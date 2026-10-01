@@ -27,7 +27,7 @@
     "fixqueue-mcp": "./dist/mcp/bin.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
