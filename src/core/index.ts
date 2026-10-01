@@ -1,0 +1,194 @@
+// Pure report logic shared by the button, the server handler and the agent
+// tools. No React, no database, no network.
+
+export const REPORT_TYPES = ['bug', 'feature'] as const;
+export type ReportType = (typeof REPORT_TYPES)[number];
+
+export const PRIORITIES = ['low', 'medium', 'high', 'blocking'] as const;
+export type Priority = (typeof PRIORITIES)[number];
+
+export const STATUSES = ['open', 'claimed', 'fixed', 'wontfix'] as const;
+export type Status = (typeof STATUSES)[number];
+
+export const TYPE_LABEL: Record<ReportType, string> = { bug: 'Bug', feature: 'Feature request' };
+const TITLE_PREFIX: Record<ReportType, string> = { bug: 'Bug', feature: 'Feature' };
+
+export const PRIORITY_LABEL: Record<Priority, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  blocking: 'Blocking',
+};
+
+export const PRIORITY_HINT: Record<Priority, string> = {
+  low: 'cosmetic or minor',
+  medium: 'annoying, has a workaround',
+  high: 'blocks a task, no workaround',
+  blocking: 'nobody can use this part',
+};
+
+const PRIORITY_RANK: Record<Priority, number> = { low: 0, medium: 1, high: 2, blocking: 3 };
+
+export interface Area {
+  value: string;
+  label: string;
+}
+
+export interface FixqueueConfig {
+  /** The parts of your app a report can be about. "Other" is always added. */
+  areas: Area[];
+  minLength: number;
+  maxLength: number;
+  maxScreenshots: number;
+  maxScreenshotBytes: number;
+}
+
+const OTHER: Area = { value: 'other', label: 'Other' };
+const MAX_PAGE_URL = 500;
+const MAX_USER_AGENT = 300;
+const MAX_DIAGNOSTICS_BYTES = 64 * 1024;
+const HEADLINE_MAX = 60;
+
+export function resolveConfig(partial: Partial<FixqueueConfig> = {}): FixqueueConfig {
+  const areas = partial.areas ?? [];
+  return {
+    areas: areas.some((a) => a.value === OTHER.value) ? areas : [...areas, OTHER],
+    minLength: partial.minLength ?? 10,
+    maxLength: partial.maxLength ?? 4000,
+    maxScreenshots: partial.maxScreenshots ?? 3,
+    maxScreenshotBytes: partial.maxScreenshotBytes ?? 5 * 1024 * 1024,
+  };
+}
+
+/** What someone files: the fields the button sends. */
+export interface ReportInput {
+  type: ReportType;
+  priority: Priority;
+  area: string;
+  description: string;
+  pageUrl: string;
+  userAgent: string;
+  /** A snapshot of app state from the `diagnostics` callback, as JSON. */
+  diagnostics: Record<string, unknown>;
+}
+
+/** A stored report, as the queue and agents see it. */
+export interface Report extends ReportInput {
+  id: string;
+  screenshots: string[];
+  reporter: string | null;
+  status: Status;
+  createdAt: string;
+  claimedBy: string | null;
+  claimedAt: string | null;
+  /** What the fixer said when closing it, e.g. a PR link. */
+  resolution: string | null;
+}
+
+export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
+
+const includes = <T extends string>(list: readonly T[], v: unknown): v is T =>
+  typeof v === 'string' && (list as readonly string[]).includes(v);
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Checks untrusted input (form fields or JSON) against the config. */
+export function validateReport(raw: Record<string, unknown>, config: FixqueueConfig): Result<ReportInput> {
+  const description = String(raw.description ?? '').trim();
+  if (description.length < config.minLength) {
+    return { ok: false, error: `Tell us a little more (at least ${config.minLength} characters).` };
+  }
+  if (description.length > config.maxLength) {
+    return { ok: false, error: `Keep the report under ${config.maxLength.toLocaleString('en-US')} characters.` };
+  }
+  const type = raw.type ?? 'bug';
+  if (!includes(REPORT_TYPES, type)) return { ok: false, error: 'Pick bug or feature request.' };
+  const priority = raw.priority ?? 'medium';
+  if (!includes(PRIORITIES, priority)) return { ok: false, error: 'Pick a priority.' };
+  const area = String(raw.area ?? OTHER.value);
+  if (!config.areas.some((a) => a.value === area)) return { ok: false, error: 'Pick where it happened.' };
+
+  const diagnostics = isPlainObject(raw.diagnostics) ? raw.diagnostics : {};
+  if (JSON.stringify(diagnostics).length > MAX_DIAGNOSTICS_BYTES) {
+    return { ok: false, error: 'Diagnostics must be under 64 KB.' };
+  }
+
+  return {
+    ok: true,
+    value: {
+      type,
+      priority,
+      area,
+      description,
+      pageUrl: String(raw.pageUrl ?? '').slice(0, MAX_PAGE_URL),
+      userAgent: String(raw.userAgent ?? '').slice(0, MAX_USER_AGENT),
+      diagnostics,
+    },
+  };
+}
+
+export function areaLabel(area: string, config: FixqueueConfig): string {
+  return config.areas.find((a) => a.value === area)?.label ?? area;
+}
+
+/** "Bug [High] Editor: first line of the description" */
+export function buildTitle(
+  r: Pick<ReportInput, 'type' | 'priority' | 'area' | 'description'>,
+  config: FixqueueConfig,
+): string {
+  const firstLine = (r.description.trim().split('\n')[0] ?? '').trim();
+  const headline = firstLine.slice(0, HEADLINE_MAX) + (firstLine.length > HEADLINE_MAX ? '…' : '');
+  return `${TITLE_PREFIX[r.type]} [${PRIORITY_LABEL[r.priority]}] ${areaLabel(r.area, config)}: ${headline}`;
+}
+
+/** Plain-text body for a task, issue or email. */
+export function buildBody(r: Report, config: FixqueueConfig): string {
+  return [
+    r.description.trim(),
+    '',
+    ...(r.screenshots.length ? ['Screenshots:', ...r.screenshots, ''] : []),
+    '---',
+    `Type: ${TYPE_LABEL[r.type]}`,
+    `Priority: ${PRIORITY_LABEL[r.priority]}`,
+    `Area: ${areaLabel(r.area, config)}`,
+    ...(r.reporter ? [`Reported by: ${r.reporter}`] : []),
+    ...(r.pageUrl ? [`Page: ${r.pageUrl}`] : []),
+    ...(r.userAgent ? [`Browser: ${r.userAgent}`] : []),
+  ].join('\n');
+}
+
+/** Most urgent first; oldest first within the same priority. */
+export function sortQueue<T extends Pick<Report, 'priority' | 'createdAt'>>(reports: readonly T[]): T[] {
+  return [...reports].sort(
+    (a, b) =>
+      PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority] ||
+      Date.parse(a.createdAt) - Date.parse(b.createdAt),
+  );
+}
+
+/** The report as a task a coding agent can pick up and work on. */
+export function toAgentPrompt(r: Report, config: FixqueueConfig): string {
+  const ask =
+    r.type === 'bug'
+      ? 'Reproduce it, write a failing test, fix it, and close the report with the PR link.'
+      : 'Propose the smallest change that gives the reporter what they asked for, then build it test-first and close the report with the PR link.';
+  const hasDiagnostics = Object.keys(r.diagnostics).length > 0;
+  return [
+    `# ${buildTitle(r, config)}`,
+    '',
+    r.description.trim(),
+    '',
+    '## Where',
+    `Report id: ${r.id}`,
+    ...(r.pageUrl ? [`Page: ${r.pageUrl}`] : []),
+    ...(r.userAgent ? [`Browser: ${r.userAgent}`] : []),
+    `Filed: ${r.createdAt}${r.reporter ? ` by ${r.reporter}` : ''}`,
+    ...(r.screenshots.length ? ['', '## Screenshots', ...r.screenshots.map((s) => `- ${s}`)] : []),
+    ...(hasDiagnostics ? ['', '## App snapshot', '```json', JSON.stringify(r.diagnostics, null, 2), '```'] : []),
+    '',
+    '## What to do',
+    ask,
+  ].join('\n');
+}
