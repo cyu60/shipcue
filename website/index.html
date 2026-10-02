@@ -16,7 +16,7 @@
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/" aria-current="page">Home</a><a href="/docs/">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
+<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/" aria-current="page">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
 <main>
 
 <section class="hero">
@@ -44,6 +44,14 @@
   <div><h3>It joins the queue</h3><p>Reports go into one table in your own Postgres, ordered by priority and then by age. Nothing goes to a third-party dashboard.</p></div>
   <div><h3>An agent fixes it</h3><p>The MCP server hands an agent the top report as a ready-to-run task. Claims are atomic, so several agents can work the queue at once and never take the same report.</p></div>
 </div>
+
+<h2>Who uses shipcue</h2>
+<div class="flow">
+  <div><h3>Hackathon teams</h3><p>Four people each running a couple of agents on one repo. One queue means no two agents fix the same bug, and nobody's fix quietly undoes someone else's.</p></div>
+  <div><h3>Founders with early users</h3><p>Users report from inside the app with the page, browser and state attached. Your agent works the queue and you review the PRs.</p></div>
+  <div><h3>Internal tools and betas</h3><p>Teammates and testers file what they hit while they click through. The most urgent report gets fixed first.</p></div>
+</div>
+<p><a href="/use-cases/">All use cases</a></p>
 
 <h2>Add it in three steps</h2>
 <div class="prose">

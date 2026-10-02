@@ -30,7 +30,8 @@
     "build": "tsup && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
   },
   "peerDependencies": {
     "react": ">=18"
@@ -62,5 +63,24 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
     "zod": "^4.6.5"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyu60/shipcue.git"
+  },
+  "homepage": "https://shipcue.vercel.app",
+  "bugs": {
+    "url": "https://github.com/cyu60/shipcue/issues"
+  },
+  "keywords": [
+    "bug-report",
+    "feedback",
+    "mcp",
+    "claude-code",
+    "codex",
+    "coding-agents",
+    "queue",
+    "postgres",
+    "react"
+  ]
 }

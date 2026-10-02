@@ -16,13 +16,19 @@
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
+<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
 <main>
 
 <div class="prose">
-<h1>Docs</h1>
+<h1>shipcue docs</h1>
 <p class="lede">Set up shipcue in a Next.js app in about ten minutes. The handler is a plain <code>(Request) =&gt; Response</code> function, so it also runs in Hono, Remix, Bun, Deno and Cloudflare Workers.</p>
-<div class="note">shipcue is in early preview. The npm package and the public repository open soon. <a href="/contact/">Ask for early access</a>.</div>
+<div class="note">shipcue is open source under the MIT license: <a href="https://github.com/cyu60/shipcue">github.com/cyu60/shipcue</a>. It is an early release, so <a href="/contact/">tell us</a> what breaks.</div>
+
+<h2>0. Install shipcue</h2>
+<pre><code>npm install shipcue</code></pre>
+<p>Until the first npm release is out, install it straight from GitHub. It builds itself on install:</p>
+<pre><code>npm install github:cyu60/shipcue</code></pre>
+<p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 
 <h2>1. Create the table</h2>
 <p>Run <code>sql/schema.sql</code> on your database. It creates one table, <code>shipcue_reports</code>, and an index that keeps the queue fast. It works on Supabase, InsForge, Neon, RDS and plain Postgres.</p>

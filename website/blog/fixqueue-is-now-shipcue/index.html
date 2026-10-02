@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='2' width='24' height='28' rx='5' fill='%23FFD43B' stroke='%2316203A' stroke-width='3'/><text x='16' y='24' font-family='Arial' font-weight='900' font-size='14' text-anchor='middle' fill='%2316203A'>#</text></svg>">
+<title>fixqueue is now shipcue, and it is open source · shipcue</title>
+<meta name="description" content="The new name, the public repository, and what to rename if you set it up early.">
+<meta property="og:title" content="fixqueue is now shipcue, and it is open source · shipcue">
+<meta property="og:description" content="The new name, the public repository, and what to rename if you set it up early.">
+<meta property="og:image" content="https://shipcue.vercel.app/assets/banner.png">
+</head>
+<body>
+<div class="wrap">
+<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/" aria-current="page">Blog</a><a href="/contact/">Contact</a></nav></header>
+<main>
+
+<article class="prose">
+<h1>fixqueue is now shipcue, and it is open source</h1>
+<p class="meta">October 1, 2026 · Chinat Yu</p>
+
+<p>For the first day of its life this project was called fixqueue, which was a pretty good working name, because it was basically a queue of fixes. But the more I used it, the more I realised that a lot of what goes into the queue is not fixes at all. It is feature requests, small ideas, things people wish the app did, and I wanted a name that covered all of that and was a bit more fun to say as well too.</p>
+
+<p>So it is now shipcue. Said out loud it sounds like "ship queue", which is what it is, and a cue is also the signal for someone to go, which is what the button does. Someone reports something, that cues an agent, and the agent ships it.</p>
+
+<p>I also made the repository public, since the whole point is for other teams to use it. It is MIT licensed and lives at <a href="https://github.com/cyu60/shipcue">github.com/cyu60/shipcue</a>.</p>
+
+<h2>What changed</h2>
+<p>If you set it up early under the old name, these are the things to rename:</p>
+<ul>
+  <li>The package is <code>shipcue</code>, with <code>shipcue/server</code> and <code>shipcue/react</code></li>
+  <li>The MCP server is <code>npx shipcue-mcp</code></li>
+  <li>The environment variables are <code>SHIPCUE_URL</code>, <code>SHIPCUE_TOKEN</code> and <code>SHIPCUE_AGENT</code></li>
+  <li>The handler is <code>createShipcueHandler</code> and its default path is <code>/api/shipcue</code></li>
+  <li>The default table is <code>shipcue_reports</code>. If you already have a <code>fixqueue_reports</code> table you can keep it with <code>postgresStore(db, 'fixqueue_reports')</code>, or rename it with <code>ALTER TABLE fixqueue_reports RENAME TO shipcue_reports</code></li>
+</ul>
+<p>Old links to the GitHub repository and to fixqueue.vercel.app redirect to the new ones, so nothing you shared before should break.</p>
+
+<p>If you have ideas for it, or you try it and something does not work, <a href="/contact/">let me know</a>.</p>
+</article>
+
+</main>
+<footer class="site-foot"><span>shipcue is open source under the MIT license.</span><span><a href="mailto:chinatchinat123@gmail.com">chinatchinat123@gmail.com</a></span></footer>
+</div>
+</body>
+</html>

@@ -32,10 +32,26 @@ user files a report  →  queue (your Postgres)  →  agent claims the top one  
 
 It started as the report button inside three apps (a founders dashboard, a hackathon platform and a block outliner) and was pulled out once the same five parts kept showing up: a button, a form, automatic context, storage, and somewhere for reports to go.
 
+## Use cases
+
+- **Hackathon teams running many agents.** Everyone reports into one queue and each agent claims one report at a time, so two agents never fix the same bug and nobody's fix undoes someone else's.
+- **Founders with early users.** Users report from the page where it broke, with context attached. Your agent works the queue, most urgent first, and you review the PRs.
+- **Internal tools and dashboards.** An inline button in the header, sign-in required, new reports posted to Slack or email, and the data stays in your database.
+- **Beta tests and dogfooding sessions.** Testers file what they hit; areas and priority keep the pile in order for the agents.
+- **Feature requests too.** An agent can draft one as a PR, or you close it as won't fix with a reason.
+
+More on the [use cases page](https://shipcue.vercel.app/use-cases/).
+
 ## Install
 
 ```bash
 pnpm add shipcue
+```
+
+Until the first npm release is out, install from GitHub (it builds on install):
+
+```bash
+pnpm add github:cyu60/shipcue
 ```
 
 ## 1. Create the table

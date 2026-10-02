@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 HEAD = (ROOT / "_head.txt").read_text()
 EMAIL = "chinatchinat123@gmail.com"
-NAV = [("/", "Home"), ("/docs/", "Docs"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/contact/", "Contact")]
+NAV = [("/", "Home"), ("/use-cases/", "Use cases"), ("/docs/", "Docs"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/contact/", "Contact")]
 
 
 def page(path, title, description, body, current):
@@ -61,6 +61,14 @@ HOME = """
   <div><h3>It joins the queue</h3><p>Reports go into one table in your own Postgres, ordered by priority and then by age. Nothing goes to a third-party dashboard.</p></div>
   <div><h3>An agent fixes it</h3><p>The MCP server hands an agent the top report as a ready-to-run task. Claims are atomic, so several agents can work the queue at once and never take the same report.</p></div>
 </div>
+
+<h2>Who uses shipcue</h2>
+<div class="flow">
+  <div><h3>Hackathon teams</h3><p>Four people each running a couple of agents on one repo. One queue means no two agents fix the same bug, and nobody's fix quietly undoes someone else's.</p></div>
+  <div><h3>Founders with early users</h3><p>Users report from inside the app with the page, browser and state attached. Your agent works the queue and you review the PRs.</p></div>
+  <div><h3>Internal tools and betas</h3><p>Teammates and testers file what they hit while they click through. The most urgent report gets fixed first.</p></div>
+</div>
+<p><a href="/use-cases/">All use cases</a></p>
 
 <h2>Add it in three steps</h2>
 <div class="prose">
@@ -134,9 +142,15 @@ HOME = """
 
 DOCS = """
 <div class="prose">
-<h1>Docs</h1>
+<h1>shipcue docs</h1>
 <p class="lede">Set up shipcue in a Next.js app in about ten minutes. The handler is a plain <code>(Request) =&gt; Response</code> function, so it also runs in Hono, Remix, Bun, Deno and Cloudflare Workers.</p>
-<div class="note">shipcue is in early preview. The npm package and the public repository open soon. <a href="/contact/">Ask for early access</a>.</div>
+<div class="note">shipcue is open source under the MIT license: <a href="https://github.com/cyu60/shipcue">github.com/cyu60/shipcue</a>. It is an early release, so <a href="/contact/">tell us</a> what breaks.</div>
+
+<h2>0. Install shipcue</h2>
+<pre><code>npm install shipcue</code></pre>
+<p>Until the first npm release is out, install it straight from GitHub. It builds itself on install:</p>
+<pre><code>npm install github:cyu60/shipcue</code></pre>
+<p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 
 <h2>1. Create the table</h2>
 <p>Run <code>sql/schema.sql</code> on your database. It creates one table, <code>shipcue_reports</code>, and an index that keeps the queue fast. It works on Supabase, InsForge, Neon, RDS and plain Postgres.</p>
@@ -222,10 +236,49 @@ CLOUD = """
 </div>
 """
 
+USE_CASES = """
+<div class="prose">
+<h1>Use cases</h1>
+<p class="lede">shipcue is for any team where the people who find problems and the agents that fix them are not the same, and you want one queue between them instead of a group chat.</p>
+
+<h2>Hackathon teams running many agents</h2>
+<p>At a hackathon everyone is building at once, and now each person has two or three coding agents going as well. The hard part stops being writing code and becomes coordination: two agents fixing the same bug, one agent's change undoing another's, a teammate asking in the chat "is anyone on the login bug?" and nobody being sure.</p>
+<p>With shipcue the whole team files bugs and feature ideas through the button in the app you are building. Every agent pulls from the same queue, and a claim is atomic, so once an agent has a report nobody else can take it. When it is done it closes the report with the PR link, so the team can see what shipped without asking.</p>
+<p><b>Set up:</b> create the table in the Supabase, InsForge or Neon database you already have for the project, mount the handler, add the button, and run <code>claude mcp add shipcue</code> on each teammate's machine with the same URL and token. It takes about ten minutes, so it is worth doing in the first hour.</p>
+<p><b>Tip:</b> give each teammate's agent its own name with <code>SHIPCUE_AGENT</code> (for example <code>claude@maya</code>), so the queue shows whose agent is on what.</p>
+
+<h2>Founders with early users</h2>
+<p>Early users will tell you what is broken, but usually in a DM, in a call, or in a screenshot with no context. The button lets them report from the page where it happened, and shipcue attaches the page address, the browser and a snapshot of app state you choose, so the report is already close to a task an agent can act on.</p>
+<p>Point Claude Code or Codex at the queue and let it work through the most urgent reports first. Each one arrives as a task prompt: reproduce it, write a failing test, fix it, close it with the PR. You stay the reviewer, not the person retyping bug reports into prompts.</p>
+
+<h2>Internal tools and dashboards</h2>
+<p>Internal tools collect small annoyances that nobody files because filing is a hassle. Put the inline button in the header, require sign-in with <code>getReporter</code> so every report has a name on it, and use <code>onReport</code> to post new reports to Slack or email the team. Reports stay in your own database, which matters when the tool touches member or customer data.</p>
+
+<h2>Beta tests and dogfooding sessions</h2>
+<p>Get the team or a group of testers to click through the app for thirty minutes and report everything they hit. Areas (the parts of your app you list) and priority keep the pile sorted, so when the session ends the queue is already in order: blocking bugs first, then high, then the rest by age. Agents can start on the top of the list while you are still reading the bottom.</p>
+
+<h2>Feature requests, not just bugs</h2>
+<p>The same button takes feature requests. An agent can claim one and draft it as a PR, or you can close it as won't fix with a short reason in the resolution, so the person who asked is not left wondering.</p>
+
+<h2>Several kinds of agents on one codebase</h2>
+<p>shipcue does not care which agent claims a report. Claude Code, Codex and a teammate working by hand can all pull from the same queue over MCP or the HTTP API. If an agent gets stuck, it releases the report and it goes back to the queue for someone else.</p>
+
+<h2>When it is not the right fit</h2>
+<ul>
+  <li>You want a public roadmap with voting today. shipcue is an inbox for your team; an optional voting board is on the roadmap.</li>
+  <li>Your team already lives in Linear or GitHub Issues and is happy there. Forwarding reports to them is planned for <a href="/cloud/">Cloud</a>; for now you can do it yourself in <code>onReport</code>.</li>
+  <li>You do not have a Postgres database and do not want one. Cloud is meant for that, and it is not built yet.</li>
+</ul>
+<p><a class="btn btn-ink" href="/docs/">Set it up</a></p>
+</div>
+"""
+
 BLOG = """
 <div class="prose">
 <h1>Blog</h1>
 <ul class="post-list">
+  <li><a href="/blog/hackathon-teams-and-agents/">Coordinating a hackathon team when everyone has agents</a><div class="meta">October 1, 2026 · Chinat Yu</div></li>
+  <li><a href="/blog/fixqueue-is-now-shipcue/">fixqueue is now shipcue, and it is open source</a><div class="meta">October 1, 2026 · Chinat Yu</div></li>
   <li><a href="/blog/agents-should-read-your-bug-reports/">Your bug report button should feed your agents</a><div class="meta">October 1, 2026 · Chinat Yu</div></li>
 </ul>
 </div>
@@ -251,7 +304,58 @@ POST = """
 <p>There are good hosted feedback tools already. I wanted something that lives in the database I already have, that I can read with SQL, and that does not need another login for the team. It is one table, one handler and one React component.</p>
 
 <h2>What is next</h2>
-<p>The first version is built and tested. Next I am moving my own apps onto it, starting with the outliner, and then opening it up properly. If you want to try it early, or you have a queue of reports you wish an agent would just handle, <a href="/contact/">get in touch</a>. I would love to hear how you would use it.</p>
+<p>The first version is built and tested, and the code is now public on <a href="https://github.com/cyu60/shipcue">GitHub</a> under the MIT license. Next I am moving my own apps onto it, starting with the outliner. If you try it, or you have a queue of reports you wish an agent would just handle, <a href="/contact/">get in touch</a>. I would really love to hear how you end up using it.</p>
+</article>
+"""
+
+HACKATHON_POST = """
+<article class="prose">
+<h1>Coordinating a hackathon team when everyone has agents</h1>
+<p class="meta">October 1, 2026 · Chinat Yu</p>
+
+<p>I have been around a lot of hackathons through MentorMates, and I think that one of the things that separates the teams that do well from the ones that do not is honestly not the idea, or even how fast they code, but how well they coordinate with each other on the product. Who is building what, what is broken, what matters most before the demo.</p>
+
+<p>That was already hard with four people and a group chat. Now that everyone is also running coding agents, I think it has become a lot harder. Each person has two or three agents going, and the agents do not talk to each other. It is really easy to end up with two agents fixing the same bug in slightly different ways, or one agent undoing what another one just shipped, and then you spend the last hour before judging working out which version is the real one.</p>
+
+<p>The fix I kept coming back to was basically a queue. Everyone on the team reports bugs and ideas through a small button at the bottom of the app they are building, and that goes into one list, sorted by how urgent it is. Agents pull from that list instead of from whatever someone pasted into a terminal. When an agent takes a report it is claimed, so no other agent can take it, and when it is done it closes it with the PR link, so the whole team can see what is fixed without asking.</p>
+
+<p>I built this for my own projects, first as a one-off and then again and again, and I have now made it open source as <a href="/">shipcue</a>. It is one table in the Postgres you already have, one handler and one React button, plus an MCP server so Claude Code and Codex can work the queue. It takes about ten minutes to set up, which I think is worth it in the first hour of a hackathon.</p>
+
+<p>A few things I would suggest if you try it at your next hackathon:</p>
+<ul>
+  <li>Set it up before anyone starts building features, so the habit is "report it in the app" and not "mention it in the chat".</li>
+  <li>Give each teammate's agent its own name with <code>SHIPCUE_AGENT</code>, so you can see whose agent is on what.</li>
+  <li>Mark the things that would break your demo as blocking. They go to the top of the queue, and those are the ones you really want fixed first.</li>
+  <li>Let mentors and friends who try your app report into it as well too. That is pretty much free testing.</li>
+</ul>
+
+<p>If you are building at a hackathon this season, I would love for you to add it on day one and tell me what breaks. The code is on <a href="https://github.com/cyu60/shipcue">GitHub</a> and the setup is in the <a href="/docs/">docs</a>.</p>
+</article>
+"""
+
+RENAME_POST = """
+<article class="prose">
+<h1>fixqueue is now shipcue, and it is open source</h1>
+<p class="meta">October 1, 2026 · Chinat Yu</p>
+
+<p>For the first day of its life this project was called fixqueue, which was a pretty good working name, because it was basically a queue of fixes. But the more I used it, the more I realised that a lot of what goes into the queue is not fixes at all. It is feature requests, small ideas, things people wish the app did, and I wanted a name that covered all of that and was a bit more fun to say as well too.</p>
+
+<p>So it is now shipcue. Said out loud it sounds like "ship queue", which is what it is, and a cue is also the signal for someone to go, which is what the button does. Someone reports something, that cues an agent, and the agent ships it.</p>
+
+<p>I also made the repository public, since the whole point is for other teams to use it. It is MIT licensed and lives at <a href="https://github.com/cyu60/shipcue">github.com/cyu60/shipcue</a>.</p>
+
+<h2>What changed</h2>
+<p>If you set it up early under the old name, these are the things to rename:</p>
+<ul>
+  <li>The package is <code>shipcue</code>, with <code>shipcue/server</code> and <code>shipcue/react</code></li>
+  <li>The MCP server is <code>npx shipcue-mcp</code></li>
+  <li>The environment variables are <code>SHIPCUE_URL</code>, <code>SHIPCUE_TOKEN</code> and <code>SHIPCUE_AGENT</code></li>
+  <li>The handler is <code>createShipcueHandler</code> and its default path is <code>/api/shipcue</code></li>
+  <li>The default table is <code>shipcue_reports</code>. If you already have a <code>fixqueue_reports</code> table you can keep it with <code>postgresStore(db, 'fixqueue_reports')</code>, or rename it with <code>ALTER TABLE fixqueue_reports RENAME TO shipcue_reports</code></li>
+</ul>
+<p>Old links to the GitHub repository and to fixqueue.vercel.app redirect to the new ones, so nothing you shared before should break.</p>
+
+<p>If you have ideas for it, or you try it and something does not work, <a href="/contact/">let me know</a>.</p>
 </article>
 """
 
@@ -274,5 +378,8 @@ page("docs/index.html", "Docs · shipcue", "Set up shipcue: the table, the handl
 page("cloud/index.html", "Cloud · shipcue", "shipcue Cloud: the same queue without running a database. Planned.", CLOUD, "/cloud/")
 page("blog/index.html", "Blog · shipcue", "Notes on building shipcue.", BLOG, "/blog/")
 page("blog/agents-should-read-your-bug-reports/index.html", "Your bug report button should feed your agents · shipcue", "Why shipcue treats the bug report inbox as a queue that agents work from.", POST, "/blog/")
+page("use-cases/index.html", "Use cases · shipcue", "Who shipcue is for: hackathon teams running many agents, founders with early users, internal tools, beta tests and more.", USE_CASES, "/use-cases/")
+page("blog/hackathon-teams-and-agents/index.html", "Coordinating a hackathon team when everyone has agents · shipcue", "Why a shared queue keeps a hackathon team's coding agents from colliding.", HACKATHON_POST, "/blog/")
+page("blog/fixqueue-is-now-shipcue/index.html", "fixqueue is now shipcue, and it is open source · shipcue", "The new name, the public repository, and what to rename if you set it up early.", RENAME_POST, "/blog/")
 page("contact/index.html", "Contact · shipcue", "Get in touch about shipcue.", CONTACT, "/contact/")
 print("built")

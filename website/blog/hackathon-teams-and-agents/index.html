@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='2' width='24' height='28' rx='5' fill='%23FFD43B' stroke='%2316203A' stroke-width='3'/><text x='16' y='24' font-family='Arial' font-weight='900' font-size='14' text-anchor='middle' fill='%2316203A'>#</text></svg>">
+<title>Coordinating a hackathon team when everyone has agents · shipcue</title>
+<meta name="description" content="Why a shared queue keeps a hackathon team's coding agents from colliding.">
+<meta property="og:title" content="Coordinating a hackathon team when everyone has agents · shipcue">
+<meta property="og:description" content="Why a shared queue keeps a hackathon team's coding agents from colliding.">
+<meta property="og:image" content="https://shipcue.vercel.app/assets/banner.png">
+</head>
+<body>
+<div class="wrap">
+<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/" aria-current="page">Blog</a><a href="/contact/">Contact</a></nav></header>
+<main>
+
+<article class="prose">
+<h1>Coordinating a hackathon team when everyone has agents</h1>
+<p class="meta">October 1, 2026 · Chinat Yu</p>
+
+<p>I have been around a lot of hackathons through MentorMates, and I think that one of the things that separates the teams that do well from the ones that do not is honestly not the idea, or even how fast they code, but how well they coordinate with each other on the product. Who is building what, what is broken, what matters most before the demo.</p>
+
+<p>That was already hard with four people and a group chat. Now that everyone is also running coding agents, I think it has become a lot harder. Each person has two or three agents going, and the agents do not talk to each other. It is really easy to end up with two agents fixing the same bug in slightly different ways, or one agent undoing what another one just shipped, and then you spend the last hour before judging working out which version is the real one.</p>
+
+<p>The fix I kept coming back to was basically a queue. Everyone on the team reports bugs and ideas through a small button at the bottom of the app they are building, and that goes into one list, sorted by how urgent it is. Agents pull from that list instead of from whatever someone pasted into a terminal. When an agent takes a report it is claimed, so no other agent can take it, and when it is done it closes it with the PR link, so the whole team can see what is fixed without asking.</p>
+
+<p>I built this for my own projects, first as a one-off and then again and again, and I have now made it open source as <a href="/">shipcue</a>. It is one table in the Postgres you already have, one handler and one React button, plus an MCP server so Claude Code and Codex can work the queue. It takes about ten minutes to set up, which I think is worth it in the first hour of a hackathon.</p>
+
+<p>A few things I would suggest if you try it at your next hackathon:</p>
+<ul>
+  <li>Set it up before anyone starts building features, so the habit is "report it in the app" and not "mention it in the chat".</li>
+  <li>Give each teammate's agent its own name with <code>SHIPCUE_AGENT</code>, so you can see whose agent is on what.</li>
+  <li>Mark the things that would break your demo as blocking. They go to the top of the queue, and those are the ones you really want fixed first.</li>
+  <li>Let mentors and friends who try your app report into it as well too. That is pretty much free testing.</li>
+</ul>
+
+<p>If you are building at a hackathon this season, I would love for you to add it on day one and tell me what breaks. The code is on <a href="https://github.com/cyu60/shipcue">GitHub</a> and the setup is in the <a href="/docs/">docs</a>.</p>
+</article>
+
+</main>
+<footer class="site-foot"><span>shipcue is open source under the MIT license.</span><span><a href="mailto:chinatchinat123@gmail.com">chinatchinat123@gmail.com</a></span></footer>
+</div>
+</body>
+</html>

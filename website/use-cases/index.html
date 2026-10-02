@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='2' width='24' height='28' rx='5' fill='%23FFD43B' stroke='%2316203A' stroke-width='3'/><text x='16' y='24' font-family='Arial' font-weight='900' font-size='14' text-anchor='middle' fill='%2316203A'>#</text></svg>">
+<title>Use cases · shipcue</title>
+<meta name="description" content="Who shipcue is for: hackathon teams running many agents, founders with early users, internal tools, beta tests and more.">
+<meta property="og:title" content="Use cases · shipcue">
+<meta property="og:description" content="Who shipcue is for: hackathon teams running many agents, founders with early users, internal tools, beta tests and more.">
+<meta property="og:image" content="https://shipcue.vercel.app/assets/banner.png">
+</head>
+<body>
+<div class="wrap">
+<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/" aria-current="page">Use cases</a><a href="/docs/">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
+<main>
+
+<div class="prose">
+<h1>Use cases</h1>
+<p class="lede">shipcue is for any team where the people who find problems and the agents that fix them are not the same, and you want one queue between them instead of a group chat.</p>
+
+<h2>Hackathon teams running many agents</h2>
+<p>At a hackathon everyone is building at once, and now each person has two or three coding agents going as well. The hard part stops being writing code and becomes coordination: two agents fixing the same bug, one agent's change undoing another's, a teammate asking in the chat "is anyone on the login bug?" and nobody being sure.</p>
+<p>With shipcue the whole team files bugs and feature ideas through the button in the app you are building. Every agent pulls from the same queue, and a claim is atomic, so once an agent has a report nobody else can take it. When it is done it closes the report with the PR link, so the team can see what shipped without asking.</p>
+<p><b>Set up:</b> create the table in the Supabase, InsForge or Neon database you already have for the project, mount the handler, add the button, and run <code>claude mcp add shipcue</code> on each teammate's machine with the same URL and token. It takes about ten minutes, so it is worth doing in the first hour.</p>
+<p><b>Tip:</b> give each teammate's agent its own name with <code>SHIPCUE_AGENT</code> (for example <code>claude@maya</code>), so the queue shows whose agent is on what.</p>
+
+<h2>Founders with early users</h2>
+<p>Early users will tell you what is broken, but usually in a DM, in a call, or in a screenshot with no context. The button lets them report from the page where it happened, and shipcue attaches the page address, the browser and a snapshot of app state you choose, so the report is already close to a task an agent can act on.</p>
+<p>Point Claude Code or Codex at the queue and let it work through the most urgent reports first. Each one arrives as a task prompt: reproduce it, write a failing test, fix it, close it with the PR. You stay the reviewer, not the person retyping bug reports into prompts.</p>
+
+<h2>Internal tools and dashboards</h2>
+<p>Internal tools collect small annoyances that nobody files because filing is a hassle. Put the inline button in the header, require sign-in with <code>getReporter</code> so every report has a name on it, and use <code>onReport</code> to post new reports to Slack or email the team. Reports stay in your own database, which matters when the tool touches member or customer data.</p>
+
+<h2>Beta tests and dogfooding sessions</h2>
+<p>Get the team or a group of testers to click through the app for thirty minutes and report everything they hit. Areas (the parts of your app you list) and priority keep the pile sorted, so when the session ends the queue is already in order: blocking bugs first, then high, then the rest by age. Agents can start on the top of the list while you are still reading the bottom.</p>
+
+<h2>Feature requests, not just bugs</h2>
+<p>The same button takes feature requests. An agent can claim one and draft it as a PR, or you can close it as won't fix with a short reason in the resolution, so the person who asked is not left wondering.</p>
+
+<h2>Several kinds of agents on one codebase</h2>
+<p>shipcue does not care which agent claims a report. Claude Code, Codex and a teammate working by hand can all pull from the same queue over MCP or the HTTP API. If an agent gets stuck, it releases the report and it goes back to the queue for someone else.</p>
+
+<h2>When it is not the right fit</h2>
+<ul>
+  <li>You want a public roadmap with voting today. shipcue is an inbox for your team; an optional voting board is on the roadmap.</li>
+  <li>Your team already lives in Linear or GitHub Issues and is happy there. Forwarding reports to them is planned for <a href="/cloud/">Cloud</a>; for now you can do it yourself in <code>onReport</code>.</li>
+  <li>You do not have a Postgres database and do not want one. Cloud is meant for that, and it is not built yet.</li>
+</ul>
+<p><a class="btn btn-ink" href="/docs/">Set it up</a></p>
+</div>
+
+</main>
+<footer class="site-foot"><span>shipcue is open source under the MIT license.</span><span><a href="mailto:chinatchinat123@gmail.com">chinatchinat123@gmail.com</a></span></footer>
+</div>
+</body>
+</html>
