@@ -52,18 +52,25 @@ export function ShipcueBoard({
     };
   }, [endpoint, refreshMs]);
 
-  if (error && !board) return <p style={s.muted}>{error}</p>;
-  if (!board) return <p style={s.muted}>Loading…</p>;
+  if (error && !board) return <p className={className} style={{ ...s.muted, ...style }}>{error}</p>;
+  if (!board) return <p className={className} style={{ ...s.muted, ...style }}>Loading…</p>;
 
   return (
     <div className={className} style={{ ...s.wrap, ...style }}>
       {show !== 'changelog' && (
         <section>
           <h2 style={{ ...s.h2, color: accentColor }}>Queue</h2>
-          <p style={s.muted}>{board.queue.length === 0 ? 'Nothing waiting.' : `${board.queue.length} open, most urgent first.`}</p>
+          <p style={s.muted}>
+            {board.queue.length === 0 ? 'Nothing waiting.' : `${board.queue.length} open, most urgent first.`}
+            {board.changelog.length > 0 ? ' Done ones stay below, greyed out.' : ''}
+          </p>
           <ul style={s.list}>
             {board.queue.map((r) => (
               <Item key={r.id} r={r} accent={accentColor} />
+            ))}
+            {/* Finished ones stay in the queue, greyed out, so nothing seems to vanish. */}
+            {board.changelog.map((r) => (
+              <Item key={r.id} r={r} accent={accentColor} done />
             ))}
           </ul>
         </section>
@@ -92,11 +99,12 @@ function day(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function Item({ r, accent, changelog = false }: { r: BoardItem; accent: string; changelog?: boolean }) {
+function Item({ r, accent, changelog = false, done = false }: { r: BoardItem; accent: string; changelog?: boolean; done?: boolean }) {
   return (
-    <li style={s.item}>
+    <li style={done ? { ...s.item, ...s.done } : s.item}>
       <div style={s.meta}>
         <span style={{ ...s.tag, borderColor: accent, color: accent }}>{TYPE_LABEL[r.type]}</span>
+        {done && <span style={s.tag}>Done</span>}
         {!changelog && r.status === 'claimed' && <span style={s.tag}>In progress</span>}
         {!changelog && (r.priority === 'high' || r.priority === 'blocking') && <span style={s.tag}>{r.priority}</span>}
         <span>{day(changelog ? r.updatedAt : r.createdAt)}</span>
@@ -114,13 +122,15 @@ function Item({ r, accent, changelog = false }: { r: BoardItem; accent: string; 
 }
 
 const s: Record<string, CSSProperties> = {
-  wrap: { display: 'grid', gap: 32, font: '14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif' },
-  h2: { margin: '0 0 2px', fontSize: 18 },
-  muted: { margin: '0 0 10px', fontSize: 13, opacity: 0.65 },
-  list: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 10 },
-  item: { padding: '10px 12px', border: '1px solid rgba(128,128,128,0.25)', borderRadius: 8 },
-  meta: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 12, opacity: 0.8, marginBottom: 4 },
-  tag: { padding: '0 6px', border: '1px solid rgba(128,128,128,0.4)', borderRadius: 999, fontSize: 11 },
+  // Type comes from the page (font family, size, line height); sizes here are relative to it.
+  wrap: { display: 'grid', gap: '2.5em', font: 'inherit', lineHeight: 1.5 },
+  h2: { margin: '0 0 0.15em', fontSize: '1.5em', lineHeight: 1.2 },
+  muted: { margin: '0 0 0.8em', fontSize: '0.9em', opacity: 0.65 },
+  list: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '0.75em' },
+  item: { padding: '0.8em 1em', border: '1px solid rgba(128,128,128,0.25)', borderRadius: 10 },
+  meta: { display: 'flex', flexWrap: 'wrap', gap: '0.5em', alignItems: 'center', fontSize: '0.8em', opacity: 0.8, marginBottom: '0.35em' },
+  tag: { padding: '0 0.55em', border: '1px solid rgba(128,128,128,0.4)', borderRadius: 999 },
   main: { margin: 0, whiteSpace: 'pre-wrap' },
-  sub: { margin: '4px 0 0', fontSize: 12, opacity: 0.65, whiteSpace: 'pre-wrap' },
+  done: { opacity: 0.5 },
+  sub: { margin: '0.35em 0 0', fontSize: '0.85em', opacity: 0.65, whiteSpace: 'pre-wrap' },
 };

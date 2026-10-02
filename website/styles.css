@@ -101,8 +101,9 @@ h3 { font-size: 28px; margin-top: 36px; }
   .t.enter { animation: none; }
 }
 
-/* The Changelog page board. */
+/* The Changelog page board: lined up with the page text, in its type. */
 .board {
-  max-width: 760px;
-  margin: 8px auto 64px;
+  max-width: 680px;
+  margin: 40px 0 72px;
 }
+.board h2 { font-family: var(--display); }

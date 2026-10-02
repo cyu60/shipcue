@@ -341,15 +341,22 @@ function ReportPanel({
       tallest.current = 0;
       return;
     }
+    let frame = 0;
+    // Written on the next frame: changing the size inside the observer's own callback
+    // makes the browser report a "ResizeObserver loop" error.
     const ro = new ResizeObserver(() => {
-      const h = el.getBoundingClientRect().height;
-      if (h > tallest.current + 0.5) {
-        tallest.current = h;
-        el.style.minHeight = `${Math.ceil(h)}px`;
-      }
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const h = el.getBoundingClientRect().height;
+        if (h > tallest.current + 0.5) {
+          tallest.current = h;
+          el.style.minHeight = `${Math.ceil(h)}px`;
+        }
+      });
     });
     ro.observe(el);
     return () => {
+      cancelAnimationFrame(frame);
       ro.disconnect();
       el.style.minHeight = '';
     };
