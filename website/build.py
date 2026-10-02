@@ -198,7 +198,7 @@ export { handler as GET, handler as POST };</code></pre>
   <li>The panel shows the page it will attach, with a "don't attach" link.</li>
 </ul>
 
-<p><img src="/assets/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, screenshots, screen recording, and a Powered by shipcue line" width="408" style="max-width:100%;height:auto;border-radius:16px;margin-top:8px"></p>
+<p><img src="/assets/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, paste or drop screenshots, files or a video, screen recording, Past reports &amp; changelog and Shortcuts links, and a Powered by shipcue line" width="408" style="max-width:100%;height:auto;border-radius:16px;margin-top:8px"></p>
 
 <h2>Keyboard shortcuts</h2>
 <p>The panel opens from the keyboard on any page, on the tab you ask for. Whatever is highlighted on the page comes along in an editable <b>Context</b> box (remove it with one click), so you can select a paragraph and turn it into an agent task in one go. When nothing is highlighted, <code>getContext={() =&gt; selectedRowsAsText()}</code> lets your app supply what is selected, like rows or blocks. Agents see it as its own Context section in the task prompt.</p>

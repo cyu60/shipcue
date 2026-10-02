@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-74%20passing-2E5BFF?style=flat-square" alt="74 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-132%20passing-2E5BFF?style=flat-square" alt="132 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -18,7 +18,7 @@
 
 A drop-in bug report and feature request button whose inbox is a queue that people **and coding agents** both work from.
 
-<p align="center"><img src="docs/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, screenshots, screen recording, Send with ⌘↵, and a Powered by shipcue line" width="420"></p>
+<p align="center"><img src="docs/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, paste or drop screenshots, files or a video, screen recording, Past reports &amp; changelog and Shortcuts links, Send with ⌘↵, and a Powered by shipcue line" width="420"></p>
 
 Someone in your app clicks the button, says what broke or what they want, pastes a screenshot, and sends. shipcue files it with the page address, browser and a snapshot of app state you choose. Then Claude Code, Codex or a teammate claims the most urgent report, gets a ready-made task prompt, fixes it, and closes it with the PR link.
 
