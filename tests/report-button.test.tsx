@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ReportButton, openReport, closeReport } from '../src/react';
 
@@ -400,6 +400,9 @@ describe('ReportButton: hotkeys', () => {
     const submit = ok();
     render(<ReportButton areas={areas} submit={submit} getContext={() => '- block one\n  - child'} />);
     await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    // An outline opens as a Preview; Raw is the editable text.
+    expect(within(screen.getByLabelText('Context preview')).getByText('child')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: 'Raw' }));
     expect(screen.getByRole('textbox', { name: 'Context' })).toHaveValue('- block one\n  - child');
     await userEvent.click(screen.getByRole('button', { name: 'Remove context' }));
     expect(screen.queryByRole('textbox', { name: 'Context' })).toBeNull();
@@ -501,7 +504,7 @@ describe('ReportButton: hooks for host apps', () => {
       />,
     );
     await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
-    expect(screen.getAllByRole('radio').map((r) => r.textContent)).toEqual(['Bug', 'Feature request', 'Agent task']);
+    expect(within(screen.getByRole('radiogroup', { name: 'Report type' })).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Bug', 'Feature request', 'Agent task']);
     await userEvent.type(screen.getByRole('textbox', { name: 'Description' }), 'make it a doc');
     await userEvent.click(screen.getByRole('radio', { name: 'Agent task' }));
     expect(screen.getByRole('dialog', { name: 'New agent task' })).toBeInTheDocument();

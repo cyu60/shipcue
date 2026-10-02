@@ -5,6 +5,7 @@ import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadU
 import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
+import { isOutlineText, OutlinePreview } from './outline';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
 
 export type SubmitResult = { id: string } | { error: string };
@@ -73,6 +74,11 @@ export interface ReportButtonProps {
    * Give one a hotkey with hotkeys={{ [id]: ['Mod+J'] }}, or open it with openReport(id).
    */
   extraTabs?: ExtraTab[];
+  /**
+   * Draw the Context's Preview your own way, e.g. your app's outline renderer. Without it,
+   * shipcue draws bullets, nesting, [[links]], #tags and ((refs)) itself.
+   */
+  renderContext?: (text: string) => React.ReactNode;
   /**
    * false draws no button of its own: open the panel from your existing menu or help button with
    * openReport(), or with the hotkeys.
@@ -194,6 +200,7 @@ function ReportPanel({
   getContext,
   onOpenChange,
   extraTabs,
+  renderContext,
   trigger = true,
 }: ReportButtonProps) {
   const tabs = useMemo(() => (types?.length ? TYPES.filter((t) => types.includes(t.value)) : TYPES), [types]);
@@ -201,6 +208,8 @@ function ReportPanel({
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [context, setContext] = useState<string | null>(null);
+  // Preview (an outline) or Raw (the editable text) for the Context box (shipcue report 0fcc360a).
+  const [contextView, setContextView] = useState<'preview' | 'raw'>('preview');
   const [extraId, setExtraId] = useState<string | null>(null);
   // After a send the panel closes and this short note says so (outliner report 22:47).
   const [sent, setSent] = useState<{ warning: string | null } | null>(null);
@@ -338,7 +347,11 @@ function ReportPanel({
       setVideo(null);
       setError(null);
       setContext(picked || null);
-    } else if (picked) setContext(picked);
+      setContextView('preview');
+    } else if (picked) {
+      setContext(picked);
+      setContextView('preview');
+    }
     if (!open) show();
     else textareaRef.current?.focus();
   };
@@ -652,25 +665,53 @@ function ReportPanel({
                 placeholder={current.placeholder}
                 style={s.textarea}
               />
-              {context !== null && (
+              {context !== null && (() => {
+                // A bulleted outline opens as a Preview; plain text, or anything being edited, as Raw.
+                const showPreview = contextView === 'preview' && (!!renderContext || isOutlineText(context));
+                return (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ ...s.row, alignItems: 'center' }}>
                     <label htmlFor={`${uid}-context`} style={s.label}>
                       Context
                     </label>
-                    <button type="button" onClick={() => setContext(null)} aria-label="Remove context" style={s.linkBtn}>
-                      remove
-                    </button>
+                    <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                      <span role="radiogroup" aria-label="Show the context as" style={{ fontSize: 11 }}>
+                        {(['preview', 'raw'] as const).map((v, i) => (
+                          <span key={v}>
+                            {i > 0 && <span aria-hidden="true" style={{ color: '#d4d4d8' }}>/</span>}
+                            <button
+                              type="button"
+                              role="radio"
+                              aria-checked={v === 'preview' ? showPreview : !showPreview}
+                              onClick={() => setContextView(v)}
+                              style={{ ...s.linkBtn, textDecoration: 'none', padding: '0 3px', color: (v === 'preview') === showPreview ? '#18181b' : '#a1a1aa', fontWeight: (v === 'preview') === showPreview ? 600 : 400 }}
+                            >
+                              {v === 'preview' ? 'Preview' : 'Raw'}
+                            </button>
+                          </span>
+                        ))}
+                      </span>
+                      <button type="button" onClick={() => setContext(null)} aria-label="Remove context" style={s.linkBtn}>
+                        remove
+                      </button>
+                    </span>
                   </div>
-                  <textarea
-                    id={`${uid}-context`}
-                    value={context}
-                    onChange={(e) => setContext(e.target.value)}
-                    rows={3}
-                    style={{ ...s.textarea, marginTop: 4, fontSize: 12, background: '#fafafa', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
-                  />
+                  {showPreview ? (
+                    <div aria-label="Context preview" style={s.contextPreview}>
+                      {renderContext ? renderContext(context) : <OutlinePreview text={context} />}
+                    </div>
+                  ) : (
+                    <textarea
+                      id={`${uid}-context`}
+                      value={context}
+                      onChange={(e) => setContext(e.target.value)}
+                      rows={3}
+                      style={{ ...s.textarea, marginTop: 4, fontSize: 12, background: '#fafafa', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+                    />
+                  )}
                 </div>
-              )}
+                );
+              })()}
               <div style={s.grid}>
                 <div>
                   <label htmlFor={`${uid}-priority`} style={s.label}>
@@ -1022,6 +1063,7 @@ function styles(accent: string) {
     sent: { background: '#fff', color: '#18181b', border: '1px solid #e4e4e7', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontFamily: font, boxShadow: '0 8px 24px rgba(24,24,27,0.12)', maxWidth: 320 } as CSSProperties,
     error: { marginTop: 8, borderRadius: 8, background: '#fff1f2', color: '#be123c', padding: '8px 12px', fontSize: 12 } as CSSProperties,
     ghost: { border: '1px solid #d4d4d8', borderRadius: 8, background: '#fff', color: '#3f3f46', padding: '4px 10px', fontSize: 12, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,
+    contextPreview: { marginTop: 4, maxHeight: 160, overflowY: 'auto', padding: '6px 10px', border: '1px solid #e4e4e7', borderRadius: 8, background: '#fafafa', fontSize: 12, lineHeight: 1.45, color: '#27272a', fontFamily: font } as CSSProperties,
     keysBox: { marginTop: 10, padding: '8px 10px', border: '1px solid #e4e4e7', borderRadius: 8, fontSize: 11, color: '#3f3f46', fontFamily: font } as CSSProperties,
     keysRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' } as CSSProperties,
     keysKbd: { minWidth: 44, textAlign: 'center', padding: '1px 6px', border: '1px solid #e4e4e7', borderRadius: 4, background: '#fafafa', fontSize: 10, fontFamily: 'inherit' } as CSSProperties,

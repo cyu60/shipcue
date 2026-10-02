@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-141%20passing-2E5BFF?style=flat-square" alt="141 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-145%20passing-2E5BFF?style=flat-square" alt="145 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -122,7 +122,7 @@ The panel has three tabs: **Bug**, **Feature request** and **Agent task** (a dir
 | Feature request | ⌃F | Alt+Shift+F |
 | Send | ⌘↵ | Ctrl+↵ |
 
-Text highlighted on the page comes along in an editable, removable **Context** box (or pass `getContext` to supply your app's selected rows or blocks), and agents get it as its own section of the task prompt. Change the keys with `hotkeys={{ task: ['Mod+J'] }}` ("Mod" is ⌘ on a Mac, Ctrl elsewhere), turn them off with `hotkeys={false}`, or open the panel from your own menu with `openReport('task')`. People can also change their own keys from the panel's small Shortcuts link; their choice is kept in their browser and wins over yours. If your app's own keymap opens shipcue (`hotkeys={false}`), pass `onEditShortcuts={openYourKeymapEditor}` and the link opens that instead.
+Text highlighted on the page comes along in an editable, removable **Context** box (an outline opens as a Preview with bullets and `[[links]]`; Raw is the text; `renderContext` draws the Preview with your app's own renderer) (or pass `getContext` to supply your app's selected rows or blocks), and agents get it as its own section of the task prompt. Change the keys with `hotkeys={{ task: ['Mod+J'] }}` ("Mod" is ⌘ on a Mac, Ctrl elsewhere), turn them off with `hotkeys={false}`, or open the panel from your own menu with `openReport('task')`. People can also change their own keys from the panel's small Shortcuts link; their choice is kept in their browser and wins over yours. If your app's own keymap opens shipcue (`hotkeys={false}`), pass `onEditShortcuts={openYourKeymapEditor}` and the link opens that instead.
 
 ### Your own tabs
 
@@ -227,6 +227,7 @@ pnpm build
 
 ## Changelog
 
+- **0.9.0**: the Context box has a Preview / Raw switch: an outline shows as bullets with nesting, `[[links]]`, `#tags` and `((refs))` set apart; pass `renderContext={(text) => <YourRenderer text={text} />}` to draw it your app's way.
 - **0.8.1**: the thanks note says "See your CueLog"; shipcue's own queue page is now CueLog, at /cuelog/.
 - **0.8.0**: broadcasters (`slack()`, signed `webhook()`, or your own) hear when a report is filed, claimed, released, closed or gets a video; `shipcue-listen` runs a command per event for agents on a Mac mini, VPS or Tailscale without opening a port; the board updates live (`/board/version`, `liveMs`); list mode stays inside its column.
 - **0.7.0**: the board has a small View control, so each viewer picks pills or tabs and cards or a one-line list (kept in their browser; apps set the default with `tabStyle` and `layout`, or hide it with `viewPicker={false}`); the thanks note says "See your cue" (`seeReportsLabel`); shipcue's own Changelog page is now Cue, at /cue/.
