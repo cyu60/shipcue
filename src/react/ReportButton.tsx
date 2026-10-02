@@ -63,6 +63,36 @@ export interface ReportButtonProps {
    * openReport(), or with the hotkeys.
    */
   trigger?: boolean;
+  /**
+   * Hide shipcue (button and hotkeys) unless the page is opened with ?<showParam>=true, e.g.
+   * showParam="shipcue" for ?shipcue=true. Remembered for the tab; ?shipcue=false hides it again.
+   * Unset (the default): always shown.
+   */
+  showParam?: string;
+}
+
+/** Whether ?<param>=true turned shipcue on for this tab (remembered in sessionStorage). */
+export function shownByParam(param: string): boolean {
+  if (typeof window === 'undefined') return false;
+  const key = `shipcue:show:${param}`;
+  const value = new URLSearchParams(window.location.search).get(param);
+  try {
+    if (value === 'true' || value === '1') sessionStorage.setItem(key, '1');
+    if (value === 'false' || value === '0') sessionStorage.removeItem(key);
+    return sessionStorage.getItem(key) === '1';
+  } catch {
+    return value === 'true' || value === '1';
+  }
+}
+
+export function ReportButton(props: ReportButtonProps) {
+  const { showParam } = props;
+  // Decided after mount: the server render and the first client render agree (hidden).
+  const [shown, setShown] = useState(!showParam);
+  useEffect(() => {
+    if (showParam) setShown(shownByParam(showParam));
+  }, [showParam]);
+  return shown ? <ReportPanel {...props} /> : null;
 }
 
 export interface ExtraTab {
@@ -116,7 +146,7 @@ async function postVideo(endpoint: string, reportId: string, video: Blob): Promi
   }
 }
 
-export function ReportButton({
+function ReportPanel({
   areas,
   endpoint = '/api/shipcue',
   submit,
@@ -166,6 +196,8 @@ export function ReportButton({
   const uid = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  // While open, the panel never shrinks back (switching tabs, clearing text), so it does not jump.
+  const tallest = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
@@ -301,6 +333,26 @@ export function ReportButton({
     if (wasOpen.current === open) return;
     wasOpen.current = open;
     onOpenChangeRef.current?.(open);
+  }, [open]);
+
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!open || !el || typeof ResizeObserver === 'undefined') {
+      tallest.current = 0;
+      return;
+    }
+    const ro = new ResizeObserver(() => {
+      const h = el.getBoundingClientRect().height;
+      if (h > tallest.current + 0.5) {
+        tallest.current = h;
+        el.style.minHeight = `${Math.ceil(h)}px`;
+      }
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      el.style.minHeight = '';
+    };
   }, [open]);
 
   useEffect(() => {

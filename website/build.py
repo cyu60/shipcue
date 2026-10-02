@@ -223,6 +223,7 @@ export { handler as GET, handler as POST };</code></pre>
   onOpenChange={(open) =&gt; setPanelOpen(open)}
 /&gt;</code></pre>
 <p><code>closeReport()</code> closes the panel from anywhere. Already have a help or support button? Pass <code>trigger={false}</code> so shipcue draws no button of its own, and call <code>openReport('bug')</code> from your menu.</p>
+<p>Only for testers? Pass <code>showParam="shipcue"</code> and shipcue stays off (no button, no hotkeys) until someone opens the page with <code>?shipcue=true</code>. It is remembered for that tab; <code>?shipcue=false</code> turns it off again.</p>
 
 <h2>4. Connect an agent</h2>
 <pre><code>claude mcp add shipcue \\

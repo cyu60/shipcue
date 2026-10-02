@@ -467,3 +467,18 @@ describe('ReportButton: after a send you carry on', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 });
+
+describe('showParam (?shipcue=true)', () => {
+  it('stays hidden until the page is opened with the param, then remembers it for the tab', async () => {
+    const { shownByParam } = await import('../src/react');
+    sessionStorage.clear();
+    window.history.replaceState(null, '', '/page');
+    expect(shownByParam('shipcue')).toBe(false);
+    window.history.replaceState(null, '', '/page?shipcue=true');
+    expect(shownByParam('shipcue')).toBe(true);
+    window.history.replaceState(null, '', '/other');
+    expect(shownByParam('shipcue')).toBe(true);
+    window.history.replaceState(null, '', '/other?shipcue=false');
+    expect(shownByParam('shipcue')).toBe(false);
+  });
+});
