@@ -17,7 +17,7 @@
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 4.5 18 13h-6z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 7.5 7 13h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
+<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 4.5 18 13h-6z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 7.5 7 13h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/changelog/">Changelog</a><a href="/contact/">Contact</a></nav></header>
 <main>
 
 <div class="prose">
@@ -111,6 +111,14 @@ export { handler as GET, handler as POST };</code></pre>
   -- npx shipcue-mcp</code></pre>
 <p>The agent gets six tools: <code>list_reports</code>, <code>claim_next_report</code>, <code>get_report</code>, <code>claim_report</code>, <code>release_report</code> and <code>close_report</code>. A claimed report arrives as a task prompt with the description, page, screenshots, app snapshot and what to do next: reproduce, write a failing test, fix, close with the PR link.</p>
 
+<h2>5. Show the queue and a changelog</h2>
+<p>Let people see what is waiting and what got fixed. Switch the board on in the handler, then drop the component on any page:</p>
+<pre><code>createShipcueHandler({ ..., board: true })   // or (req) =&gt; isSignedIn(req)
+
+import { ShipcueBoard } from 'shipcue/react';
+&lt;ShipcueBoard endpoint="/api/shipcue" /&gt;        // or &lt;ShipcueQueue /&gt;, &lt;ShipcueChangelog /&gt;</code></pre>
+<p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. See it on <a href="/changelog/">shipcue's own changelog</a>.</p>
+
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
 <pre><code>POST /reports                 file a report (multipart form, from the button)
@@ -119,7 +127,8 @@ GET  /reports/:id             one report plus its task prompt
 POST /reports/next/claim      take the most urgent open report (204 when empty)
 POST /reports/:id/claim       take a specific report (409 if someone has it)
 POST /reports/:id/release     give it back to the queue
-POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }</code></pre>
+POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }
+GET  /board                   no token: the queue and the changelog (only with board on)</code></pre>
 
 <h2>What a report holds</h2>
 <ul>

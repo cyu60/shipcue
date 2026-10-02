@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { formatBytes, resolveConfig, toAgentPrompt, validateReport, videoExtension, videoType, type ShipcueConfig, type Report } from '../core';
+import { formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateReport, videoExtension, videoType, type Board, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 
 const IMAGE_TYPES: Record<string, string> = {
@@ -30,6 +30,13 @@ export interface HandlerOptions {
   onReport?: (report: Report) => Promise<void>;
   /** Bearer token for the agent API. Leave unset to switch the agent API off. */
   agentToken?: string;
+  /**
+   * The public board: GET {base}/board returns the queue (open and claimed) and the
+   * changelog (fixed, with each fix's resolution), for <ShipcueBoard />. Off by default.
+   * Items carry no reporter, page, diagnostics or attachments. Pass a function to decide
+   * per request, e.g. signed-in people only.
+   */
+  board?: boolean | ((req: Request) => Promise<boolean> | boolean);
 }
 
 const json = (body: unknown, status = 200) =>
@@ -116,6 +123,10 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       if (f.size > config.maxScreenshotBytes) {
         return fail(`Each screenshot must be under ${Math.round(config.maxScreenshotBytes / 1024 / 1024)} MB.`);
       }
+    }
+    const total = files.reduce((n, f) => n + f.size, 0);
+    if (total > config.maxTotalScreenshotBytes) {
+      return fail(`The screenshots add up to more than ${formatBytes(config.maxTotalScreenshotBytes)}. Send fewer, or send the rest in another report.`);
     }
 
     // The key folder groups one report's screenshots; it is not the report id.
@@ -210,8 +221,38 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     return fail('Not found', 404);
   }
 
+  const BOARD_LIMIT = 200;
+
+  async function board(req: Request): Promise<Response> {
+    const allowed = typeof opts.board === 'function' ? await opts.board(req) : opts.board === true;
+    if (!allowed) return fail('Not found', 404);
+    const [open, claimed, fixed] = await Promise.all([
+      store.list({ status: 'open' }),
+      store.list({ status: 'claimed' }),
+      store.list({ status: 'fixed' }),
+    ]);
+    const result: Board = {
+      queue: [...claimed, ...open].slice(0, BOARD_LIMIT).map(toBoardItem),
+      changelog: fixed
+        .map(toBoardItem)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, BOARD_LIMIT),
+    };
+    return new Response(JSON.stringify(result), {
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    });
+  }
+
   return async function handler(req: Request): Promise<Response> {
     const path = new URL(req.url).pathname;
+    if (req.method === 'GET' && path === `${base}/board`) {
+      try {
+        return await board(req);
+      } catch (err) {
+        console.error('shipcue: board failed', err);
+        return fail('Something went wrong. Please try again.', 500);
+      }
+    }
     if (!path.startsWith(`${base}/reports`)) return fail('Not found', 404);
     const parts = path.slice(`${base}/reports`.length).split('/').filter(Boolean);
     try {

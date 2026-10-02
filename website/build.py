@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 HEAD = (ROOT / "_head.txt").read_text()
-NAV = [("/", "Home"), ("/use-cases/", "Use cases"), ("/docs/", "Docs"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/contact/", "Contact")]
+NAV = [("/", "Home"), ("/use-cases/", "Use cases"), ("/docs/", "Docs"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/changelog/", "Changelog"), ("/contact/", "Contact")]
 
 
 def page(path, title, description, body, current):
@@ -231,6 +231,14 @@ export { handler as GET, handler as POST };</code></pre>
   -- npx shipcue-mcp</code></pre>
 <p>The agent gets six tools: <code>list_reports</code>, <code>claim_next_report</code>, <code>get_report</code>, <code>claim_report</code>, <code>release_report</code> and <code>close_report</code>. A claimed report arrives as a task prompt with the description, page, screenshots, app snapshot and what to do next: reproduce, write a failing test, fix, close with the PR link.</p>
 
+<h2>5. Show the queue and a changelog</h2>
+<p>Let people see what is waiting and what got fixed. Switch the board on in the handler, then drop the component on any page:</p>
+<pre><code>createShipcueHandler({ ..., board: true })   // or (req) =&gt; isSignedIn(req)
+
+import { ShipcueBoard } from 'shipcue/react';
+&lt;ShipcueBoard endpoint="/api/shipcue" /&gt;        // or &lt;ShipcueQueue /&gt;, &lt;ShipcueChangelog /&gt;</code></pre>
+<p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. See it on <a href="/changelog/">shipcue's own changelog</a>.</p>
+
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
 <pre><code>POST /reports                 file a report (multipart form, from the button)
@@ -239,7 +247,8 @@ GET  /reports/:id             one report plus its task prompt
 POST /reports/next/claim      take the most urgent open report (204 when empty)
 POST /reports/:id/claim       take a specific report (409 if someone has it)
 POST /reports/:id/release     give it back to the queue
-POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }</code></pre>
+POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }
+GET  /board                   no token: the queue and the changelog (only with board on)</code></pre>
 
 <h2>What a report holds</h2>
 <ul>
@@ -422,5 +431,14 @@ page("blog/agents-should-read-your-bug-reports/index.html", "Your bug report but
 page("use-cases/index.html", "Use cases · shipcue", "Who shipcue is for: hackathon teams running many agents, founders with early users, internal tools, beta tests and more.", USE_CASES, "/use-cases/")
 page("blog/hackathon-teams-and-agents/index.html", "Coordinating a hackathon team when everyone has agents · shipcue", "Why a shared queue keeps a hackathon team's coding agents from colliding.", HACKATHON_POST, "/blog/")
 page("blog/fixqueue-is-now-shipcue/index.html", "fixqueue is now shipcue, and it is open source · shipcue", "The new name, the public repository, and what to rename if you set it up early.", RENAME_POST, "/blog/")
+CHANGELOG = """<div class="prose">
+<h1>Changelog</h1>
+<p class="lede">Everything people have asked shipcue for, straight from its own queue: what is waiting, and what got fixed and how. Send something with the ship button and it shows up here.</p>
+</div>
+<div id="shipcue-board" class="board"></div>
+<script src="/assets/shipcue-board.js" defer></script>
+"""
+
+page("changelog/index.html", "Changelog · shipcue", "What people asked shipcue for, what is in the queue, and what got fixed.", CHANGELOG, "/changelog/")
 page("contact/index.html", "Contact · shipcue", "Get in touch about shipcue.", CONTACT, "/contact/")
 print("built")

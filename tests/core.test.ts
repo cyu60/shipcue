@@ -19,7 +19,7 @@ const config = resolveConfig({
 describe('resolveConfig', () => {
   it('always offers an Other area and keeps the defaults for limits', () => {
     expect(config.areas.map((a) => a.value)).toEqual(['editor', 'sign-in', 'other']);
-    expect(config.maxScreenshots).toBe(3);
+    expect(config.maxScreenshots).toBe(10);
     expect(config.minLength).toBe(10);
   });
   it('does not add Other twice', () => {

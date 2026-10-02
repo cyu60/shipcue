@@ -11,6 +11,8 @@ const handler = createShipcueHandler({
   config: resolveConfig({ areas: AREAS }),
   basePath: '/api/shipcue',
   agentToken: process.env.SHIPCUE_TOKEN,
+  // The Changelog page reads the queue and the fixes (no reporters or diagnostics).
+  board: true,
 });
 
 // vercel.json rewrites /api/shipcue/<rest> to /api/shipcue?__p=<rest>; put the path back.

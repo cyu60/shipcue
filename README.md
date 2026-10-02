@@ -171,6 +171,11 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 | `POST` | `/reports/:id/claim` | agent |
 | `POST` | `/reports/:id/release` | agent |
 | `POST` | `/reports/:id/close` | agent, `{ status: "fixed" \| "wontfix", resolution }` |
+| `GET` | `/board` | anyone, only with `board` on: the queue and the changelog |
+
+## Queue and changelog pages
+
+Switch on `board` in the handler (`true`, or `(req) => boolean` to limit who sees it), then render `<ShipcueBoard endpoint="/api/shipcue" />` (or `<ShipcueQueue />` / `<ShipcueChangelog />`) from `shipcue/react`. It lists open and in-progress reports, most urgent first, and fixed ones with their resolution, latest first. No reporter, page, diagnostics or attachments ever leave the server. Close reports with a one-line, user-facing `resolution` and the changelog writes itself.
 
 ## Try it locally
 
@@ -189,6 +194,7 @@ pnpm build
 
 ## Changelog
 
+- **0.6.0**: `<ShipcueBoard />` / `<ShipcueQueue />` / `<ShipcueChangelog />` and the opt-in `GET /board`; up to 10 screenshots per report (default, with a 4 MB total so a report fits a 4.5 MB request); hotkeys are caught before the page's own key handlers, so ⌘J always reaches the Agent task tab; reports carry `updatedAt`.
 - **0.2.0**: screen recording and video attachments, recent errors in the snapshot, a don't-attach-page link, Past reports links, `attachVideo` on stores. Brought over from the report buttons in the Stanford Founders dashboard and Block Outliner.
 - **0.1.0**: first release.
 

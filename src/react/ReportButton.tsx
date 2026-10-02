@@ -237,16 +237,18 @@ export function ReportButton({
       const t = hotkeyType(e, keys);
       if (!t) return;
       e.preventDefault();
+      e.stopPropagation();
       openOnRef.current(t, true);
     };
     const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: string }>).detail?.type, true);
     const onClose = () => closeRef.current();
-    window.addEventListener('keydown', onKey);
+    // Capture phase: the page's own key handlers (an editor, a popup) never swallow the chord.
+    window.addEventListener('keydown', onKey, true);
     window.addEventListener(OPEN_EVENT, onOpen);
     window.addEventListener(CLOSE_EVENT, onClose);
     return () => {
       window.removeEventListener(CLOSE_EVENT, onClose);
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
       window.removeEventListener(OPEN_EVENT, onOpen);
     };
   }, [keys]);
@@ -324,6 +326,11 @@ export function ReportButton({
       }
       if (next.length >= config.maxScreenshots) {
         setError(`Up to ${config.maxScreenshots} screenshots.`);
+        break;
+      }
+      const total = next.reduce((n, x) => n + x.size, 0) + f.size;
+      if (total > config.maxTotalScreenshotBytes) {
+        setError(`That is all the screenshots one report can carry (${formatBytes(config.maxTotalScreenshotBytes)}). Send the rest in another report.`);
         break;
       }
       next.push(f);

@@ -41,6 +41,8 @@ export interface ShipcueConfig {
   maxLength: number;
   maxScreenshots: number;
   maxScreenshotBytes: number;
+  /** All screenshots together, after shrinking: hosts cap request bodies (Vercel: 4.5 MB). */
+  maxTotalScreenshotBytes: number;
   /** Largest video someone can record or attach. */
   maxVideoBytes: number;
   /** Screen recordings stop after this long. */
@@ -78,8 +80,9 @@ export function resolveConfig(partial: Partial<ShipcueConfig> = {}): ShipcueConf
     areas: areas.some((a) => a.value === OTHER.value) ? areas : [...areas, OTHER],
     minLength: partial.minLength ?? 10,
     maxLength: partial.maxLength ?? 4000,
-    maxScreenshots: partial.maxScreenshots ?? 3,
+    maxScreenshots: partial.maxScreenshots ?? 10,
     maxScreenshotBytes: partial.maxScreenshotBytes ?? 5 * 1024 * 1024,
+    maxTotalScreenshotBytes: partial.maxTotalScreenshotBytes ?? 4 * 1024 * 1024,
     maxVideoBytes: partial.maxVideoBytes ?? 40 * 1024 * 1024,
     maxVideoSeconds: partial.maxVideoSeconds ?? 60,
   };
@@ -113,6 +116,42 @@ export interface Report extends ReportInput {
   /** A screen recording or video of the problem, if one was attached. */
   video: string | null;
   context: string | null;
+  /** Last change (claimed, closed, a video added): when a fix shipped, for the changelog. */
+  updatedAt?: string;
+}
+
+/** A report as a public board shows it: no reporter, page, diagnostics or attachments. */
+export interface BoardItem {
+  id: string;
+  type: ReportType;
+  priority: Priority;
+  area: string;
+  description: string;
+  status: Status;
+  resolution: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Board {
+  /** Open and claimed reports, most urgent first. */
+  queue: BoardItem[];
+  /** Fixed reports, latest first: what changed and why. */
+  changelog: BoardItem[];
+}
+
+export function toBoardItem(r: Report): BoardItem {
+  return {
+    id: r.id,
+    type: r.type,
+    priority: r.priority,
+    area: r.area,
+    description: r.description.length > 600 ? `${r.description.slice(0, 597)}...` : r.description,
+    status: r.status,
+    resolution: r.resolution,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt,
+  };
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };

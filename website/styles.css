@@ -100,3 +100,9 @@ h3 { font-size: 28px; margin-top: 36px; }
 @media (prefers-reduced-motion: reduce) {
   .t.enter { animation: none; }
 }
+
+/* The Changelog page board. */
+.board {
+  max-width: 760px;
+  margin: 8px auto 64px;
+}

@@ -24,6 +24,7 @@ interface Row {
   video: string | null;
   context: string | null;
   created_at: Date | string;
+  updated_at?: Date | string;
 }
 
 const iso = (v: Date | string | null) => (v === null ? null : new Date(v).toISOString());
@@ -47,11 +48,12 @@ function toReport(r: Row): Report {
     resolution: r.resolution,
     video: r.video ?? null,
     context: r.context ?? null,
+    updatedAt: iso(r.updated_at ?? r.created_at)!,
   };
 }
 
 const COLUMNS =
-  'id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, context, created_at';
+  'id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, context, created_at, updated_at';
 const QUEUE_ORDER = 'ORDER BY priority_rank DESC, created_at, id';
 
 /** Stores reports in the shipcue_reports table from sql/schema.sql. Use a server-side connection. */

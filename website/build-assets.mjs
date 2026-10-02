@@ -9,6 +9,12 @@ await build({
   define: { 'process.env.NODE_ENV': '"production"' },
 });
 await build({
+  entryPoints: ['website/_src/board.mjs'],
+  outfile: 'website/assets/shipcue-board.js',
+  bundle: true, minify: true, format: 'iife', target: 'es2020',
+  define: { 'process.env.NODE_ENV': '"production"' },
+});
+await build({
   entryPoints: ['website/_src/api.mjs'],
   outfile: 'website/api/shipcue.mjs',
   bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg'],

@@ -60,8 +60,8 @@ describe('filing a report', () => {
     let res = await handle(post('/reports', reportForm({}, [gif])));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'Screenshots must be PNG, JPG, WebP or GIF.' });
-    res = await handle(post('/reports', reportForm({}, [png(), png(), png(), png()])));
-    expect(await res.json()).toEqual({ error: 'Up to 3 screenshots.' });
+    res = await handle(post('/reports', reportForm({}, Array.from({ length: 11 }, () => png()))));
+    expect(await res.json()).toEqual({ error: 'Up to 10 screenshots.' });
     res = await handle(post('/reports', reportForm({}, [png(6 * 1024 * 1024)])));
     expect(await res.json()).toEqual({ error: 'Each screenshot must be under 5 MB.' });
     res = await handle(post('/reports', reportForm({ description: 'short' })));
@@ -184,5 +184,45 @@ describe('attaching a video', () => {
     vi.setSystemTime(Date.now() + 31 * 60 * 1000);
     expect((await handle(post(`/reports/${id}/video`, videoForm(webm())))).status).toBe(403);
     vi.useRealTimers();
+  });
+});
+
+describe('screenshots per report', () => {
+  it('takes up to 10, but not more than the total a request can carry', async () => {
+    const { store, handle } = setup();
+    const ten = Array.from({ length: 10 }, () => png());
+    const { id } = await (await handle(post('/reports', reportForm({}, ten)))).json();
+    expect((await store.get(id))?.screenshots).toHaveLength(10);
+    expect((await handle(post('/reports', reportForm({}, [...ten, png()])))).status).toBe(400);
+    const big = Array.from({ length: 2 }, () => png(2.5 * 1024 * 1024));
+    const res = await handle(post('/reports', reportForm({}, big)));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/add up to more than/);
+  });
+});
+
+describe('the public board', () => {
+  it('is off unless switched on', async () => {
+    const { handle } = setup();
+    expect((await handle(new Request(BASE + '/board'))).status).toBe(404);
+  });
+
+  it('lists the queue and a changelog of fixes, without reporters or diagnostics', async () => {
+    const { handle } = setup({ board: true });
+    const first = (await (await handle(post('/reports', reportForm({ diagnostics: '{"secret":1}' })))).json()).id;
+    const second = (await (await handle(post('/reports', reportForm({ type: 'feature', description: 'Dark mode please' })))).json()).id;
+    await handle(post(`/reports/${first}/close`, JSON.stringify({ status: 'fixed', resolution: 'Headings keep their text (PR #9)' }), agent));
+    const board = await (await handle(new Request(BASE + '/board'))).json();
+    expect(board.queue.map((r: { id: string }) => r.id)).toEqual([second]);
+    expect(board.changelog).toHaveLength(1);
+    expect(board.changelog[0]).toMatchObject({ id: first, resolution: 'Headings keep their text (PR #9)', status: 'fixed' });
+    const text = JSON.stringify(board);
+    expect(text).not.toMatch(/ada@example.com|secret|diagnostics|reporter/);
+  });
+
+  it('can be limited per request', async () => {
+    const { handle } = setup({ board: (req) => req.headers.get('cookie') === 'admin=1' });
+    expect((await handle(new Request(BASE + '/board'))).status).toBe(404);
+    expect((await handle(new Request(BASE + '/board', { headers: { cookie: 'admin=1' } }))).status).toBe(200);
   });
 });

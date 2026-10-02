@@ -27,7 +27,7 @@ export function memoryStore(): ReportStore {
   const update = (id: string, when: (r: Report) => boolean, patch: (r: Report) => Partial<Report>) => {
     const r = rows.get(id);
     if (!r || !when(r)) return null;
-    const next = { ...r, ...patch(r) };
+    const next = { ...r, ...patch(r), updatedAt: now() };
     rows.set(id, next);
     return { ...next };
   };
@@ -44,6 +44,7 @@ export function memoryStore(): ReportStore {
         resolution: null,
         video: null,
       };
+      r.updatedAt = r.createdAt;
       rows.set(r.id, r);
       return { ...r };
     },

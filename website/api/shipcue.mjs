@@ -35,10 +35,24 @@ function resolveConfig(partial = {}) {
     areas: areas.some((a) => a.value === OTHER.value) ? areas : [...areas, OTHER],
     minLength: partial.minLength ?? 10,
     maxLength: partial.maxLength ?? 4e3,
-    maxScreenshots: partial.maxScreenshots ?? 3,
+    maxScreenshots: partial.maxScreenshots ?? 10,
     maxScreenshotBytes: partial.maxScreenshotBytes ?? 5 * 1024 * 1024,
+    maxTotalScreenshotBytes: partial.maxTotalScreenshotBytes ?? 4 * 1024 * 1024,
     maxVideoBytes: partial.maxVideoBytes ?? 40 * 1024 * 1024,
     maxVideoSeconds: partial.maxVideoSeconds ?? 60
+  };
+}
+function toBoardItem(r) {
+  return {
+    id: r.id,
+    type: r.type,
+    priority: r.priority,
+    area: r.area,
+    description: r.description.length > 600 ? `${r.description.slice(0, 597)}...` : r.description,
+    status: r.status,
+    resolution: r.resolution,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt
   };
 }
 var includes = (list, v) => typeof v === "string" && list.includes(v);
@@ -130,10 +144,11 @@ function toReport(r) {
     claimedAt: iso(r.claimed_at),
     resolution: r.resolution,
     video: r.video ?? null,
-    context: r.context ?? null
+    context: r.context ?? null,
+    updatedAt: iso(r.updated_at ?? r.created_at)
   };
 }
-var COLUMNS = "id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, context, created_at";
+var COLUMNS = "id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, context, created_at, updated_at";
 var QUEUE_ORDER = "ORDER BY priority_rank DESC, created_at, id";
 function postgresStore(db, table = "shipcue_reports") {
   if (!/^[a-z_][a-z0-9_.]*$/i.test(table)) throw new Error(`Bad table name: ${table}`);
@@ -284,6 +299,10 @@ function createShipcueHandler(opts) {
         return fail(`Each screenshot must be under ${Math.round(config.maxScreenshotBytes / 1024 / 1024)} MB.`);
       }
     }
+    const total = files.reduce((n, f) => n + f.size, 0);
+    if (total > config.maxTotalScreenshotBytes) {
+      return fail(`The screenshots add up to more than ${formatBytes(config.maxTotalScreenshotBytes)}. Send fewer, or send the rest in another report.`);
+    }
     const batch = crypto.randomUUID();
     const screenshots = [];
     for (const [i, f] of files.entries()) {
@@ -364,8 +383,33 @@ function createShipcueHandler(opts) {
     }
     return fail("Not found", 404);
   }
+  const BOARD_LIMIT = 200;
+  async function board(req) {
+    const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
+    if (!allowed) return fail("Not found", 404);
+    const [open, claimed, fixed] = await Promise.all([
+      store.list({ status: "open" }),
+      store.list({ status: "claimed" }),
+      store.list({ status: "fixed" })
+    ]);
+    const result = {
+      queue: [...claimed, ...open].slice(0, BOARD_LIMIT).map(toBoardItem),
+      changelog: fixed.map(toBoardItem).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
+    };
+    return new Response(JSON.stringify(result), {
+      headers: { "content-type": "application/json", "cache-control": "no-store" }
+    });
+  }
   return async function handler2(req) {
     const path = new URL(req.url).pathname;
+    if (req.method === "GET" && path === `${base}/board`) {
+      try {
+        return await board(req);
+      } catch (err) {
+        console.error("shipcue: board failed", err);
+        return fail("Something went wrong. Please try again.", 500);
+      }
+    }
     if (!path.startsWith(`${base}/reports`)) return fail("Not found", 404);
     const parts = path.slice(`${base}/reports`.length).split("/").filter(Boolean);
     try {
@@ -394,7 +438,9 @@ var handler = createShipcueHandler({
   store: postgresStore(pool),
   config: resolveConfig({ areas: AREAS }),
   basePath: "/api/shipcue",
-  agentToken: process.env.SHIPCUE_TOKEN
+  agentToken: process.env.SHIPCUE_TOKEN,
+  // The Changelog page reads the queue and the fixes (no reporters or diagnostics).
+  board: true
 });
 function restore(req) {
   const url = new URL(req.url);
