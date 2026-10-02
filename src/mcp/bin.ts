@@ -16,7 +16,7 @@ if (!url || !token) {
 }
 
 const client = createAgentClient({ url, token, agent: process.env.SHIPCUE_AGENT ?? `mcp@${hostname()}` });
-const server = new McpServer({ name: 'shipcue', version: '0.3.1' });
+const server = new McpServer({ name: 'shipcue', version: '0.4.0' });
 
 const text = (value: unknown) => ({
   content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],

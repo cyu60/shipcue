@@ -3,7 +3,8 @@
 // Mac's Alt does not change what was pressed.
 import type { ReportType } from '../core';
 
-export type Hotkeys = Partial<Record<ReportType, string[]>>;
+/** Chords per tab: a report type, or the id of one of your extraTabs. */
+export type Hotkeys = Partial<Record<ReportType, string[]>> & Record<string, string[] | undefined>;
 type KeyInfo = Pick<KeyboardEvent, 'code' | 'key' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>;
 
 const MODS = ['Ctrl', 'Alt', 'Shift', 'Cmd'];
@@ -51,18 +52,25 @@ export function display(chord: string, mac = isMac()): string {
 }
 
 /** Which tab a key press opens, if any. */
-export function hotkeyType(e: KeyInfo, hotkeys: Hotkeys, mac = isMac()): ReportType | null {
+export function hotkeyType(e: KeyInfo, hotkeys: Hotkeys, mac = isMac()): string | null {
   const chord = chordOf(e);
   if (!chord) return null;
-  for (const [type, chords] of Object.entries(hotkeys) as [ReportType, string[]][]) {
-    if (chords.some((c) => normalize(c, mac) === chord)) return type;
+  for (const [type, chords] of Object.entries(hotkeys) as [string, string[] | undefined][]) {
+    if (chords?.some((c) => normalize(c, mac) === chord)) return type;
   }
   return null;
 }
 
 export const OPEN_EVENT = 'shipcue:open';
 
-/** Open the report panel from anywhere in your app, e.g. a menu item. */
-export function openReport(type?: ReportType): void {
-  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { type } }));
+export const CLOSE_EVENT = 'shipcue:close';
+
+/** Open the report panel from anywhere in your app, on a report type or one of your extraTabs. */
+export function openReport(tab?: ReportType | (string & {})): void {
+  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { type: tab } }));
+}
+
+/** Close the report panel from anywhere in your app. */
+export function closeReport(): void {
+  window.dispatchEvent(new CustomEvent(CLOSE_EVENT));
 }

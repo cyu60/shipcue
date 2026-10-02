@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { defaultHotkeys, display, hotkeyType, isMac, OPEN_EVENT, type Hotkeys } from './hotkeys';
+import { CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, OPEN_EVENT, type Hotkeys } from './hotkeys';
 import { formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
@@ -50,6 +50,23 @@ export interface ReportButtonProps {
    * blocks in your app as text. Shown in an editable Context box the reporter can remove.
    */
   getContext?: () => string | null | undefined;
+  /** Called when the panel opens or closes. */
+  onOpenChange?: (open: boolean) => void;
+  /**
+   * Tabs of your own, drawn inside the same panel after the report tabs: e.g. an agent-task
+   * composer backed by your API. `render` gets the draft so far and a `close` function.
+   * Give one a hotkey with hotkeys={{ [id]: ['Mod+J'] }}, or open it with openReport(id).
+   */
+  extraTabs?: ExtraTab[];
+}
+
+export interface ExtraTab {
+  id: string;
+  label: string;
+  /** Panel heading on this tab; the label by default. */
+  title?: string;
+  subtitle?: string;
+  render: (draft: { text: string; context: string | null; close: () => void }) => React.ReactNode;
 }
 
 const TYPES: { value: ReportType; label: string; placeholder: string }[] = [
@@ -110,12 +127,16 @@ export function ReportButton({
   types,
   hotkeys,
   getContext,
+  onOpenChange,
+  extraTabs,
 }: ReportButtonProps) {
   const tabs = useMemo(() => (types?.length ? TYPES.filter((t) => types.includes(t.value)) : TYPES), [types]);
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [context, setContext] = useState<string | null>(null);
+  const [extraId, setExtraId] = useState<string | null>(null);
+  const extra = extraTabs?.find((x) => x.id === extraId) ?? null;
   const [type, setType] = useState<ReportType>(() => tabs[0]?.value ?? 'bug');
   const [priority, setPriority] = useState<Priority>('medium');
   const [area, setArea] = useState('other');
@@ -160,8 +181,9 @@ export function ReportButton({
   const keys = useMemo<Hotkeys>(() => {
     if (hotkeys === false) return {};
     const all = { ...defaultHotkeys(), ...hotkeys };
-    return Object.fromEntries(tabs.map((t) => [t.value, all[t.value] ?? []]));
-  }, [hotkeys, tabs]);
+    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id)];
+    return Object.fromEntries(ids.map((id) => [id, (all as Hotkeys)[id] ?? []]));
+  }, [hotkeys, tabs, extraTabs]);
 
   // Open on a tab with what the report is about: the text highlighted on the page (not in
   // the panel), or else what the app says is selected.
@@ -177,8 +199,12 @@ export function ReportButton({
   };
   // A hotkey or openReport() always starts a fresh, empty form on its tab (outliner report 20:55),
   // even right after a send or with another tab half written. A click on the button keeps the draft.
-  const openOn = (t?: ReportType, fresh = false) => {
-    if (t && tabs.some((x) => x.value === t)) setType(t);
+  const openOn = (t?: string, fresh = false) => {
+    if (t && extraTabs?.some((x) => x.id === t)) setExtraId(t);
+    else if (t && tabs.some((x) => x.value === t)) {
+      setType(t as ReportType);
+      setExtraId(null);
+    }
     const picked = pickContext();
     if (fresh) {
       setText('');
@@ -203,10 +229,13 @@ export function ReportButton({
       e.preventDefault();
       openOnRef.current(t, true);
     };
-    const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: ReportType }>).detail?.type, true);
+    const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: string }>).detail?.type, true);
+    const onClose = () => closeRef.current();
     window.addEventListener('keydown', onKey);
     window.addEventListener(OPEN_EVENT, onOpen);
+    window.addEventListener(CLOSE_EVENT, onClose);
     return () => {
+      window.removeEventListener(CLOSE_EVENT, onClose);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener(OPEN_EVENT, onOpen);
     };
@@ -252,6 +281,17 @@ export function ReportButton({
     setError(null);
     setWarning(null);
   };
+  const closeRef = useRef(close);
+  closeRef.current = close;
+
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current === open) return;
+    wasOpen.current = open;
+    onOpenChangeRef.current?.(open);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -330,12 +370,12 @@ export function ReportButton({
   return (
     <div data-shipcue={variant} style={variant === 'floating' ? s.floatingWrap : s.inlineWrap}>
       {open && recording === null && (
-        <div ref={panelRef} role="dialog" aria-label={HEADING[type][0]} style={variant === 'floating' ? s.panel : s.inlinePanel}>
+        <div ref={panelRef} role="dialog" aria-label={extra ? (extra.title ?? extra.label) : HEADING[type][0]} style={variant === 'floating' ? s.panel : s.inlinePanel}>
           <div style={s.row}>
             <div>
-              <h3 style={s.h3}>{HEADING[type][0]}</h3>
+              <h3 style={s.h3}>{extra ? (extra.title ?? extra.label) : HEADING[type][0]}</h3>
               <p style={s.sub}>
-                {HEADING[type][1]}
+                {extra ? (extra.subtitle ?? '') : HEADING[type][1]}
               </p>
             </div>
             <button type="button" onClick={close} aria-label="Close" style={s.iconBtn}>
@@ -359,20 +399,43 @@ export function ReportButton({
           ) : (
             <>
               <div role="radiogroup" aria-label="Report type" style={s.segment}>
-                {tabs.map((t) => (
+                {tabs.map((t) => {
+                  const on = !extra && type === t.value;
+                  return (
+                    <button
+                      key={t.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => {
+                        setType(t.value);
+                        setExtraId(null);
+                      }}
+                      title={keys[t.value]?.[0] ? `${t.label} (${display(keys[t.value]![0]!)})` : undefined}
+                      style={on ? s.segOn : s.segOff}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+                {extraTabs?.map((x) => (
                   <button
-                    key={t.value}
+                    key={x.id}
                     type="button"
                     role="radio"
-                    aria-checked={type === t.value}
-                    onClick={() => setType(t.value)}
-                    title={keys[t.value]?.[0] ? `${t.label} (${display(keys[t.value]![0]!)})` : undefined}
-                    style={type === t.value ? s.segOn : s.segOff}
+                    aria-checked={extraId === x.id}
+                    onClick={() => setExtraId(x.id)}
+                    title={keys[x.id]?.[0] ? `${x.label} (${display(keys[x.id]![0]!)})` : undefined}
+                    style={extraId === x.id ? s.segOn : s.segOff}
                   >
-                    {t.label}
+                    {x.label}
                   </button>
                 ))}
               </div>
+              {extra ? (
+                <div style={{ marginTop: 12 }}>{extra.render({ text, context, close })}</div>
+              ) : (
+              <>
               <textarea
                 ref={textareaRef}
                 value={text}
@@ -538,6 +601,8 @@ export function ReportButton({
                   <span style={s.kbd} aria-hidden="true">{isMac() ? '⌘↵' : 'Ctrl+↵'}</span>
                 </button>
               </div>
+              </>
+              )}
             </>
           )}
           {watermark && (

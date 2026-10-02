@@ -149,7 +149,7 @@ DOCS = """
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
 <p>Until the first npm release is out, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
-<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.3.1/shipcue-0.3.1.tgz</code></pre>
+<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.4.0/shipcue-0.4.0.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 
 <h2>1. Create the table</h2>
@@ -209,6 +209,21 @@ export { handler as GET, handler as POST };</code></pre>
 <p>On Windows and Linux, Ctrl+J, Ctrl+B and Ctrl+F already belong to the browser and to editors, so shipcue stays off them. Pick your own with <code>hotkeys</code> ("Mod" is ⌘ on a Mac and Ctrl elsewhere), or pass <code>hotkeys={false}</code> to turn them off:</p>
 <pre><code>&lt;ReportButton hotkeys={{ task: ['Mod+J'], bug: ['Mod+Shift+B'], feature: [] }} /&gt;</code></pre>
 <p>To open the panel from your own menu or command palette, call <code>openReport('task')</code> from <code>shipcue/react</code>.</p>
+
+<h2>Your own tabs</h2>
+<p>Apps that already have their own flow, like an agent-task composer backed by their API, can put it in the same panel as a tab of its own. It gets the draft so far and a <code>close</code> function, and a hotkey or <code>openReport(id)</code> opens it:</p>
+<pre><code>&lt;ReportButton
+  types={['bug', 'feature']}
+  hotkeys={{ agent: ['Mod+J'] }}
+  extraTabs={[{
+    id: 'agent',
+    label: 'Agent task',
+    title: 'New agent task',
+    render: ({ text, context, close }) =&gt; &lt;TaskComposer draft={text} context={context} onDone={close} /&gt;,
+  }]}
+  onOpenChange={(open) =&gt; setPanelOpen(open)}
+/&gt;</code></pre>
+<p><code>closeReport()</code> closes the panel from anywhere.</p>
 
 <h2>4. Connect an agent</h2>
 <pre><code>claude mcp add shipcue \\

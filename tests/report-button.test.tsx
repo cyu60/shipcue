@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ReportButton, openReport } from '../src/react';
+import { ReportButton, openReport, closeReport } from '../src/react';
 
 beforeAll(() => {
   URL.createObjectURL = vi.fn(() => 'blob:preview');
@@ -348,5 +348,75 @@ describe('ReportButton: a hotkey always starts a fresh form', () => {
     press('KeyJ', 'j');
     expect(await screen.findByRole('heading', { name: 'New agent task' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('');
+  });
+});
+
+describe('ReportButton: hooks for host apps', () => {
+  it('says when the panel opens and closes', async () => {
+    const onOpenChange = vi.fn();
+    render(<ReportButton areas={areas} submit={ok()} onOpenChange={onOpenChange} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    expect(onOpenChange).toHaveBeenLastCalledWith(true);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('adds your own tab, drawn inside the same panel, with the draft handed over', async () => {
+    render(
+      <ReportButton
+        areas={areas}
+        submit={ok()}
+        types={['bug', 'feature']}
+        getContext={() => '- a block'}
+        hotkeys={{ bug: ['Ctrl+B'], agent: ['Ctrl+J'] }}
+        extraTabs={[
+          {
+            id: 'agent',
+            label: 'Agent task',
+            title: 'New agent task',
+            render: ({ text, context, close }) => (
+              <div>
+                <p>composer: {text} | {context}</p>
+                <button type="button" onClick={close}>done</button>
+              </div>
+            ),
+          },
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    expect(screen.getAllByRole('radio').map((r) => r.textContent)).toEqual(['Bug', 'Feature request', 'Agent task']);
+    await userEvent.type(screen.getByRole('textbox', { name: 'Description' }), 'make it a doc');
+    await userEvent.click(screen.getByRole('radio', { name: 'Agent task' }));
+    expect(screen.getByRole('dialog', { name: 'New agent task' })).toBeInTheDocument();
+    expect(screen.getByText('composer: make it a doc | - a block')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'done' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('opens your tab from its hotkey or openReport(id)', async () => {
+    render(
+      <ReportButton
+        areas={areas}
+        submit={ok()}
+        types={['bug', 'feature']}
+        hotkeys={{ agent: ['Ctrl+J'] }}
+        extraTabs={[{ id: 'agent', label: 'Agent task', render: () => <p>the composer</p> }]}
+      />,
+    );
+    fireEvent.keyDown(window, { code: 'KeyJ', key: 'j', ctrlKey: true });
+    expect(await screen.findByText('the composer')).toBeInTheDocument();
+    closeReport();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    openReport('agent');
+    expect(await screen.findByText('the composer')).toBeInTheDocument();
+  });
+
+  it('closes from anywhere with closeReport', async () => {
+    render(<ReportButton areas={areas} submit={ok()} />);
+    openReport('bug');
+    await screen.findByRole('dialog');
+    closeReport();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
