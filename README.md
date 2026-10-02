@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-156%20passing-2E5BFF?style=flat-square" alt="156 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-159%20passing-2E5BFF?style=flat-square" alt="159 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -106,6 +106,7 @@ What else the panel does:
 - **Record screen or attach a video.** Recordings stop at 60 seconds. The video uploads after the report is filed; if it fails, the report is still filed and the panel says so. Pass `uploadVideo={(reportId, blob) => …}` to upload it yourself; otherwise it goes to the handler. With `submit` and no `uploadVideo`, video is hidden.
 - **Recent errors.** Page errors, unhandled rejections and `console.error` calls from before the report are added to the snapshot as `recentErrors`. Turn off with `captureErrors={false}`.
 - **The page.** The panel shows which page it will attach, with a "don't attach" link.
+- **Move it.** People can drag the floating button anywhere; `movable={false}` keeps it bottom-right.
 - **Your own mark.** `launcherIcon={<YourLogo />}` draws your logo on the floating or inline button instead of shipcue's sailboat.
 - **Your own words.** Pass `text={{ seeReports: 'See your reports', bugTab: 'Problem', send: 'Submit' }}` to the button or the board: anything you leave out keeps shipcue's wording (`DEFAULT_TEXT` from `shipcue/react` lists every key).
 - **Limits.** Set them once where you create the handler, `config: resolveConfig({ areas, maxScreenshots: 20, maxTotalScreenshotBytes: 4 * 1024 * 1024 })`, and the button follows (it reads them from `{endpoint}/capabilities`). If you send reports yourself with `submit`, pass the same numbers as `limits={{ maxScreenshots: 20 }}`. Defaults: 10 screenshots, 5 MB each, 4 MB together (under Vercel's 4.5 MB request cap), 40 MB and 60 seconds of video.
@@ -233,6 +234,7 @@ pnpm build
 
 ## Changelog
 
+- **0.10.4**: drag the floating button anywhere on the page; it stays where you leave it (kept in your browser) and the panel opens toward the middle of the screen. `movable={false}` pins it bottom-right.
 - **0.10.3**: in Tabs view only the current tab is underlined (others no longer keep a grey line once visited); shipcue's CueLog opens on the Changelog.
 - **0.10.2**: `launcherIcon` puts your own mark on the button in place of the sailboat (the accent background stays).
 - **0.10.1**: "+ Add context" under the text box: what your app says is selected (as a preview), or an empty box to type or paste into, on any tab.

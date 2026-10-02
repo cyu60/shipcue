@@ -96,6 +96,11 @@ export interface ReportButtonProps {
    */
   launcherIcon?: React.ReactNode;
   /**
+   * People can drag the floating button anywhere on the page; where they leave it is kept in
+   * their browser. On by default; false pins it bottom-right.
+   */
+  movable?: boolean;
+  /**
    * Hide shipcue (button and hotkeys) unless the page is opened with ?<showParam>=true, e.g.
    * showParam="shipcue" for ?shipcue=true. Remembered for the tab; ?shipcue=false hides it again.
    * Unset (the default): always shown.
@@ -214,6 +219,7 @@ function ReportPanel({
   renderContext,
   trigger = true,
   launcherIcon,
+  movable = true,
 }: ReportButtonProps) {
   // The app's words over shipcue's (the older pastReportsLabel/seeReportsLabel props still work).
   const t = useMemo(
@@ -591,9 +597,10 @@ function ReportPanel({
   const canSend = !busy && text.trim().length >= config.minLength;
   const current = TYPES.find((t) => t.value === type)!;
   const s = styles(accentColor);
+  const drag = useDraggableButton(variant === 'floating' && movable);
 
   return (
-    <div data-shipcue={variant} style={variant === 'floating' ? s.floatingWrap : s.inlineWrap}>
+    <div data-shipcue={variant} style={variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap}>
       {open && recording === null && (
         <div
           ref={panelRef}
@@ -988,10 +995,15 @@ function ReportPanel({
       {trigger !== false && (
         <button
           type="button"
-          onClick={() => (open ? close() : openOn())}
+          onClick={() => {
+            // The end of a drag is not a click.
+            if (drag.justDragged()) return;
+            open ? close() : openOn();
+          }}
+          {...drag.handlers}
           aria-label={open ? t.closeButton : t.openButton}
           title={t.openButton}
-          style={variant === 'floating' ? s.fab : s.inlineBtn}
+          style={variant === 'floating' ? { ...s.fab, ...(drag.dragging ? { cursor: 'grabbing' } : null) } : s.inlineBtn}
         >
           {launcherIcon ?? (
           <svg data-icon="ship" width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1008,6 +1020,106 @@ function ReportPanel({
 }
 
 // Inline styles so the button works in any app with no CSS setup.
+const POSITION_KEY = 'shipcue:button-position';
+const FAB = 48;
+const EDGE = 8;
+
+/**
+ * Drag the floating button anywhere (shipcue report 9061b5f6). The spot is kept as the button's
+ * centre; the wrapper is anchored to the nearest corner, so the panel opens towards the middle
+ * of the screen and never off it.
+ */
+function useDraggableButton(enabled: boolean) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const start = useRef<{ px: number; py: number; moved: boolean } | null>(null);
+  const dragged = useRef(false);
+  const [, setViewport] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(POSITION_KEY) ?? 'null') as { x?: unknown; y?: unknown } | null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only there in the browser
+      if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') setPos({ x: saved.x, y: saved.y });
+    } catch {
+      // Storage blocked: bottom-right.
+    }
+    const onResize = () => setViewport((n) => n + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [enabled]);
+
+  const clamp = (x: number, y: number) => {
+    const half = FAB / 2 + EDGE;
+    return {
+      x: Math.min(Math.max(x, half), Math.max(half, window.innerWidth - half)),
+      y: Math.min(Math.max(y, half), Math.max(half, window.innerHeight - half)),
+    };
+  };
+
+  let wrapStyle: CSSProperties = {};
+  if (enabled && pos && typeof window !== 'undefined') {
+    const { x, y } = clamp(pos.x, pos.y);
+    const right = x > window.innerWidth / 2;
+    const bottom = y > window.innerHeight / 2;
+    wrapStyle = {
+      ...(right ? { right: window.innerWidth - x - FAB / 2, left: 'auto', alignItems: 'flex-end' } : { left: x - FAB / 2, right: 'auto', alignItems: 'flex-start' }),
+      ...(bottom ? { bottom: window.innerHeight - y - FAB / 2, top: 'auto', flexDirection: 'column' } : { top: y - FAB / 2, bottom: 'auto', flexDirection: 'column-reverse' }),
+    };
+  }
+
+  const handlers = enabled
+    ? {
+        onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+          if (e.button !== 0) return;
+          start.current = { px: e.clientX, py: e.clientY, moved: false };
+        },
+        onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => {
+          const st = start.current;
+          if (!st) return;
+          if (!st.moved && Math.hypot(e.clientX - st.px, e.clientY - st.py) < 5) return;
+          if (!st.moved) {
+            st.moved = true;
+            setDragging(true);
+            try {
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+            } catch {
+              // An unknown pointer (some synthetic events): the drag still works within the button's reach.
+            }
+          }
+          setPos(clamp(e.clientX, e.clientY));
+        },
+        onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => {
+          const st = start.current;
+          start.current = null;
+          if (!st?.moved) return;
+          dragged.current = true;
+          setDragging(false);
+          const next = clamp(e.clientX, e.clientY);
+          setPos(next);
+          try {
+            localStorage.setItem(POSITION_KEY, JSON.stringify(next));
+          } catch {
+            // Storage blocked: the spot lasts until the page reloads.
+          }
+        },
+      }
+    : {};
+
+  return {
+    wrapStyle,
+    handlers,
+    dragging,
+    /** True once, right after a drag ended, so that release is not taken as a click. */
+    justDragged: () => {
+      const was = dragged.current;
+      dragged.current = false;
+      return was;
+    },
+  };
+}
+
 function styles(accent: string) {
   const font = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
   const card: CSSProperties = {
@@ -1123,6 +1235,7 @@ function styles(accent: string) {
       justifyContent: 'center',
       boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
       cursor: 'pointer',
+      touchAction: 'none',
     } as CSSProperties,
     inlineBtn: {
       width: 36,
