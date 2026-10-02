@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ReportButton } from '../src/react';
+import { ReportButton, openReport } from '../src/react';
 
 beforeAll(() => {
   URL.createObjectURL = vi.fn(() => 'blob:preview');
@@ -246,5 +246,52 @@ describe('ReportButton: three tabs', () => {
   it('shows a ship on the button', () => {
     render(<ReportButton areas={areas} submit={ok()} />);
     expect(screen.getByRole('button', { name: 'Report a bug or request a feature' }).querySelector('svg[data-icon="ship"]')).not.toBeNull();
+  });
+});
+
+describe('ReportButton: hotkeys', () => {
+  const keys = { bug: ['Ctrl+B'], feature: ['Ctrl+F'], task: ['Ctrl+J'] };
+  const press = (code: string, key: string, mods: Record<string, boolean> = { ctrlKey: true }) =>
+    fireEvent.keyDown(window, { code, key, ...mods });
+
+  it('opens the panel on the tab the hotkey names', async () => {
+    render(<ReportButton areas={areas} submit={ok()} hotkeys={keys} />);
+    press('KeyJ', 'j');
+    expect(await screen.findByRole('heading', { name: 'New agent task' })).toBeInTheDocument();
+    press('KeyB', 'b');
+    expect(await screen.findByRole('heading', { name: 'Report a bug' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveFocus();
+  });
+
+  it('starts from the text highlighted on the page', async () => {
+    render(<><p>Export the members table as CSV</p><ReportButton areas={areas} submit={ok()} hotkeys={keys} /></>);
+    const range = document.createRange();
+    range.selectNodeContents(screen.getByText('Export the members table as CSV'));
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    press('KeyJ', 'j');
+    expect(await screen.findByRole('textbox')).toHaveValue('> Export the members table as CSV\n\n');
+  });
+
+  it('sends with Cmd or Ctrl+Enter', async () => {
+    const submit = ok();
+    render(<ReportButton areas={areas} submit={submit} hotkeys={keys} />);
+    press('KeyB', 'b');
+    await userEvent.type(await screen.findByRole('textbox'), 'The heading disappears on Enter');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', code: 'Enter', ctrlKey: true });
+    await screen.findByRole('status');
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it('can be turned off', () => {
+    render(<ReportButton areas={areas} submit={ok()} hotkeys={false} />);
+    press('KeyB', 'b');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('opens from anywhere in the app with openReport', async () => {
+    render(<ReportButton areas={areas} submit={ok()} />);
+    openReport('feature');
+    expect(await screen.findByRole('heading', { name: 'Request a feature' })).toBeInTheDocument();
   });
 });

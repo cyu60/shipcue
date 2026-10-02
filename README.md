@@ -18,7 +18,7 @@
 
 A drop-in bug report and feature request button whose inbox is a queue that people **and coding agents** both work from.
 
-<p align="center"><img src="docs/report-button.png" alt="The report button open on a feature request: bug or feature toggle, description, priority, where, screenshot upload and Send" width="420"></p>
+<p align="center"><img src="docs/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, screenshots, screen recording, Send with ⌘↵, and a Powered by shipcue line" width="420"></p>
 
 Someone in your app clicks the button, says what broke or what they want, pastes a screenshot, and sends. shipcue files it with the page address, browser and a snapshot of app state you choose. Then Claude Code, Codex or a teammate claims the most urgent report, gets a ready-made task prompt, fixes it, and closes it with the PR link.
 
@@ -109,6 +109,17 @@ What else the panel does:
 - **Past reports.** `pastReportsHref="/reports"` adds a Past reports link to the panel and a See your reports link after sending.
 
 The panel has three tabs: **Bug**, **Feature request** and **Agent task** (a direct instruction for an agent; limit them with `types={['bug', 'feature']}` on a public page). The panel ends with a small "Powered by shipcue · ★ Star it on GitHub" line. If shipcue helps you, a star really helps; `watermark={false}` turns it off.
+
+### Keyboard shortcuts
+
+| | Mac | Windows / Linux |
+|---|---|---|
+| Agent task | ⌘J | Alt+Shift+J |
+| Bug | ⌃B | Alt+Shift+B |
+| Feature request | ⌃F | Alt+Shift+F |
+| Send | ⌘↵ | Ctrl+↵ |
+
+Text highlighted on the page comes along as a quote. Change the keys with `hotkeys={{ task: ['Mod+J'] }}` ("Mod" is ⌘ on a Mac, Ctrl elsewhere), turn them off with `hotkeys={false}`, or open the panel from your own menu with `openReport('task')`.
 
 ## 4. Let agents work the queue
 

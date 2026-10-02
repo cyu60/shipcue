@@ -196,6 +196,20 @@ export { handler as GET, handler as POST };</code></pre>
   <li>The panel shows the page it will attach, with a "don't attach" link.</li>
 </ul>
 
+<p><img src="/assets/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, screenshots, screen recording, and a Powered by shipcue line" width="408" style="max-width:100%;height:auto;border-radius:16px;margin-top:8px"></p>
+
+<h2>Keyboard shortcuts</h2>
+<p>The panel opens from the keyboard on any page, on the tab you ask for. Whatever is highlighted on the page comes along as a quote, so you can select a paragraph and turn it into an agent task in one go.</p>
+<ul>
+  <li><b>Agent task:</b> <code>⌘J</code> on a Mac, <code>Alt+Shift+J</code> elsewhere</li>
+  <li><b>Bug:</b> <code>⌃B</code> on a Mac, <code>Alt+Shift+B</code> elsewhere</li>
+  <li><b>Feature request:</b> <code>⌃F</code> on a Mac, <code>Alt+Shift+F</code> elsewhere</li>
+  <li><b>Send:</b> <code>⌘↵</code> or <code>Ctrl+↵</code>. <b>Close:</b> <code>Esc</code></li>
+</ul>
+<p>On Windows and Linux, Ctrl+J, Ctrl+B and Ctrl+F already belong to the browser and to editors, so shipcue stays off them. Pick your own with <code>hotkeys</code> ("Mod" is ⌘ on a Mac and Ctrl elsewhere), or pass <code>hotkeys={false}</code> to turn them off:</p>
+<pre><code>&lt;ReportButton hotkeys={{ task: ['Mod+J'], bug: ['Mod+Shift+B'], feature: [] }} /&gt;</code></pre>
+<p>To open the panel from your own menu or command palette, call <code>openReport('task')</code> from <code>shipcue/react</code>.</p>
+
 <h2>4. Connect an agent</h2>
 <pre><code>claude mcp add shipcue \\
   -e SHIPCUE_URL=https://your.app/api/shipcue \\

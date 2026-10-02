@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { defaultHotkeys, display, hotkeyType, isMac, OPEN_EVENT, type Hotkeys } from './hotkeys';
 import { formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
@@ -39,6 +40,11 @@ export interface ReportButtonProps {
   watermark?: boolean;
   /** Which tabs to show, in order. All three by default; on a public page you may want to leave out 'task'. */
   types?: ReportType[];
+  /**
+   * Shortcuts that open the panel on a tab. On a Mac ⌘J agent task, ⌃B bug, ⌃F feature;
+   * elsewhere Alt+Shift+J/B/F. Pass your own chords per tab ("Mod+J", "Ctrl+B"), or false for none.
+   */
+  hotkeys?: Hotkeys | false;
 }
 
 const TYPES: { value: ReportType; label: string; placeholder: string }[] = [
@@ -97,6 +103,7 @@ export function ReportButton({
   pastReportsHref,
   watermark = true,
   types,
+  hotkeys,
 }: ReportButtonProps) {
   const tabs = useMemo(() => (types?.length ? TYPES.filter((t) => types.includes(t.value)) : TYPES), [types]);
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
@@ -119,14 +126,18 @@ export function ReportButton({
   const videoOn = !!uploadVideo || !submit;
   const uid = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
   useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
 
   useEffect(() => {
-    if (open) textareaRef.current?.focus();
-  }, [open]);
+    const el = textareaRef.current;
+    if (!open || !el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [open, type]);
 
   useEffect(() => {
     if (captureErrors) startCapturingErrors();
@@ -137,6 +148,43 @@ export function ReportButton({
     setPage(window.location.href);
     setOpen(true);
   };
+
+  // The keys in use, only for the tabs on show.
+  const keys = useMemo<Hotkeys>(() => {
+    if (hotkeys === false) return {};
+    const all = { ...defaultHotkeys(), ...hotkeys };
+    return Object.fromEntries(tabs.map((t) => [t.value, all[t.value] ?? []]));
+  }, [hotkeys, tabs]);
+
+  // Open on a tab, starting from whatever is highlighted on the page (not in the panel).
+  const openOn = (t?: ReportType) => {
+    if (t && tabs.some((x) => x.value === t)) setType(t);
+    const sel = window.getSelection();
+    const picked = sel && !sel.isCollapsed && !panelRef.current?.contains(sel.anchorNode) ? sel.toString().trim() : '';
+    if (picked) setText((cur) => (cur.trim() ? cur : picked.split('\n').map((l) => `> ${l}`).join('\n') + '\n\n'));
+    setDone(false);
+    if (!open) show();
+    else textareaRef.current?.focus();
+  };
+  const openOnRef = useRef(openOn);
+  openOnRef.current = openOn;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat) return;
+      const t = hotkeyType(e, keys);
+      if (!t) return;
+      e.preventDefault();
+      openOnRef.current(t);
+    };
+    const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: ReportType }>).detail?.type);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener(OPEN_EVENT, onOpen);
+    };
+  }, [keys]);
 
   const attachVideo = (blob: Blob) => {
     setError(null);
@@ -254,7 +302,7 @@ export function ReportButton({
   return (
     <div data-shipcue={variant} style={variant === 'floating' ? s.floatingWrap : s.inlineWrap}>
       {open && recording === null && (
-        <div role="dialog" aria-label="Report a bug" style={variant === 'floating' ? s.panel : s.inlinePanel}>
+        <div ref={panelRef} role="dialog" aria-label={HEADING[type][0]} style={variant === 'floating' ? s.panel : s.inlinePanel}>
           <div style={s.row}>
             <div>
               <h3 style={s.h3}>{HEADING[type][0]}</h3>
@@ -290,6 +338,7 @@ export function ReportButton({
                     role="radio"
                     aria-checked={type === t.value}
                     onClick={() => setType(t.value)}
+                    title={keys[t.value]?.[0] ? `${t.label} (${display(keys[t.value]![0]!)})` : undefined}
                     style={type === t.value ? s.segOn : s.segOff}
                   >
                     {t.label}
@@ -300,6 +349,12 @@ export function ReportButton({
                 ref={textareaRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    if (canSend) void send();
+                  }
+                }}
                 onPaste={(e) => {
                   const imgs = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'));
                   if (imgs.length) {
@@ -432,6 +487,7 @@ export function ReportButton({
                 )}
                 <button type="button" onClick={send} disabled={!canSend} style={canSend ? s.send : { ...s.send, opacity: 0.5, cursor: 'not-allowed' }}>
                   {busy ? 'Sending…' : 'Send'}
+                  <span style={s.kbd} aria-hidden="true">{isMac() ? '⌘↵' : 'Ctrl+↵'}</span>
                 </button>
               </div>
             </>
@@ -541,6 +597,7 @@ function styles(accent: string) {
     label: { display: 'block', fontSize: 11, fontWeight: 500, color: '#71717a' } as CSSProperties,
     select: { ...field, marginTop: 4, padding: '6px 8px' } as CSSProperties,
     hint: { margin: '2px 0 0', fontSize: 10, color: '#a1a1aa', fontWeight: 400 } as CSSProperties,
+    kbd: { marginLeft: 6, fontSize: 10, opacity: 0.7, fontWeight: 400 } as CSSProperties,
     watermark: { margin: '12px 0 0', textAlign: 'center', fontSize: 10, color: '#a1a1aa', fontFamily: font } as CSSProperties,
     watermarkLink: { color: '#71717a', textDecoration: 'none', fontWeight: 600 } as CSSProperties,
     thumbs: { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 } as CSSProperties,
