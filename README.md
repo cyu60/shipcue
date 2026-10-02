@@ -4,14 +4,11 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a>
-<img src="https://img.shields.io/badge/tests-53%20passing-2E5BFF?style=flat-square" alt="53 tests passing">
-<img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready">
-<img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-53%20passing-2E5BFF?style=flat-square" alt="53 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # fixqueue: Bug Reports Your Coding Agents Can Fix
 
-**Drop-in report button** &nbsp;•&nbsp; **Queue in your own Postgres** &nbsp;•&nbsp; **Agents claim over MCP** &nbsp;•&nbsp; **No two agents take the same report**
+**Drop-in report button** &nbsp;•&nbsp; **Queue in your own Postgres** &nbsp;•&nbsp; **Agents claim over MCP** &nbsp;•&nbsp; **One report, one agent**
 
 🌐 [Website](https://fixqueue.vercel.app) &nbsp;•&nbsp; ☁️ [Cloud](https://fixqueue.vercel.app/cloud/) &nbsp;•&nbsp; 📖 [Docs](https://fixqueue.vercel.app/docs/) &nbsp;•&nbsp; 📝 [Blog](https://fixqueue.vercel.app/blog/) &nbsp;•&nbsp; ✉️ [Contact](https://fixqueue.vercel.app/contact/)
 
