@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --paper:#F2F4F7; --ink:#16203A; --ticket:#FFD43B; --blue:#2E5BFF; --muted:#5A6478; }
+  * { box-sizing:border-box; margin:0; }
+  body { width:1600px; height:520px; background:var(--paper); font-family:'Instrument Sans',sans-serif; color:var(--ink); overflow:hidden; position:relative;
+    background-image: radial-gradient(#d5dbe5 1.2px, transparent 1.2px); background-size: 22px 22px; }
+  .left { position:absolute; left:96px; top:118px; }
+  .mark { font-family:'Big Shoulders Display'; font-weight:900; font-size:168px; line-height:.86; letter-spacing:-1px; }
+  .tag { margin-top:26px; font-size:34px; color:var(--muted); font-weight:500; }
+  .strip { position:absolute; right:-40px; top:92px; display:flex; gap:18px; align-items:flex-end; transform:rotate(-4deg); }
+  .t { width:150px; height:250px; background:#fff; border:3px solid var(--ink); border-radius:14px; position:relative; padding:20px 16px; display:flex; flex-direction:column; justify-content:space-between; }
+  .t::before { content:''; position:absolute; left:-3px; right:-3px; top:62px; border-top:3px dashed var(--ink); }
+  .t .n { font-family:'Big Shoulders Display'; font-weight:900; font-size:76px; line-height:1; }
+  .t .k { font-size:17px; font-weight:600; }
+  .t .p { font-size:15px; color:var(--muted); }
+  .t.hot { background:var(--ticket); }
+  .t.done { opacity:.35; }
+  .serving { position:absolute; right:96px; bottom:44px; background:var(--ink); color:#fff; border-radius:14px; padding:14px 24px; display:flex; gap:18px; align-items:baseline; }
+  .serving .l { font-size:20px; color:#c4cbe0; }
+  .serving .n { font-family:'Big Shoulders Display'; font-weight:900; font-size:52px; color:var(--ticket); line-height:1; }
+  .serving .a { font-size:20px; }
+</style></head><body>
+  <div class="left">
+    <div class="mark">fixqueue</div>
+    <div class="tag">Bug reports your coding agents can fix</div>
+  </div>
+  <div class="strip">
+    <div class="t done"><div class="k">Bug</div><div><div class="n">39</div><div class="p">fixed · PR #212</div></div></div>
+    <div class="t hot"><div class="k">Bug · Blocking</div><div><div class="n">40</div><div class="p">Editor</div></div></div>
+    <div class="t"><div class="k">Feature</div><div><div class="n">41</div><div class="p">Search</div></div></div>
+    <div class="t"><div class="k">Bug · High</div><div><div class="n">42</div><div class="p">Sign-in</div></div></div>
+    <div class="t"><div class="k">Feature</div><div><div class="n">43</div><div class="p">Journals</div></div></div>
+  </div>
+  <div class="serving"><span class="l">Now serving</span><span class="n">40</span><span class="a">claude-code</span></div>
+</body></html>

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='2' width='24' height='28' rx='5' fill='%23FFD43B' stroke='%2316203A' stroke-width='3'/><text x='16' y='24' font-family='Arial' font-weight='900' font-size='14' text-anchor='middle' fill='%2316203A'>#</text></svg>">
+<title>Docs · fixqueue</title>
+<meta name="description" content="Set up fixqueue: the table, the handler, the button and the agent tools.">
+<meta property="og:title" content="Docs · fixqueue">
+<meta property="og:description" content="Set up fixqueue: the table, the handler, the button and the agent tools.">
+<meta property="og:image" content="https://fixqueue.vercel.app/assets/banner.png">
+</head>
+<body>
+<div class="wrap">
+<header class="site-head"><a class="brand" href="/">fixqueue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
+<main>
+
+<div class="prose">
+<h1>Docs</h1>
+<p class="lede">Set up fixqueue in a Next.js app in about ten minutes. The handler is a plain <code>(Request) =&gt; Response</code> function, so it also runs in Hono, Remix, Bun, Deno and Cloudflare Workers.</p>
+<div class="note">fixqueue is in early preview. The npm package and the public repository open soon. <a href="/contact/">Ask for early access</a>.</div>
+
+<h2>1. Create the table</h2>
+<p>Run <code>sql/schema.sql</code> on your database. It creates one table, <code>fixqueue_reports</code>, and an index that keeps the queue fast. It works on Supabase, InsForge, Neon, RDS and plain Postgres.</p>
+
+<h2>2. Mount the handler</h2>
+<p>In <code>app/api/fixqueue/[...path]/route.ts</code>:</p>
+<pre><code>import { Pool } from 'pg';
+import { createFixqueueHandler, postgresStore } from 'fixqueue/server';
+import { resolveConfig } from 'fixqueue';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+const handler = createFixqueueHandler({
+  store: postgresStore(pool),
+  config: resolveConfig({ areas: [{ value: 'editor', label: 'Editor' }] }),
+  getReporter: async (req) =&gt; (await getSession(req))?.email ?? null,
+  requireReporter: true,
+  agentToken: process.env.FIXQUEUE_TOKEN,
+  onReport: async (report) =&gt; { /* email the team, post to Slack */ },
+});
+
+export { handler as GET, handler as POST };</code></pre>
+<p>Screenshots are stored as small data URLs unless you pass <code>saveScreenshot(file, key)</code> to upload them to S3 or Supabase Storage. A failure inside <code>onReport</code> never fails the report.</p>
+
+<h2>3. Add the button</h2>
+<pre><code>import { ReportButton } from 'fixqueue/react';
+
+&lt;ReportButton
+  areas={[{ value: 'editor', label: 'Editor' }]}
+  accentColor="#16203A"
+  diagnostics={() =&gt; ({ route: location.pathname, lastAction: store.lastAction })}
+/&gt;</code></pre>
+<ul>
+  <li><code>variant="inline"</code> puts a small button in your header, which works better on phones where a floating bubble covers the controls.</li>
+  <li><code>submit={(form) =&gt; action(form)}</code> sends through a Next.js server action instead of <code>fetch</code>.</li>
+  <li><code>diagnostics</code> is a snapshot for whoever fixes the report. Keep it under 64 KB. If it throws, the report still goes through.</li>
+</ul>
+
+<h2>4. Connect an agent</h2>
+<pre><code>claude mcp add fixqueue \
+  -e FIXQUEUE_URL=https://your.app/api/fixqueue \
+  -e FIXQUEUE_TOKEN=... \
+  -- npx fixqueue-mcp</code></pre>
+<p>The agent gets six tools: <code>list_reports</code>, <code>claim_next_report</code>, <code>get_report</code>, <code>claim_report</code>, <code>release_report</code> and <code>close_report</code>. A claimed report arrives as a task prompt with the description, page, screenshots, app snapshot and what to do next: reproduce, write a failing test, fix, close with the PR link.</p>
+
+<h2>HTTP API</h2>
+<p>Everything except filing a report needs <code>Authorization: Bearer $FIXQUEUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
+<pre><code>POST /reports                 file a report (multipart form, from the button)
+GET  /reports?status=open     the queue, most urgent first
+GET  /reports/:id             one report plus its task prompt
+POST /reports/next/claim      take the most urgent open report (204 when empty)
+POST /reports/:id/claim       take a specific report (409 if someone has it)
+POST /reports/:id/release     give it back to the queue
+POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }</code></pre>
+
+<h2>What a report holds</h2>
+<ul>
+  <li>Type: bug or feature request</li>
+  <li>Priority: low, medium, high or blocking</li>
+  <li>Area: the parts of your app you list, plus Other</li>
+  <li>Description, 10 to 4,000 characters</li>
+  <li>Up to 3 screenshots, 5 MB each, shrunk in the browser first</li>
+  <li>Page address, browser and your app snapshot</li>
+  <li>Status: open, claimed, fixed or won't fix, with who claimed it and the resolution</li>
+</ul>
+</div>
+
+</main>
+<footer class="site-foot"><span>fixqueue is open source under the MIT license.</span><span><a href="mailto:chinatchinat123@gmail.com">chinatchinat123@gmail.com</a></span></footer>
+</div>
+</body>
+</html>

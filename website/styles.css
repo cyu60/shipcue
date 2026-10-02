@@ -1,0 +1,99 @@
+:root {
+  --paper: #F2F4F7;
+  --ink: #16203A;
+  --ticket: #FFD43B;
+  --blue: #2E5BFF;
+  --muted: #5A6478;
+  --line: #D5DBE5;
+  --white: #FFFFFF;
+  --display: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
+  --body: 'Instrument Sans', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 17px/1.6 var(--body);
+}
+a { color: var(--blue); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; border-radius: 4px; }
+code, pre { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.86em; }
+code { background: #E4E8EF; padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--ink); color: #E8ECF5; padding: 16px 18px; border-radius: 10px; overflow-x: auto; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+.prose { max-width: 680px; }
+
+/* Header */
+.site-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 0; flex-wrap: wrap; }
+.brand { font: 900 34px/1 var(--display); color: var(--ink); text-decoration: none; letter-spacing: -0.5px; }
+.nav { display: flex; gap: 22px; flex-wrap: wrap; }
+.nav a { color: var(--ink); text-decoration: none; font-weight: 500; }
+.nav a:hover, .nav a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 2px; }
+
+/* Type */
+h1, h2, h3 { font-family: var(--display); font-weight: 900; line-height: 1; letter-spacing: -0.3px; margin: 0; }
+h1 { font-size: clamp(56px, 9vw, 112px); }
+h2 { font-size: clamp(36px, 5vw, 52px); margin-top: 72px; }
+h3 { font-size: 28px; margin-top: 36px; }
+.lede { font-size: 22px; line-height: 1.45; color: var(--muted); max-width: 620px; margin: 22px 0 0; }
+.prose h2 { font-size: 40px; margin-top: 56px; }
+.prose p, .prose ul, .prose ol { margin: 16px 0; }
+
+/* Buttons */
+.actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 32px; }
+.btn { display: inline-block; padding: 12px 20px; border-radius: 10px; font: 600 16px/1 var(--body); text-decoration: none; border: 2px solid var(--ink); cursor: pointer; }
+.btn-ink { background: var(--ink); color: var(--white); }
+.btn-plain { background: transparent; color: var(--ink); }
+
+/* Hero */
+.hero { padding: 48px 0 24px; }
+
+/* Queue demo: the one loud thing on the site */
+.demo { margin-top: 56px; background: var(--white); border: 2px solid var(--ink); border-radius: 18px; padding: 24px; }
+.demo-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.serving { display: flex; align-items: baseline; gap: 14px; background: var(--ink); color: #C4CBE0; border-radius: 12px; padding: 10px 18px; }
+.serving b { font: 900 44px/1 var(--display); color: var(--ticket); min-width: 2ch; }
+.serving span:last-child { color: var(--white); }
+.demo-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.strip { list-style: none; margin: 24px 0 0; padding: 4px 0 8px; display: flex; gap: 14px; overflow-x: auto; min-height: 210px; }
+.t { flex: 0 0 136px; height: 196px; border: 3px solid var(--ink); border-radius: 12px; background: var(--white); padding: 14px; display: flex; flex-direction: column; justify-content: space-between; position: relative; }
+.t::before { content: ''; position: absolute; left: -3px; right: -3px; top: 52px; border-top: 3px dashed var(--ink); }
+.t .k { font-size: 14px; font-weight: 600; }
+.t .n { font: 900 64px/1 var(--display); }
+.t .p { font-size: 13px; color: var(--muted); }
+.t.claimed { background: var(--ticket); }
+.t.fixed { opacity: 0.35; }
+.t.enter { animation: drop 360ms cubic-bezier(.2,.8,.3,1.2); }
+@keyframes drop { from { transform: translateY(-24px) rotate(-6deg); opacity: 0; } }
+.demo-log { margin: 16px 0 0; font-size: 15px; color: var(--muted); min-height: 1.6em; }
+.empty { align-self: center; color: var(--muted); }
+
+/* Three parts, read left to right as the flow they are */
+.flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 28px; }
+.flow h3 { margin-top: 0; font-size: 30px; }
+.flow p { margin: 10px 0 0; color: var(--muted); }
+
+/* Posts */
+.post-list { list-style: none; padding: 0; margin: 28px 0 0; }
+.post-list li { padding: 20px 0; border-top: 2px solid var(--ink); }
+.post-list a { font: 900 34px/1.05 var(--display); color: var(--ink); text-decoration: none; }
+.post-list a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: 15px; margin-top: 6px; }
+
+.note { background: var(--ticket); border-radius: 12px; padding: 16px 20px; margin: 24px 0; }
+
+.site-foot { margin-top: 96px; padding: 28px 0 48px; border-top: 2px solid var(--ink); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 15px; }
+.site-foot a { color: var(--ink); }
+
+@media (max-width: 760px) {
+  body { font-size: 16px; }
+  .flow { grid-template-columns: 1fr; gap: 24px; }
+  .lede { font-size: 19px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .t.enter { animation: none; }
+}

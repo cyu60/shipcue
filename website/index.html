@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='2' width='24' height='28' rx='5' fill='%23FFD43B' stroke='%2316203A' stroke-width='3'/><text x='16' y='24' font-family='Arial' font-weight='900' font-size='14' text-anchor='middle' fill='%2316203A'>#</text></svg>">
+<title>fixqueue: bug reports your coding agents can fix</title>
+<meta name="description" content="A report button, a queue in your own Postgres, and an MCP server so coding agents can fix what people report.">
+<meta property="og:title" content="fixqueue: bug reports your coding agents can fix">
+<meta property="og:description" content="A report button, a queue in your own Postgres, and an MCP server so coding agents can fix what people report.">
+<meta property="og:image" content="https://fixqueue.vercel.app/assets/banner.png">
+</head>
+<body>
+<div class="wrap">
+<header class="site-head"><a class="brand" href="/">fixqueue</a><nav class="nav" aria-label="Main"><a href="/" aria-current="page">Home</a><a href="/docs/">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
+<main>
+
+<section class="hero">
+  <h1>Bug reports your coding agents can fix</h1>
+  <p class="lede">A report button for your app, a queue in your own Postgres, and an MCP server so Claude Code or Codex can take the most urgent report, fix it and close it with the PR link.</p>
+  <div class="actions"><a class="btn btn-ink" href="/docs/">Read the docs</a><a class="btn btn-plain" href="/blog/agents-should-read-your-bug-reports/">Why we built it</a></div>
+
+  <div class="demo" aria-label="Try the queue">
+    <div class="demo-bar">
+      <div class="serving" aria-live="polite"><span>Now serving</span><b id="serving">--</b><span id="agent">nobody yet</span></div>
+      <div class="demo-actions">
+        <button class="btn btn-plain" id="file" type="button">File a report</button>
+        <button class="btn btn-ink" id="claim" type="button">Claim next</button>
+        <button class="btn btn-plain" id="fix" type="button">Close as fixed</button>
+      </div>
+    </div>
+    <ol class="strip" id="strip"></ol>
+    <p class="demo-log" id="log">Try it: file a few reports, then claim one the way an agent would. The most urgent goes first.</p>
+  </div>
+</section>
+
+<h2>How it works</h2>
+<div class="flow">
+  <div><h3>Someone reports it</h3><p>The button opens a small form: bug or feature, what happened, how bad it is, where in the app. People can paste a screenshot. The page address, browser and a snapshot of app state you choose come along automatically.</p></div>
+  <div><h3>It joins the queue</h3><p>Reports go into one table in your own Postgres, ordered by priority and then by age. Nothing goes to a third-party dashboard.</p></div>
+  <div><h3>An agent fixes it</h3><p>The MCP server hands an agent the top report as a ready-to-run task. Claims are atomic, so several agents can work the queue at once and never take the same report.</p></div>
+</div>
+
+<h2>Add it in three steps</h2>
+<div class="prose">
+<p>Create the table, mount one handler, drop in the button.</p>
+<pre><code>import { ReportButton } from 'fixqueue/react';
+
+&lt;ReportButton
+  areas={[{ value: 'editor', label: 'Editor' }]}
+  diagnostics={() =&gt; ({ route: location.pathname })}
+/&gt;</code></pre>
+<p><a href="/docs/">Full setup in the docs</a></p>
+</div>
+
+<script>
+(() => {
+  const kinds = [
+    ['Bug', 'blocking', 'Editor'], ['Feature', 'low', 'Search'], ['Bug', 'high', 'Sign-in'],
+    ['Bug', 'medium', 'Journals'], ['Feature', 'medium', 'Sharing'], ['Bug', 'low', 'Settings'],
+  ];
+  const rank = { blocking: 3, high: 2, medium: 1, low: 0 };
+  const label = { blocking: 'Blocking', high: 'High', medium: 'Medium', low: 'Low' };
+  let next = 41, i = 0;
+  const q = [
+    { n: 39, type: 'Bug', pr: 'high', area: 'Editor', status: 'fixed' },
+    { n: 40, type: 'Feature', pr: 'medium', area: 'Search', status: 'open' },
+  ];
+  const $ = (id) => document.getElementById(id);
+  const log = (t) => ($('log').textContent = t);
+
+  function render(fresh) {
+    const strip = $('strip');
+    strip.innerHTML = '';
+    const order = [...q].sort((a, b) => (a.status === 'fixed') - (b.status === 'fixed') || (b.status === 'claimed') - (a.status === 'claimed') || rank[b.pr] - rank[a.pr] || a.n - b.n);
+    for (const r of order) {
+      const li = document.createElement('li');
+      li.className = 't ' + r.status + (r.n === fresh ? ' enter' : '');
+      li.innerHTML = `<div class="k">${r.type}</div><div><div class="n">${r.n}</div><div class="p">${r.status === 'fixed' ? 'Fixed' : label[r.pr] + ' · ' + r.area}</div></div>`;
+      strip.appendChild(li);
+    }
+    const claimed = q.find((r) => r.status === 'claimed');
+    $('serving').textContent = claimed ? claimed.n : '--';
+    $('agent').textContent = claimed ? 'claude-code' : 'nobody yet';
+  }
+
+  $('file').onclick = () => {
+    const [type, pr, area] = kinds[i++ % kinds.length];
+    const n = next++;
+    q.push({ n, type, pr, area, status: 'open' });
+    render(n);
+    log(`#${n} filed: ${type.toLowerCase()} in ${area}, ${label[pr].toLowerCase()} priority. Page, browser and app snapshot attached.`);
+  };
+  $('claim').onclick = () => {
+    if (q.some((r) => r.status === 'claimed')) return log('Close the current report first. One agent, one report at a time.');
+    const open = q.filter((r) => r.status === 'open').sort((a, b) => rank[b.pr] - rank[a.pr] || a.n - b.n);
+    if (!open.length) return log('The queue is empty. File a report first.');
+    open[0].status = 'claimed';
+    render();
+    log(`claude-code claimed #${open[0].n}, the most urgent open report, and got it as a task prompt.`);
+  };
+  $('fix').onclick = () => {
+    const r = q.find((x) => x.status === 'claimed');
+    if (!r) return log('Nothing is claimed. Claim the next report first.');
+    r.status = 'fixed';
+    render();
+    log(`#${r.n} closed as fixed with the PR link. The reporter can see it is done.`);
+  };
+  render();
+})();
+</script>
+
+</main>
+<footer class="site-foot"><span>fixqueue is open source under the MIT license.</span><span><a href="mailto:chinatchinat123@gmail.com">chinatchinat123@gmail.com</a></span></footer>
+</div>
+</body>
+</html>
