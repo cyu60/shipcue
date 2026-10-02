@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { TYPE_LABEL, type Board, type BoardItem } from '../core';
+import { type Board, type BoardItem, type ReportType } from '../core';
+import { fill, resolveText, type ShipcueText } from './text';
 
 type View = 'open' | 'fixed' | 'all' | 'changelog';
 export type BoardTabStyle = 'pills' | 'tabs';
@@ -31,6 +32,8 @@ export interface ShipcueBoardProps {
   layout?: BoardLayout;
   /** The small View control that lets each viewer pick. On by default. */
   viewPicker?: boolean;
+  /** Your own words for the tabs, empty states and labels; see DEFAULT_TEXT. */
+  text?: Partial<ShipcueText>;
   /** Heading color and the small accents. */
   accentColor?: string;
   /** Re-read the board this often while the page is open (ms). 0 turns it off. */
@@ -55,6 +58,7 @@ export function ShipcueBoard({
   tabStyle: tabStyleProp = 'pills',
   layout: layoutProp = 'cards',
   viewPicker = true,
+  text: textProp,
   accentColor = '#16203A',
   refreshMs = 60_000,
   liveMs = 5_000,
@@ -63,6 +67,7 @@ export function ShipcueBoard({
 }: ShipcueBoardProps) {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const t = resolveText(textProp);
   const [view, setView] = useState<View>(initialView === 'queue' ? 'open' : initialView);
   // Each viewer's own pick (shipcue report bf463120), over the app's default.
   const [picked, setPicked] = useState<{ tabStyle?: BoardTabStyle; layout?: BoardLayout }>({});
@@ -134,21 +139,21 @@ export function ShipcueBoard({
   }, [endpoint, refreshMs, liveMs]);
 
   if (error && !board) return <p className={className} style={{ ...s.muted, ...style }}>{error}</p>;
-  if (!board) return <p className={className} style={{ ...s.muted, ...style }}>Loading…</p>;
+  if (!board) return <p className={className} style={{ ...s.muted, ...style }}>{t.loading}</p>;
 
   // With both lists, pill tabs: Open, Fixed, All, Changelog, with counts
   // (shipcue reports 9fdd0b45, 15720123).
   const TABS: { id: View; label: string; count?: number }[] = [
-    { id: 'open', label: 'Open', count: board.queue.length },
-    { id: 'fixed', label: 'Fixed', count: board.changelog.length },
-    { id: 'all', label: 'All', count: board.queue.length + board.changelog.length },
-    { id: 'changelog', label: 'Changelog' },
+    { id: 'open', label: t.open, count: board.queue.length },
+    { id: 'fixed', label: t.fixed, count: board.changelog.length },
+    { id: 'all', label: t.all, count: board.queue.length + board.changelog.length },
+    { id: 'changelog', label: t.changelog },
   ];
   const current: View | 'queue' = show === 'both' ? view : show;
   const list = (items: BoardItem[], done = false) => (
     <ul style={layout === 'list' ? s.listCompact : s.list}>
       {items.map((r) => (
-        <Item key={r.id} r={r} accent={accentColor} done={done} compact={layout === 'list'} />
+        <Item key={r.id} r={r} t={t} accent={accentColor} done={done} compact={layout === 'list'} />
       ))}
     </ul>
   );
@@ -186,20 +191,20 @@ export function ShipcueBoard({
       )}
       {viewPicker && (
         <span style={s.picker} aria-label="View">
-          <Toggle label="Tab style" value={tabStyle} options={[['pills', 'Pills'], ['tabs', 'Tabs']]} onPick={(v) => pick({ tabStyle: v })} />
+          <Toggle label="Tab style" value={tabStyle} options={[['pills', t.pills], ['tabs', t.tabs]]} onPick={(v) => pick({ tabStyle: v })} />
           <span aria-hidden="true"> · </span>
-          <Toggle label="Layout" value={layout} options={[['cards', 'Cards'], ['list', 'List']]} onPick={(v) => pick({ layout: v })} />
+          <Toggle label="Layout" value={layout} options={[['cards', t.cards], ['list', t.list]]} onPick={(v) => pick({ layout: v })} />
         </span>
       )}
         </div>
       )}
       {current === 'open' && (
         <section>
-          {board.queue.length === 0 ? <p style={s.muted}>Nothing waiting.</p> : list(board.queue)}
+          {board.queue.length === 0 ? <p style={s.muted}>{t.nothingWaiting}</p> : list(board.queue)}
         </section>
       )}
       {current === 'fixed' && (
-        <section>{board.changelog.length === 0 ? <p style={s.muted}>Nothing fixed yet.</p> : list(board.changelog, true)}</section>
+        <section>{board.changelog.length === 0 ? <p style={s.muted}>{t.nothingFixed}</p> : list(board.changelog, true)}</section>
       )}
       {current === 'all' && (
         <section>
@@ -209,29 +214,29 @@ export function ShipcueBoard({
       )}
       {current === 'queue' && (
         <section>
-          <h2 style={{ ...s.h2, color: accentColor }}>Queue</h2>
+          <h2 style={{ ...s.h2, color: accentColor }}>{t.queueTitle}</h2>
           <p style={s.muted}>
-            {board.queue.length === 0 ? 'Nothing waiting.' : `${board.queue.length} open, most urgent first.`}
-            {board.changelog.length > 0 ? ' Done ones stay below, greyed out.' : ''}
+            {board.queue.length === 0 ? t.nothingWaiting : fill(t.queueSummary, { n: board.queue.length })}
+            {board.changelog.length > 0 ? ` ${t.doneBelow}` : ''}
           </p>
           <ul style={layout === 'list' ? s.listCompact : s.list}>
             {board.queue.map((r) => (
-              <Item key={r.id} r={r} accent={accentColor} compact={layout === 'list'} />
+              <Item key={r.id} r={r} t={t} accent={accentColor} compact={layout === 'list'} />
             ))}
             {/* Finished ones stay in the queue, greyed out, so nothing seems to vanish. */}
             {board.changelog.map((r) => (
-              <Item key={r.id} r={r} accent={accentColor} done compact={layout === 'list'} />
+              <Item key={r.id} r={r} t={t} accent={accentColor} done compact={layout === 'list'} />
             ))}
           </ul>
         </section>
       )}
       {current === 'changelog' && (
         <section>
-          {show !== 'both' && <h2 style={{ ...s.h2, color: accentColor }}>Changelog</h2>}
-          <p style={s.muted}>{board.changelog.length === 0 ? 'Nothing shipped yet.' : 'What was fixed, latest first.'}</p>
+          {show !== 'both' && <h2 style={{ ...s.h2, color: accentColor }}>{t.changelog}</h2>}
+          <p style={s.muted}>{board.changelog.length === 0 ? t.nothingShipped : t.latestFirst}</p>
           <ul style={layout === 'list' ? s.listCompact : s.list}>
             {board.changelog.map((r) => (
-              <Item key={r.id} r={r} accent={accentColor} changelog compact={layout === 'list'} />
+              <Item key={r.id} r={r} t={t} accent={accentColor} changelog compact={layout === 'list'} />
             ))}
           </ul>
         </section>
@@ -265,13 +270,15 @@ function Toggle<T extends string>({ label, value, options, onPick }: { label: st
   );
 }
 
-function Item({ r, accent, changelog = false, done = false, compact = false }: { r: BoardItem; accent: string; changelog?: boolean; done?: boolean; compact?: boolean }) {
+const typeLabel = (t: ShipcueText, type: ReportType) => (type === 'bug' ? t.bugTab : type === 'feature' ? t.featureTab : t.taskTab);
+
+function Item({ r, t, accent, changelog = false, done = false, compact = false }: { r: BoardItem; t: ShipcueText; accent: string; changelog?: boolean; done?: boolean; compact?: boolean }) {
   if (compact) {
     // One line: type, the fix (or the ask), date. No screenshots.
     const text = changelog && r.resolution ? r.resolution : r.description;
     return (
       <li style={done ? { ...s.row, ...s.done } : s.row}>
-        <span style={{ ...s.tag, borderColor: accent, color: accent, flex: 'none' }}>{TYPE_LABEL[r.type]}</span>
+        <span style={{ ...s.tag, borderColor: accent, color: accent, flex: 'none' }}>{typeLabel(t, r.type)}</span>
         <span style={s.rowText} title={text}>
           {text}
         </span>
@@ -282,16 +289,16 @@ function Item({ r, accent, changelog = false, done = false, compact = false }: {
   return (
     <li style={done ? { ...s.item, ...s.done } : s.item}>
       <div style={s.meta}>
-        <span style={{ ...s.tag, borderColor: accent, color: accent }}>{TYPE_LABEL[r.type]}</span>
-        {done && <span style={s.tag}>Done</span>}
-        {!changelog && r.status === 'claimed' && <span style={s.tag}>In progress</span>}
+        <span style={{ ...s.tag, borderColor: accent, color: accent }}>{typeLabel(t, r.type)}</span>
+        {done && <span style={s.tag}>{t.done}</span>}
+        {!changelog && r.status === 'claimed' && <span style={s.tag}>{t.inProgress}</span>}
         {!changelog && (r.priority === 'high' || r.priority === 'blocking') && <span style={s.tag}>{r.priority}</span>}
         <span>{day(changelog ? r.updatedAt : r.createdAt)}</span>
       </div>
       {changelog && r.resolution ? (
         <>
           <p style={s.main}>{r.resolution}</p>
-          <p style={s.sub}>Asked for: {r.description}</p>
+          <p style={s.sub}>{t.askedFor} {r.description}</p>
         </>
       ) : (
         <p style={s.main}>{r.description}</p>

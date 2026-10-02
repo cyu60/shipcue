@@ -6,3 +6,4 @@ export { openReport, closeReport, defaultHotkeys, display as displayHotkey, type
 export { ShipcueBoard, ShipcueQueue, ShipcueChangelog, type ShipcueBoardProps, type BoardTabStyle, type BoardLayout } from './Board';
 export type { Limits } from '../core';
 export { OutlinePreview, parseOutline, isOutlineText, type OutlineNode } from './outline';
+export { DEFAULT_TEXT, type ShipcueText } from './text';

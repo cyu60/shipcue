@@ -6,6 +6,7 @@ import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LA
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
 import { isOutlineText, OutlinePreview } from './outline';
+import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
 
 export type SubmitResult = { id: string } | { error: string };
@@ -23,8 +24,13 @@ export interface ReportButtonProps {
   variant?: 'floating' | 'inline';
   /** Button and focus colour. */
   accentColor?: string;
-  /** Shown after a report is sent, e.g. a link to your queue. */
+  /** Shown after a report is sent, e.g. a link to your queue. Same as text.sent, but can be any node. */
   successMessage?: React.ReactNode;
+  /**
+   * Your own words for anything the panel says: tab names, headings, placeholders, buttons,
+   * links, the thanks note. Leave out what you are happy with; see DEFAULT_TEXT.
+   */
+  text?: Partial<ShipcueText>;
   onSubmitted?: (id: string) => void;
   /**
    * Upload a video for a filed report yourself, e.g. straight from the browser
@@ -125,17 +131,16 @@ export interface ExtraTab {
   render: (draft: { text: string; context: string | null; close: () => void }) => React.ReactNode;
 }
 
-const TYPES: { value: ReportType; label: string; placeholder: string }[] = [
-  { value: 'bug', label: 'Bug', placeholder: 'I pressed Enter at the end of a heading and the heading disappeared.' },
-  { value: 'feature', label: 'Feature request', placeholder: 'It would help to nest pages under other pages.' },
-  { value: 'task', label: 'Agent task', placeholder: 'Add a CSV export to the reports page, with the same columns as the table.' },
+const typesFor = (t: ShipcueText): { value: ReportType; label: string; placeholder: string }[] => [
+  { value: 'bug', label: t.bugTab, placeholder: t.bugPlaceholder },
+  { value: 'feature', label: t.featureTab, placeholder: t.featurePlaceholder },
+  { value: 'task', label: t.taskTab, placeholder: t.taskPlaceholder },
 ];
-
-const HEADING: Record<ReportType, [string, string]> = {
-  bug: ['Report a bug', 'Say what you did and what happened.'],
-  feature: ['Request a feature', 'Say what you want and why it helps.'],
-  task: ['New agent task', 'Delegate a task to your agent.'],
-};
+const headingFor = (t: ShipcueText): Record<ReportType, [string, string]> => ({
+  bug: [t.bugTitle, t.bugSubtitle],
+  feature: [t.featureTitle, t.featureSubtitle],
+  task: [t.taskTitle, t.taskSubtitle],
+});
 
 const ACCEPT = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
@@ -185,13 +190,14 @@ function ReportPanel({
   diagnostics,
   variant = 'floating',
   accentColor = '#18181b',
-  successMessage = 'Thanks. It is in the queue.',
+  successMessage,
+  text: textProp,
   onSubmitted,
   uploadVideo,
   captureErrors = true,
   pastReportsHref,
-  pastReportsLabel = 'Past reports',
-  seeReportsLabel = 'See your CueLog',
+  pastReportsLabel,
+  seeReportsLabel,
   limits,
   onEditShortcuts,
   watermark = true,
@@ -203,7 +209,14 @@ function ReportPanel({
   renderContext,
   trigger = true,
 }: ReportButtonProps) {
-  const tabs = useMemo(() => (types?.length ? TYPES.filter((t) => types.includes(t.value)) : TYPES), [types]);
+  // The app's words over shipcue's (the older pastReportsLabel/seeReportsLabel props still work).
+  const t = useMemo(
+    () => resolveText({ pastReports: pastReportsLabel, seeReports: seeReportsLabel }, textProp),
+    [pastReportsLabel, seeReportsLabel, textProp],
+  );
+  const TYPES = useMemo(() => typesFor(t), [t]);
+  const HEADING = useMemo(() => headingFor(t), [t]);
+  const tabs = useMemo(() => (types?.length ? TYPES.filter((x) => types.includes(x.value)) : TYPES), [types, TYPES]);
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
@@ -672,7 +685,7 @@ function ReportPanel({
                 <div style={{ marginTop: 8 }}>
                   <div style={{ ...s.row, alignItems: 'center' }}>
                     <label htmlFor={`${uid}-context`} style={s.label}>
-                      Context
+                      {t.context}
                     </label>
                     <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
                       <span role="radiogroup" aria-label="Show the context as" style={{ fontSize: 11 }}>
@@ -686,13 +699,13 @@ function ReportPanel({
                               onClick={() => setContextView(v)}
                               style={{ ...s.linkBtn, textDecoration: 'none', padding: '0 3px', color: (v === 'preview') === showPreview ? '#18181b' : '#a1a1aa', fontWeight: (v === 'preview') === showPreview ? 600 : 400 }}
                             >
-                              {v === 'preview' ? 'Preview' : 'Raw'}
+                              {v === 'preview' ? t.preview : t.raw}
                             </button>
                           </span>
                         ))}
                       </span>
                       <button type="button" onClick={() => setContext(null)} aria-label="Remove context" style={s.linkBtn}>
-                        remove
+                        {t.remove}
                       </button>
                     </span>
                   </div>
@@ -715,7 +728,7 @@ function ReportPanel({
               <div style={s.grid}>
                 <div>
                   <label htmlFor={`${uid}-priority`} style={s.label}>
-                    Priority
+                    {t.priority}
                   </label>
                   <select id={`${uid}-priority`} value={priority} onChange={(e) => setPriority(e.target.value as Priority)} style={s.select}>
                     {PRIORITIES.map((p) => (
@@ -728,7 +741,7 @@ function ReportPanel({
                 </div>
                 <div>
                   <label htmlFor={`${uid}-area`} style={s.label}>
-                    Where
+                    {t.where}
                   </label>
                   <select id={`${uid}-area`} value={area} onChange={(e) => setArea(e.target.value)} style={s.select}>
                     {config.areas.map((a) => (
@@ -776,8 +789,8 @@ function ReportPanel({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    aria-label={filesOn ? 'Add a screenshot or file' : 'Add a screenshot'}
-                    title={filesOn ? 'Add a screenshot or file' : 'Add a screenshot'}
+                    aria-label={filesOn ? t.addScreenshotOrFile : t.addScreenshot}
+                    title={filesOn ? t.addScreenshotOrFile : t.addScreenshot}
                     style={s.addShot}
                   >
                     <svg data-icon="photo" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -789,8 +802,7 @@ function ReportPanel({
                 )}
               </div>
               <p style={s.hint}>
-                Paste or drop {filesOn ? 'screenshots, files' : 'screenshots'}
-                {videoOn ? ' or a video' : ''} into the text box, or add up to {lim.maxScreenshots}.
+                {fill(t.attachHint, { what: `${filesOn ? 'screenshots, files' : 'screenshots'}${videoOn ? ' or a video' : ''}`, max: lim.maxScreenshots })}
               </p>
 
               {videoOn && (
@@ -810,11 +822,11 @@ function ReportPanel({
                             <rect x="2.5" y="6" width="13" height="12" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
                             <path d="m15.5 10.5 5-3v9l-5-3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
                           </svg>
-                          Record screen
+                          {t.recordScreen}
                         </button>
                       )}
                       <button type="button" onClick={() => videoInputRef.current?.click()} style={s.linkBtn}>
-                        or attach a video
+                        {t.attachVideo}
                       </button>
                     </>
                   )}
@@ -841,9 +853,9 @@ function ReportPanel({
               )}
               {page && (
                 <p style={{ ...s.hint, marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  Page: {decodeURIComponent(new URL(page).pathname)}{' '}
+                  {t.page} {decodeURIComponent(new URL(page).pathname)}{' '}
                   <button type="button" onClick={() => setPage(null)} style={s.linkBtn}>
-                    don&apos;t attach
+                    {t.dontAttach}
                   </button>
                 </p>
               )}
@@ -872,7 +884,7 @@ function ReportPanel({
                 <span style={{ ...s.hint, marginTop: 0 }}>
                   {pastReportsHref && (
                     <a href={pastReportsHref} style={{ color: '#71717a' }}>
-                      {pastReportsLabel}
+                      {t.pastReports}
                     </a>
                   )}
                   {pastReportsHref && (hotkeys !== false || onEditShortcuts) && ' · '}
@@ -891,12 +903,12 @@ function ReportPanel({
                       aria-expanded={onEditShortcuts ? undefined : editingKeys}
                       style={{ ...s.linkBtn, fontSize: 10, textDecoration: 'none', color: '#71717a' }}
                     >
-                      Shortcuts
+                      {t.shortcuts}
                     </button>
                   )}
                 </span>
                 <button type="button" onClick={send} disabled={!canSend} style={canSend ? s.send : { ...s.send, opacity: 0.5, cursor: 'not-allowed' }}>
-                  {busy ? 'Sending…' : 'Send'}
+                  {busy ? t.sending : t.send}
                   <span style={s.kbd} aria-hidden="true">{isMac() ? '⌘↵' : 'Ctrl+↵'}</span>
                 </button>
               </div>
@@ -929,20 +941,20 @@ function ReportPanel({
 
       {sent && (
         <div role="status" style={s.sent}>
-          {successMessage}
+          {successMessage ?? t.sent}
           {pastReportsHref && (
             <>
               {' '}
               <a href={pastReportsHref} style={{ color: 'inherit', fontWeight: 600 }}>
-                {seeReportsLabel}
+                {t.seeReports}
               </a>
             </>
           )}
-          {sent.warning && <p style={{ margin: '4px 0 0', color: '#be123c' }}>The video was not attached: {sent.warning}</p>}
+          {sent.warning && <p style={{ margin: '4px 0 0', color: '#be123c' }}>{t.videoNotAttached} {sent.warning}</p>}
         </div>
       )}
       {recording !== null && (
-        <button type="button" onClick={() => recorderRef.current?.stop()} aria-label="Stop recording" title="Stop recording and attach it to the report" style={s.recording}>
+        <button type="button" onClick={() => recorderRef.current?.stop()} aria-label={t.stopRecording} title={t.stopRecording} style={s.recording}>
           ● {Math.floor(recording / 60)}:{String(recording % 60).padStart(2, '0')}
         </button>
       )}
@@ -950,8 +962,8 @@ function ReportPanel({
         <button
           type="button"
           onClick={() => (open ? close() : openOn())}
-          aria-label={open ? 'Close report' : 'Report a bug or request a feature'}
-          title="Report a bug or request a feature"
+          aria-label={open ? t.closeButton : t.openButton}
+          title={t.openButton}
           style={variant === 'floating' ? s.fab : s.inlineBtn}
         >
           <svg data-icon="ship" width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
