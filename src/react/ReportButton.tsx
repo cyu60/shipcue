@@ -91,6 +91,11 @@ export interface ReportButtonProps {
    */
   trigger?: boolean;
   /**
+   * Your own mark on the button in place of shipcue's sailboat, e.g. your app's logo (about 22px
+   * on the floating button, 18px inline). The button keeps its accent background.
+   */
+  launcherIcon?: React.ReactNode;
+  /**
    * Hide shipcue (button and hotkeys) unless the page is opened with ?<showParam>=true, e.g.
    * showParam="shipcue" for ?shipcue=true. Remembered for the tab; ?shipcue=false hides it again.
    * Unset (the default): always shown.
@@ -208,6 +213,7 @@ function ReportPanel({
   extraTabs,
   renderContext,
   trigger = true,
+  launcherIcon,
 }: ReportButtonProps) {
   // The app's words over shipcue's (the older pastReportsLabel/seeReportsLabel props still work).
   const t = useMemo(
@@ -987,12 +993,14 @@ function ReportPanel({
           title={t.openButton}
           style={variant === 'floating' ? s.fab : s.inlineBtn}
         >
+          {launcherIcon ?? (
           <svg data-icon="ship" width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 3v12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             <path d="M12 4.5 18 13h-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
             <path d="M12 7.5 7 13h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
             <path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
           </svg>
+          )}
         </button>
       )}
     </div>

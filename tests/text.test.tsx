@@ -38,3 +38,17 @@ describe('each app can use its own words', () => {
     expect(screen.getByText('All clear.')).toBeInTheDocument();
   });
 });
+
+describe('launcherIcon (Habitect report 4d0da3e8)', () => {
+  it("draws the app's mark on the button instead of the sailboat", () => {
+    const { container } = render(<ReportButton areas={[]} submit={async () => ({ id: 'r1' })} launcherIcon={<svg data-icon="brand" />} />);
+    const button = screen.getByRole('button', { name: DEFAULT_TEXT.openButton });
+    expect(button.querySelector('[data-icon="brand"]')).not.toBeNull();
+    expect(container.querySelector('[data-icon="ship"]')).toBeNull();
+  });
+
+  it('keeps the sailboat by default', () => {
+    render(<ReportButton areas={[]} submit={async () => ({ id: 'r1' })} />);
+    expect(screen.getByRole('button', { name: DEFAULT_TEXT.openButton }).querySelector('[data-icon="ship"]')).not.toBeNull();
+  });
+});
