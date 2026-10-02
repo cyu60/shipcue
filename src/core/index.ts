@@ -68,6 +68,7 @@ export function formatBytes(bytes: number): string {
 const OTHER: Area = { value: 'other', label: 'Other' };
 const MAX_PAGE_URL = 500;
 const MAX_USER_AGENT = 300;
+const MAX_CONTEXT = 20_000;
 const MAX_DIAGNOSTICS_BYTES = 64 * 1024;
 const HEADLINE_MAX = 60;
 
@@ -94,6 +95,8 @@ export interface ReportInput {
   userAgent: string;
   /** A snapshot of app state from the `diagnostics` callback, as JSON. */
   diagnostics: Record<string, unknown>;
+  /** Text picked out on the page (a selection or selected blocks) that the report is about. */
+  context?: string | null;
 }
 
 /** A stored report, as the queue and agents see it. */
@@ -109,6 +112,7 @@ export interface Report extends ReportInput {
   resolution: string | null;
   /** A screen recording or video of the problem, if one was attached. */
   video: string | null;
+  context: string | null;
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -136,6 +140,9 @@ export function validateReport(raw: Record<string, unknown>, config: ShipcueConf
   const area = String(raw.area ?? OTHER.value);
   if (!config.areas.some((a) => a.value === area)) return { ok: false, error: 'Pick where it happened.' };
 
+  const context = String(raw.context ?? '').trim() || null;
+  if (context && context.length > MAX_CONTEXT) return { ok: false, error: 'Keep the context under 20,000 characters.' };
+
   const diagnostics = isPlainObject(raw.diagnostics) ? raw.diagnostics : {};
   if (JSON.stringify(diagnostics).length > MAX_DIAGNOSTICS_BYTES) {
     return { ok: false, error: 'Diagnostics must be under 64 KB.' };
@@ -151,6 +158,7 @@ export function validateReport(raw: Record<string, unknown>, config: ShipcueConf
       pageUrl: String(raw.pageUrl ?? '').slice(0, MAX_PAGE_URL),
       userAgent: String(raw.userAgent ?? '').slice(0, MAX_USER_AGENT),
       diagnostics,
+      context,
     },
   };
 }
@@ -174,6 +182,7 @@ export function buildBody(r: Report, config: ShipcueConfig): string {
   return [
     r.description.trim(),
     '',
+    ...(r.context ? ['Context:', r.context, ''] : []),
     ...(r.screenshots.length ? ['Screenshots:', ...r.screenshots, ''] : []),
     ...(r.video ? [`Video: ${r.video}`, ''] : []),
     '---',
@@ -210,6 +219,7 @@ export function toAgentPrompt(r: Report, config: ShipcueConfig): string {
     '',
     r.description.trim(),
     '',
+    ...(r.context ? ['## Context', 'Picked out on the page by the person who filed it:', '', r.context, ''] : []),
     '## Where',
     `Report id: ${r.id}`,
     ...(r.pageUrl ? [`Page: ${r.pageUrl}`] : []),

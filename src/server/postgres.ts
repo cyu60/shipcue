@@ -22,6 +22,7 @@ interface Row {
   claimed_at: Date | string | null;
   resolution: string | null;
   video: string | null;
+  context: string | null;
   created_at: Date | string;
 }
 
@@ -45,11 +46,12 @@ function toReport(r: Row): Report {
     claimedAt: iso(r.claimed_at),
     resolution: r.resolution,
     video: r.video ?? null,
+    context: r.context ?? null,
   };
 }
 
 const COLUMNS =
-  'id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, created_at';
+  'id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, context, created_at';
 const QUEUE_ORDER = 'ORDER BY priority_rank DESC, created_at, id';
 
 /** Stores reports in the shipcue_reports table from sql/schema.sql. Use a server-side connection. */
@@ -65,8 +67,8 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports'): ReportS
   return {
     async create(input) {
       const r = await one(
-        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9) RETURNING ${COLUMNS}`,
+        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, context)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10) RETURNING ${COLUMNS}`,
         [
           input.type,
           input.priority,
@@ -77,6 +79,7 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports'): ReportS
           JSON.stringify(input.diagnostics),
           input.screenshots,
           input.reporter,
+          input.context ?? null,
         ],
       );
       return r!;

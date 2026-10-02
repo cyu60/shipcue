@@ -35,6 +35,7 @@ export function memoryStore(): ReportStore {
     async create(input) {
       const r: Report = {
         ...input,
+        context: input.context ?? null,
         id: crypto.randomUUID(),
         status: 'open',
         createdAt: now(),

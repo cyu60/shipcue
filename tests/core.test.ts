@@ -35,7 +35,7 @@ describe('validateReport', () => {
     const r = validateReport({ ...good, description: '  ' + good.description + '  ' }, config);
     expect(r).toEqual({
       ok: true,
-      value: { ...good, pageUrl: '', userAgent: '', diagnostics: {} },
+      value: { ...good, pageUrl: '', userAgent: '', diagnostics: {}, context: null },
     });
   });
   it('defaults priority to medium and area to other', () => {
@@ -98,6 +98,7 @@ const report: Report = {
   claimedAt: null,
   resolution: null,
   video: null,
+  context: null,
 };
 
 describe('buildBody', () => {
@@ -181,5 +182,23 @@ describe('agent tasks', () => {
     expect(p).toContain('Do what it asks');
     expect(p).toContain('came from the person who filed it');
     expect(p).not.toContain('Reproduce it');
+  });
+});
+
+describe('context', () => {
+  const good = { type: 'bug', priority: 'medium', area: 'editor', description: 'Enter deletes the heading' };
+  it('keeps the context trimmed, and empty as null', () => {
+    const r = validateReport({ ...good, context: '  - a block\n  - its child  ' }, config);
+    expect(r.ok && r.value.context).toBe('- a block\n  - its child');
+    const e = validateReport({ ...good, context: '   ' }, config);
+    expect(e.ok && e.value.context).toBeNull();
+  });
+  it('rejects context over 20,000 characters', () => {
+    expect(validateReport({ ...good, context: 'x'.repeat(20_001) }, config).ok).toBe(false);
+  });
+  it('gives the agent the context as its own section', () => {
+    const p = toAgentPrompt({ ...report, context: 'the selected paragraph' }, config);
+    expect(p).toContain('## Context');
+    expect(p).toContain('the selected paragraph');
   });
 });

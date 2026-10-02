@@ -26,6 +26,7 @@ function formatBytes(bytes) {
 var OTHER = { value: "other", label: "Other" };
 var MAX_PAGE_URL = 500;
 var MAX_USER_AGENT = 300;
+var MAX_CONTEXT = 2e4;
 var MAX_DIAGNOSTICS_BYTES = 64 * 1024;
 var HEADLINE_MAX = 60;
 function resolveConfig(partial = {}) {
@@ -58,6 +59,8 @@ function validateReport(raw, config) {
   if (!includes(PRIORITIES, priority)) return { ok: false, error: "Pick a priority." };
   const area = String(raw.area ?? OTHER.value);
   if (!config.areas.some((a) => a.value === area)) return { ok: false, error: "Pick where it happened." };
+  const context = String(raw.context ?? "").trim() || null;
+  if (context && context.length > MAX_CONTEXT) return { ok: false, error: "Keep the context under 20,000 characters." };
   const diagnostics = isPlainObject(raw.diagnostics) ? raw.diagnostics : {};
   if (JSON.stringify(diagnostics).length > MAX_DIAGNOSTICS_BYTES) {
     return { ok: false, error: "Diagnostics must be under 64 KB." };
@@ -71,7 +74,8 @@ function validateReport(raw, config) {
       description,
       pageUrl: String(raw.pageUrl ?? "").slice(0, MAX_PAGE_URL),
       userAgent: String(raw.userAgent ?? "").slice(0, MAX_USER_AGENT),
-      diagnostics
+      diagnostics,
+      context
     }
   };
 }
@@ -91,6 +95,7 @@ function toAgentPrompt(r, config) {
     "",
     r.description.trim(),
     "",
+    ...r.context ? ["## Context", "Picked out on the page by the person who filed it:", "", r.context, ""] : [],
     "## Where",
     `Report id: ${r.id}`,
     ...r.pageUrl ? [`Page: ${r.pageUrl}`] : [],
@@ -124,10 +129,11 @@ function toReport(r) {
     claimedBy: r.claimed_by,
     claimedAt: iso(r.claimed_at),
     resolution: r.resolution,
-    video: r.video ?? null
+    video: r.video ?? null,
+    context: r.context ?? null
   };
 }
-var COLUMNS = "id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, created_at";
+var COLUMNS = "id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, context, created_at";
 var QUEUE_ORDER = "ORDER BY priority_rank DESC, created_at, id";
 function postgresStore(db, table = "shipcue_reports") {
   if (!/^[a-z_][a-z0-9_.]*$/i.test(table)) throw new Error(`Bad table name: ${table}`);
@@ -140,8 +146,8 @@ function postgresStore(db, table = "shipcue_reports") {
   return {
     async create(input) {
       const r = await one(
-        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9) RETURNING ${COLUMNS}`,
+        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, context)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10) RETURNING ${COLUMNS}`,
         [
           input.type,
           input.priority,
@@ -151,7 +157,8 @@ function postgresStore(db, table = "shipcue_reports") {
           input.userAgent,
           JSON.stringify(input.diagnostics),
           input.screenshots,
-          input.reporter
+          input.reporter,
+          input.context ?? null
         ]
       );
       return r;
@@ -263,6 +270,7 @@ function createShipcueHandler(opts) {
         description: form.get("description") ?? "",
         pageUrl: form.get("pageUrl") ?? "",
         userAgent: form.get("userAgent") ?? "",
+        context: form.get("context") ?? "",
         diagnostics
       },
       config

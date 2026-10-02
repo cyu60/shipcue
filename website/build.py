@@ -199,12 +199,12 @@ export { handler as GET, handler as POST };</code></pre>
 <p><img src="/assets/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, screenshots, screen recording, and a Powered by shipcue line" width="408" style="max-width:100%;height:auto;border-radius:16px;margin-top:8px"></p>
 
 <h2>Keyboard shortcuts</h2>
-<p>The panel opens from the keyboard on any page, on the tab you ask for. Whatever is highlighted on the page comes along as a quote, so you can select a paragraph and turn it into an agent task in one go.</p>
+<p>The panel opens from the keyboard on any page, on the tab you ask for. Whatever is highlighted on the page comes along in an editable <b>Context</b> box (remove it with one click), so you can select a paragraph and turn it into an agent task in one go. When nothing is highlighted, <code>getContext={() =&gt; selectedRowsAsText()}</code> lets your app supply what is selected, like rows or blocks. Agents see it as its own Context section in the task prompt.</p>
 <ul>
   <li><b>Agent task:</b> <code>⌘J</code> on a Mac, <code>Alt+Shift+J</code> elsewhere</li>
   <li><b>Bug:</b> <code>⌃B</code> on a Mac, <code>Alt+Shift+B</code> elsewhere</li>
   <li><b>Feature request:</b> <code>⌃F</code> on a Mac, <code>Alt+Shift+F</code> elsewhere</li>
-  <li><b>Send:</b> <code>⌘↵</code> or <code>Ctrl+↵</code>. <b>Close:</b> <code>Esc</code></li>
+  <li><b>Send:</b> <code>⌘↵</code> or <code>Ctrl+↵</code> on every tab (never mid-composition in an input method). <b>Close:</b> <code>Esc</code></li>
 </ul>
 <p>On Windows and Linux, Ctrl+J, Ctrl+B and Ctrl+F already belong to the browser and to editors, so shipcue stays off them. Pick your own with <code>hotkeys</code> ("Mod" is ⌘ on a Mac and Ctrl elsewhere), or pass <code>hotkeys={false}</code> to turn them off:</p>
 <pre><code>&lt;ReportButton hotkeys={{ task: ['Mod+J'], bug: ['Mod+Shift+B'], feature: [] }} /&gt;</code></pre>
@@ -234,6 +234,7 @@ POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR
   <li>Area: the parts of your app you list, plus Other</li>
   <li>Description, 10 to 4,000 characters</li>
   <li>Up to 3 screenshots, 5 MB each, shrunk in the browser first</li>
+  <li>Context: text picked out on the page, up to 20,000 characters</li>
   <li>Page address, browser and your app snapshot</li>
   <li>Status: open, claimed, fixed or won't fix, with who claimed it and the resolution</li>
 </ul>

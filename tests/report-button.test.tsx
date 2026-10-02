@@ -263,14 +263,43 @@ describe('ReportButton: hotkeys', () => {
     expect(screen.getByRole('textbox')).toHaveFocus();
   });
 
-  it('starts from the text highlighted on the page', async () => {
-    render(<><p>Export the members table as CSV</p><ReportButton areas={areas} submit={ok()} hotkeys={keys} /></>);
+  it('puts the text highlighted on the page in an editable Context box, and sends it', async () => {
+    const submit = ok();
+    render(<><p>Export the members table as CSV</p><ReportButton areas={areas} submit={submit} hotkeys={keys} /></>);
     const range = document.createRange();
     range.selectNodeContents(screen.getByText('Export the members table as CSV'));
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
     press('KeyJ', 'j');
-    expect(await screen.findByRole('textbox')).toHaveValue('> Export the members table as CSV\n\n');
+    const context = await screen.findByRole('textbox', { name: 'Context' });
+    expect(context).toHaveValue('Export the members table as CSV');
+    await userEvent.type(context, ' please');
+    await userEvent.type(screen.getByRole('textbox', { name: 'Description' }), 'Add it to the reports page');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status');
+    expect((submit.mock.calls[0]![0] as FormData).get('context')).toBe('Export the members table as CSV please');
+  });
+
+  it('lets you remove the context', async () => {
+    const submit = ok();
+    render(<ReportButton areas={areas} submit={submit} getContext={() => '- block one\n  - child'} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    expect(screen.getByRole('textbox', { name: 'Context' })).toHaveValue('- block one\n  - child');
+    await userEvent.click(screen.getByRole('button', { name: 'Remove context' }));
+    expect(screen.queryByRole('textbox', { name: 'Context' })).toBeNull();
+    await userEvent.type(screen.getByRole('textbox'), 'The heading disappears on Enter');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status');
+    expect((submit.mock.calls[0]![0] as FormData).get('context')).toBe('');
+  });
+
+  it('does not send while an input method is composing', async () => {
+    const submit = ok();
+    render(<ReportButton areas={areas} submit={submit} hotkeys={keys} />);
+    press('KeyB', 'b');
+    await userEvent.type(await screen.findByRole('textbox'), 'The heading disappears on Enter');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', code: 'Enter', metaKey: true, isComposing: true });
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it('sends with Cmd or Ctrl+Enter', async () => {

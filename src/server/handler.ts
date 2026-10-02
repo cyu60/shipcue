@@ -102,6 +102,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         description: form.get('description') ?? '',
         pageUrl: form.get('pageUrl') ?? '',
         userAgent: form.get('userAgent') ?? '',
+        context: form.get('context') ?? '',
         diagnostics,
       },
       config,

@@ -11,6 +11,7 @@ export const sample = (over: Partial<NewReport> = {}): NewReport => ({
   diagnostics: { a: 1 },
   reporter: 'ada@example.com',
   screenshots: [],
+  context: null,
   ...over,
 });
 
@@ -20,6 +21,12 @@ export function storeContract(name: string, makeStore: () => Promise<ReportStore
     let store: ReportStore;
     beforeEach(async () => {
       store = await makeStore();
+    });
+
+    it('keeps the context with the report', async () => {
+      const store = await makeStore();
+      const r = await store.create(sample({ context: '- a block\n  - its child' }));
+      expect((await store.get(r.id))?.context).toBe('- a block\n  - its child');
     });
 
     it('creates an open report and reads it back', async () => {

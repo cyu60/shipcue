@@ -119,7 +119,7 @@ The panel has three tabs: **Bug**, **Feature request** and **Agent task** (a dir
 | Feature request | ⌃F | Alt+Shift+F |
 | Send | ⌘↵ | Ctrl+↵ |
 
-Text highlighted on the page comes along as a quote. Change the keys with `hotkeys={{ task: ['Mod+J'] }}` ("Mod" is ⌘ on a Mac, Ctrl elsewhere), turn them off with `hotkeys={false}`, or open the panel from your own menu with `openReport('task')`.
+Text highlighted on the page comes along in an editable, removable **Context** box (or pass `getContext` to supply your app's selected rows or blocks), and agents get it as its own section of the task prompt. Change the keys with `hotkeys={{ task: ['Mod+J'] }}` ("Mod" is ⌘ on a Mac, Ctrl elsewhere), turn them off with `hotkeys={false}`, or open the panel from your own menu with `openReport('task')`.
 
 ## 4. Let agents work the queue
 

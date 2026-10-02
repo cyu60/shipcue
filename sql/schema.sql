@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS shipcue_reports (
   resolution    text,
   -- A screen recording or video URL, attached after the report is filed.
   video         text,
+  -- Text picked out on the page (a selection or selected blocks) the report is about.
+  context       text CHECK (length(context) <= 20000),
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
   -- Soft delete: rows are hidden, never removed.
@@ -35,7 +37,8 @@ CREATE TABLE IF NOT EXISTS shipcue_reports (
 -- Upgrading from 0.1: add the video column to an existing table.
 ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS video text;
 
--- Upgrading from 0.2: allow agent tasks.
+-- Upgrading from 0.2: allow agent tasks, and keep the picked-out context.
+ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS context text CHECK (length(context) <= 20000);
 ALTER TABLE shipcue_reports DROP CONSTRAINT IF EXISTS shipcue_reports_type_check;
 ALTER TABLE shipcue_reports ADD CONSTRAINT shipcue_reports_type_check CHECK (type IN ('bug', 'feature', 'task'));
 

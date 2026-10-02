@@ -45,6 +45,11 @@ export interface ReportButtonProps {
    * elsewhere Alt+Shift+J/B/F. Pass your own chords per tab ("Mod+J", "Ctrl+B"), or false for none.
    */
   hotkeys?: Hotkeys | false;
+  /**
+   * What the report is about when nothing is highlighted on the page, e.g. the selected rows or
+   * blocks in your app as text. Shown in an editable Context box the reporter can remove.
+   */
+  getContext?: () => string | null | undefined;
 }
 
 const TYPES: { value: ReportType; label: string; placeholder: string }[] = [
@@ -104,11 +109,13 @@ export function ReportButton({
   watermark = true,
   types,
   hotkeys,
+  getContext,
 }: ReportButtonProps) {
   const tabs = useMemo(() => (types?.length ? TYPES.filter((t) => types.includes(t.value)) : TYPES), [types]);
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
+  const [context, setContext] = useState<string | null>(null);
   const [type, setType] = useState<ReportType>(() => tabs[0]?.value ?? 'bug');
   const [priority, setPriority] = useState<Priority>('medium');
   const [area, setArea] = useState('other');
@@ -156,12 +163,22 @@ export function ReportButton({
     return Object.fromEntries(tabs.map((t) => [t.value, all[t.value] ?? []]));
   }, [hotkeys, tabs]);
 
-  // Open on a tab, starting from whatever is highlighted on the page (not in the panel).
-  const openOn = (t?: ReportType) => {
-    if (t && tabs.some((x) => x.value === t)) setType(t);
+  // Open on a tab with what the report is about: the text highlighted on the page (not in
+  // the panel), or else what the app says is selected.
+  const pickContext = () => {
     const sel = window.getSelection();
     const picked = sel && !sel.isCollapsed && !panelRef.current?.contains(sel.anchorNode) ? sel.toString().trim() : '';
-    if (picked) setText((cur) => (cur.trim() ? cur : picked.split('\n').map((l) => `> ${l}`).join('\n') + '\n\n'));
+    if (picked) return picked;
+    try {
+      return getContext?.()?.trim() || null;
+    } catch {
+      return null;
+    }
+  };
+  const openOn = (t?: ReportType) => {
+    if (t && tabs.some((x) => x.value === t)) setType(t);
+    const picked = pickContext();
+    if (picked) setContext(picked);
     setDone(false);
     if (!open) show();
     else textareaRef.current?.focus();
@@ -265,6 +282,7 @@ export function ReportButton({
       const form = new FormData();
       form.set('type', type);
       form.set('description', text);
+      form.set('context', context ?? '');
       form.set('priority', priority);
       form.set('area', area);
       form.set('pageUrl', page ?? '');
@@ -286,6 +304,7 @@ export function ReportButton({
       setVideo(null);
       setDone(true);
       setText('');
+      setContext(null);
       setFiles([]);
       onSubmitted?.(result.id);
     } catch (err) {
@@ -350,7 +369,7 @@ export function ReportButton({
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     if (canSend) void send();
                   }
@@ -363,9 +382,29 @@ export function ReportButton({
                   }
                 }}
                 rows={4}
+                aria-label="Description"
                 placeholder={current.placeholder}
                 style={s.textarea}
               />
+              {context !== null && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ ...s.row, alignItems: 'center' }}>
+                    <label htmlFor={`${uid}-context`} style={s.label}>
+                      Context
+                    </label>
+                    <button type="button" onClick={() => setContext(null)} aria-label="Remove context" style={s.linkBtn}>
+                      remove
+                    </button>
+                  </div>
+                  <textarea
+                    id={`${uid}-context`}
+                    value={context}
+                    onChange={(e) => setContext(e.target.value)}
+                    rows={3}
+                    style={{ ...s.textarea, marginTop: 4, fontSize: 12, background: '#fafafa', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+                  />
+                </div>
+              )}
               <div style={s.grid}>
                 <div>
                   <label htmlFor={`${uid}-priority`} style={s.label}>
@@ -521,7 +560,7 @@ export function ReportButton({
       )}
       <button
         type="button"
-        onClick={() => (open ? close() : show())}
+        onClick={() => (open ? close() : openOn())}
         aria-label={open ? 'Close report' : 'Report a bug or request a feature'}
         title="Report a bug or request a feature"
         style={variant === 'floating' ? s.fab : s.inlineBtn}
