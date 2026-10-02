@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>shipcue</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<main id="report">
+  <header>
+    <img src="icons/icon-32.png" width="18" height="18" alt="">
+    <h1 id="heading">Report a bug</h1>
+    <button type="button" id="open-settings" class="icon" title="Settings" aria-label="Settings">⚙</button>
+  </header>
+  <p class="sub" id="subheading">Say what you did and what happened.</p>
+
+  <div class="segment" role="radiogroup" aria-label="Report type">
+    <button type="button" role="radio" data-type="bug" aria-checked="true">Bug</button>
+    <button type="button" role="radio" data-type="feature" aria-checked="false">Feature request</button>
+    <button type="button" role="radio" data-type="task" aria-checked="false">Agent task</button>
+  </div>
+
+  <textarea id="description" rows="4" aria-label="Description" placeholder="I pressed Enter at the end of a heading and the heading disappeared."></textarea>
+
+  <label class="field">Priority
+    <select id="priority">
+      <option value="low">Low: cosmetic or minor</option>
+      <option value="medium" selected>Medium: annoying, has a workaround</option>
+      <option value="high">High: blocks a task, no workaround</option>
+      <option value="blocking">Blocking: nobody can use this part</option>
+    </select>
+  </label>
+
+  <p class="label">Comes along</p>
+  <div class="shot-row">
+    <label class="check"><input type="checkbox" id="with-shot" checked> Screenshot of this page</label>
+    <img id="shot" alt="Screenshot of the page" hidden>
+  </div>
+  <div class="element-row">
+    <button type="button" id="pick" class="ghost">⌖ Pick an element</button>
+    <span id="picked" class="chip" hidden><span id="picked-text"></span><button type="button" id="unpick" aria-label="Remove the element">×</button></span>
+  </div>
+  <label class="check"><input type="checkbox" id="with-details" checked disabled> Page details: address, title, time and time zone, window size</label>
+  <label class="check"><input type="checkbox" id="with-location"> My location</label>
+  <p class="hint" id="selection-hint" hidden></p>
+
+  <p class="error" id="error" role="alert" hidden></p>
+  <div class="foot">
+    <a id="cuelog" target="_blank" rel="noopener">See the CueLog</a>
+    <button type="button" id="send" class="send">Send <kbd>⌘↵</kbd></button>
+  </div>
+</main>
+
+<main id="done" hidden>
+  <header><img src="icons/icon-32.png" width="18" height="18" alt=""><h1>Thanks. It is in the queue.</h1></header>
+  <p class="sub"><a id="done-link" target="_blank" rel="noopener">See your CueLog</a></p>
+</main>
+
+<main id="settings" hidden>
+  <header>
+    <img src="icons/icon-32.png" width="18" height="18" alt="">
+    <h1>Settings</h1>
+    <button type="button" id="close-settings" class="icon" aria-label="Back">×</button>
+  </header>
+  <label class="field">Where reports go: your app's shipcue endpoint
+    <input id="endpoint" type="url" placeholder="https://app.example.com/api/shipcue">
+  </label>
+  <p class="hint">The address createShipcueHandler is mounted at. Leave it as shipcue's own to send to the shipcue CueLog.</p>
+  <label class="field">Its CueLog page (optional)
+    <input id="cuelog-url" type="url" placeholder="https://app.example.com/reports">
+  </label>
+  <p class="error" id="settings-error" role="alert" hidden></p>
+  <div class="foot">
+    <button type="button" id="reset" class="link">Use shipcue's own</button>
+    <button type="button" id="save" class="send">Save</button>
+  </div>
+</main>
+<script src="lib.js"></script>
+<script src="popup.js" type="module"></script>
+</body>
+</html>

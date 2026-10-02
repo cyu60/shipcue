@@ -1,9 +1,20 @@
 """Builds the static site: wraps each page body in the shared head, header and footer."""
+import json
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+VERSION = json.loads((ROOT.parent / "package.json").read_text())["version"]
+EXT_DIR = ROOT.parent / "extension"
+EXT_VERSION = json.loads((EXT_DIR / "manifest.json").read_text())["version"]
+
+# The Chrome extension, zipped for the download page (shipcue report 879ec99b).
+with zipfile.ZipFile(ROOT / "assets" / "shipcue-extension.zip", "w", zipfile.ZIP_DEFLATED) as z:
+    for f in sorted(EXT_DIR.rglob("*")):
+        if f.is_file() and f.name != ".DS_Store":
+            z.write(f, Path("shipcue-extension") / f.relative_to(EXT_DIR))
 HEAD = (ROOT / "_head.txt").read_text()
-NAV = [("/", "Home"), ("/use-cases/", "Use cases"), ("/docs/", "Docs"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/cuelog/", "CueLog"), ("/contact/", "Contact")]
+NAV = [("/", "Home"), ("/use-cases/", "Use cases"), ("/docs/", "Docs"), ("/extension/", "Extension"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/cuelog/", "CueLog"), ("/contact/", "Contact")]
 
 
 def page(path, title, description, body, current):
@@ -148,7 +159,7 @@ DOCS = """
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
 <p>Until the first npm release is out, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
-<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.5.2/shipcue-0.5.2.tgz</code></pre>
+<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v{VERSION}/shipcue-{VERSION}.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 
 <h2>1. Create the table</h2>
@@ -446,6 +457,7 @@ CONTACT = """
 """
 
 page("index.html", "shipcue: bug reports your coding agents can fix", "A report button, a queue in your own Postgres, and an MCP server so coding agents can fix what people report.", HOME, "/")
+DOCS = DOCS.replace("{VERSION}", VERSION)
 page("docs/index.html", "Docs · shipcue", "Set up shipcue: the table, the handler, the button and the agent tools.", DOCS, "/docs/")
 page("cloud/index.html", "Cloud · shipcue", "shipcue Cloud: the same queue without running a database. Planned.", CLOUD, "/cloud/")
 page("blog/index.html", "Blog · shipcue", "Notes on building shipcue.", BLOG, "/blog/")
@@ -462,5 +474,36 @@ CHANGELOG = """<div class="prose">
 """
 
 page("cuelog/index.html", "CueLog · shipcue", "What people asked shipcue for, what is waiting, and what got fixed.", CHANGELOG, "/cuelog/")
+EXTENSION = """<div class="prose">
+<h1>Chrome extension</h1>
+<p class="lede">Report what you see on any page, even sites you do not run. The shipcue extension sends your words with a screenshot of the tab, the element you click on, and when and where it happened, straight into a shipcue queue.</p>
+<p><a class="btn btn-ink" href="/assets/shipcue-extension.zip" download>Download for Chrome (.zip, version {EXT_VERSION})</a></p>
+
+<h2>Install it</h2>
+<ol>
+  <li>Download the zip above and unzip it. You get a <code>shipcue-extension</code> folder.</li>
+  <li>Open <code>chrome://extensions</code> and switch on <b>Developer mode</b> (top right).</li>
+  <li>Click <b>Load unpacked</b> and choose the <code>shipcue-extension</code> folder.</li>
+  <li>Pin it from the puzzle-piece menu. Open it with the icon, or with <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.</li>
+</ol>
+<p>It works the same in Edge, Brave, Arc and other Chromium browsers. A Chrome Web Store listing is on the way, after which it installs with one click.</p>
+
+<h2>What comes along</h2>
+<ul>
+  <li><b>A screenshot</b> of the tab you are looking at (untick it to leave it out).</li>
+  <li><b>The element you pick</b>: click <i>Pick an element</i>, then anything on the page. Its selector, text, size, position and HTML go into the report's Context.</li>
+  <li><b>Text you selected</b> on the page.</li>
+  <li><b>Page details</b>: the address, title, time and time zone, window size, scroll position and language.</li>
+  <li><b>Your location</b>, only if you tick <i>My location</i> (Chrome asks first).</li>
+</ul>
+<p>Nothing is read or sent until you open the extension, and nothing leaves until you press Send.</p>
+
+<h2>Send to your own app</h2>
+<p>It sends to shipcue's own CueLog until you change it. Open the extension, click ⚙ and paste your app's shipcue address, the one <code>createShipcueHandler</code> is mounted at (for example <code>https://app.example.com/api/shipcue</code>). Chrome asks once for permission to send there. Add your CueLog page too, and the extension links to it after each report.</p>
+</div>
+"""
+
+EXTENSION = EXTENSION.replace("{EXT_VERSION}", EXT_VERSION)
+page("extension/index.html", "Chrome extension · shipcue", "Report what you see on any page: a screenshot, the element you pick, and when and where, straight into a shipcue queue.", EXTENSION, "/extension/")
 page("contact/index.html", "Contact · shipcue", "Get in touch about shipcue.", CONTACT, "/contact/")
 print("built")

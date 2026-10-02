@@ -1,0 +1,37 @@
+/* Small and quiet, like shipcue's panel. */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { width: 360px; margin: 0; padding: 14px; font: 12px/1.45 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; color: #18181b; background: #fff; }
+header { display: flex; align-items: center; gap: 8px; }
+h1 { flex: 1; margin: 0; font-size: 14px; font-weight: 600; }
+.sub { margin: 2px 0 10px; color: #52525b; }
+a { color: #16203A; }
+.icon { border: 0; background: none; color: #a1a1aa; font-size: 15px; cursor: pointer; padding: 2px 4px; }
+.icon:hover { color: #52525b; }
+.segment { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: #f4f4f5; }
+.segment button { flex: 1; padding: 5px 4px; border: 0; border-radius: 7px; background: none; color: #52525b; font: inherit; font-size: 11.5px; cursor: pointer; }
+.segment button[aria-checked='true'] { background: #fff; color: #18181b; font-weight: 500; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+textarea, select, input[type='url'] { width: 100%; margin-top: 10px; padding: 7px 10px; border: 1px solid #d4d4d8; border-radius: 8px; font: inherit; font-size: 13px; color: inherit; background: #fff; }
+textarea { resize: none; }
+textarea:focus, select:focus, input:focus { outline: 2px solid #16203A; outline-offset: -1px; border-color: transparent; }
+.field { display: block; margin-top: 10px; font-size: 11px; font-weight: 500; color: #71717a; }
+.field select, .field input { margin-top: 4px; }
+.label { margin: 12px 0 4px; font-size: 11px; font-weight: 500; color: #71717a; }
+.check { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0; color: #3f3f46; }
+.check input { margin: 2px 0 0; }
+.shot-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#shot { width: 72px; height: 44px; object-fit: cover; border: 1px solid #e4e4e7; border-radius: 6px; }
+.element-row { display: flex; align-items: center; gap: 6px; margin: 4px 0 6px; min-width: 0; }
+.ghost { padding: 4px 10px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; color: #3f3f46; font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.ghost:hover { border-color: #a1a1aa; }
+.chip { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 4px 2px 8px; border-radius: 999px; background: #f4f4f5; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip button { border: 0; background: none; color: #71717a; cursor: pointer; }
+.hint { margin: 4px 0 0; font-size: 10.5px; color: #a1a1aa; }
+.error { margin: 8px 0 0; padding: 6px 8px; border-radius: 6px; background: #fff1f2; color: #be123c; }
+.foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.foot a { font-size: 11px; color: #71717a; }
+.send { padding: 6px 12px; border: 0; border-radius: 8px; background: #16203A; color: #fff; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.send:disabled { opacity: 0.5; cursor: not-allowed; }
+.send kbd { margin-left: 4px; font: inherit; font-size: 10px; opacity: 0.7; }
+.link { border: 0; background: none; color: #71717a; font: inherit; font-size: 11px; text-decoration: underline; cursor: pointer; }

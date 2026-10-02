@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "shipcue",
+  "version": "0.1.0",
+  "description": "Report a bug or request a feature on any page, with a screenshot, the element you pick and the page details, straight into a shipcue queue.",
+  "homepage_url": "https://shipcue.ibuildathing.com/extension/",
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "action": {
+    "default_title": "shipcue: report what you see",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" }
+  },
+  "commands": {
+    "_execute_action": { "suggested_key": { "default": "Alt+Shift+S" }, "description": "Open shipcue" }
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://shipcue.ibuildathing.com/*"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*"],
+  "optional_permissions": ["geolocation"],
+  "background": { "service_worker": "background.js" }
+}

@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-147%20passing-2E5BFF?style=flat-square" alt="147 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-151%20passing-2E5BFF?style=flat-square" alt="151 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -183,6 +183,10 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 
 Switch on `board` in the handler (`true`, or `(req) => boolean` to limit who sees it), then render `<ShipcueBoard endpoint="/api/shipcue" />` (or `<ShipcueQueue />` / `<ShipcueChangelog />`) from `shipcue/react`. It lists open and in-progress reports, most urgent first, and fixed ones with their resolution, latest first. No reporter, page, diagnostics or attachments ever leave the server. Close reports with a one-line, user-facing `resolution` and the changelog writes itself. With both lists it shows Open / Fixed / All / Changelog pills with counts, and a small View control lets each viewer switch to tabs or a compact list (`tabStyle`, `layout`, `viewPicker`) (`initialView` sets where it starts). Add `boardScreenshots: true` to show each report's screenshots too: off by default, since screenshots can show private things. The board is live: it checks a tiny `/board/version` every 5 seconds while the page is in view and re-reads as soon as a report is filed or changes (`liveMs`, 0 turns it off).
 
+## Chrome extension
+
+Report what you see on any page, even sites you do not run: the extension in `extension/` sends your words with a screenshot of the tab, the element you click (selector, text, position, HTML), the text you selected, and the time, time zone, window size and, if you tick it, your location, to any shipcue endpoint. Download it from [shipcue.ibuildathing.com/extension](https://shipcue.ibuildathing.com/extension/), unzip, and load it at `chrome://extensions` → Developer mode → Load unpacked. Set your app's endpoint under ⚙ (it sends to shipcue's own CueLog until then).
+
 ## Broadcast and listen
 
 Tell people or agents when something happens to a report. Each broadcaster gets the events it lists (`report.filed`, `report.claimed`, `report.released`, `report.closed`, `report.video`), after the change is saved; one that fails or is slow is logged and never fails the request.
@@ -228,6 +232,7 @@ pnpm build
 
 ## Changelog
 
+- **Extension 0.1.0**: a Chrome extension that reports from any page with a screenshot, a picked element, the selection and page details (time, time zone, location if you allow it). Download at /extension/.
 - **0.10.0**: `text`: every word the panel and the board show can be your app's own (tab names, headings, placeholders, buttons, links, the thanks note, empty states); `DEFAULT_TEXT` lists them. `pastReportsLabel` and `seeReportsLabel` still work.
 - **0.9.0**: the Context box has a Preview / Raw switch: an outline shows as bullets with nesting, `[[links]]`, `#tags` and `((refs))` set apart; pass `renderContext={(text) => <YourRenderer text={text} />}` to draw it your app's way.
 - **0.8.1**: the thanks note says "See your CueLog"; shipcue's own queue page is now CueLog, at /cuelog/.
