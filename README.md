@@ -2,6 +2,8 @@
 
 A drop-in bug report and feature request button whose inbox is a queue that people **and coding agents** both work from.
 
+<p align="center"><img src="docs/report-button.png" alt="The report button open on a feature request: bug or feature toggle, description, priority, where, screenshot upload and Send" width="420"></p>
+
 Someone in your app clicks the button, says what broke or what they want, pastes a screenshot, and sends. fixqueue files it with the page address, browser and a snapshot of app state you choose. Then Claude Code, Codex or a teammate claims the most urgent report, gets a ready-made task prompt, fixes it, and closes it with the PR link.
 
 ```
