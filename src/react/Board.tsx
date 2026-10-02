@@ -1,13 +1,15 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { TYPE_LABEL, type Board, type BoardItem } from '../core';
 
+type View = 'open' | 'fixed' | 'all' | 'changelog';
+
 export interface ShipcueBoardProps {
   /** Where the handler is mounted, e.g. "/api/shipcue" (it must be created with `board`). */
   endpoint?: string;
-  /** Which lists to show. Both by default, with a Queue / Changelog toggle between them. */
+  /** Which lists to show. Both by default, as Open / Fixed / All / Changelog tabs. */
   show?: 'both' | 'queue' | 'changelog';
-  /** With show="both", the list the toggle starts on. */
-  initialView?: 'queue' | 'changelog';
+  /** With show="both", the tab it starts on. 'queue' is the same as 'open'. */
+  initialView?: View | 'queue';
   /** Heading color and the small accents. */
   accentColor?: string;
   /** Re-read the board this often while the page is open (ms). 0 turns it off. */
@@ -23,7 +25,7 @@ export interface ShipcueBoardProps {
 export function ShipcueBoard({
   endpoint = '/api/shipcue',
   show = 'both',
-  initialView = 'queue',
+  initialView = 'open',
   accentColor = '#16203A',
   refreshMs = 60_000,
   className,
@@ -31,7 +33,7 @@ export function ShipcueBoard({
 }: ShipcueBoardProps) {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'queue' | 'changelog'>(initialView);
+  const [view, setView] = useState<View>(initialView === 'queue' ? 'open' : initialView);
 
   useEffect(() => {
     let live = true;
@@ -59,25 +61,55 @@ export function ShipcueBoard({
   if (error && !board) return <p className={className} style={{ ...s.muted, ...style }}>{error}</p>;
   if (!board) return <p className={className} style={{ ...s.muted, ...style }}>Loading…</p>;
 
-  // With both lists, a toggle picks one (shipcue report 9fdd0b45).
-  const current = show === 'both' ? view : show;
+  // With both lists, a tab row like Habitect's Reports page: Open, Fixed, All, Changelog
+  // (shipcue reports 9fdd0b45, 15720123).
+  const TABS: { id: View; label: string; count?: number }[] = [
+    { id: 'open', label: 'Open', count: board.queue.length },
+    { id: 'fixed', label: 'Fixed', count: board.changelog.length },
+    { id: 'all', label: 'All', count: board.queue.length + board.changelog.length },
+    { id: 'changelog', label: 'Changelog' },
+  ];
+  const current: View | 'queue' = show === 'both' ? view : show;
+  const list = (items: BoardItem[], done = false) => (
+    <ul style={s.list}>
+      {items.map((r) => (
+        <Item key={r.id} r={r} accent={accentColor} done={done} />
+      ))}
+    </ul>
+  );
   return (
     <div className={className} style={{ ...s.wrap, ...style }}>
       {show === 'both' && (
-        <div role="tablist" aria-label="Queue or changelog" style={s.toggle}>
-          {(['queue', 'changelog'] as const).map((v) => (
+        <div role="tablist" aria-label="Reports" style={s.tabs}>
+          {TABS.map((t) => (
             <button
-              key={v}
+              key={t.id}
               type="button"
               role="tab"
-              aria-selected={view === v}
-              onClick={() => setView(v)}
-              style={view === v ? { ...s.toggleBtn, background: accentColor, color: '#fff' } : s.toggleBtn}
+              aria-selected={view === t.id}
+              aria-label={t.count !== undefined ? `${t.label} ${t.count}` : t.label}
+              onClick={() => setView(t.id)}
+              style={view === t.id ? { ...s.tab, ...s.tabOn, borderBottomColor: accentColor, color: accentColor } : s.tab}
             >
-              {v === 'queue' ? `Queue (${board.queue.length})` : `Changelog (${board.changelog.length})`}
+              {t.label}
+              {t.count !== undefined && <span style={s.count}>{t.count}</span>}
             </button>
           ))}
         </div>
+      )}
+      {current === 'open' && (
+        <section>
+          {board.queue.length === 0 ? <p style={s.muted}>Nothing waiting.</p> : list(board.queue)}
+        </section>
+      )}
+      {current === 'fixed' && (
+        <section>{board.changelog.length === 0 ? <p style={s.muted}>Nothing fixed yet.</p> : list(board.changelog, true)}</section>
+      )}
+      {current === 'all' && (
+        <section>
+          {list(board.queue)}
+          {board.changelog.length > 0 && <div style={{ marginTop: '0.75em' }}>{list(board.changelog, true)}</div>}
+        </section>
       )}
       {current === 'queue' && (
         <section>
@@ -99,7 +131,7 @@ export function ShipcueBoard({
       )}
       {current === 'changelog' && (
         <section>
-          <h2 style={{ ...s.h2, color: accentColor }}>Changelog</h2>
+          {show !== 'both' && <h2 style={{ ...s.h2, color: accentColor }}>Changelog</h2>}
           <p style={s.muted}>{board.changelog.length === 0 ? 'Nothing shipped yet.' : 'What was fixed, latest first.'}</p>
           <ul style={s.list}>
             {board.changelog.map((r) => (
@@ -163,8 +195,10 @@ const s: Record<string, CSSProperties> = {
   tag: { padding: '0 0.55em', border: '1px solid rgba(128,128,128,0.4)', borderRadius: 999 },
   main: { margin: 0, whiteSpace: 'pre-wrap' },
   done: { opacity: 0.5 },
-  toggle: { display: 'inline-flex', gap: 4, padding: 3, border: '1px solid rgba(128,128,128,0.3)', borderRadius: 999, justifySelf: 'start' },
-  toggleBtn: { font: 'inherit', fontSize: '0.85em', padding: '0.25em 0.9em', border: 0, borderRadius: 999, background: 'none', color: 'inherit', cursor: 'pointer' },
+  tabs: { display: 'flex', gap: '1.6em', borderBottom: '1px solid rgba(128,128,128,0.25)', marginBottom: '-1.2em' },
+  tab: { font: 'inherit', fontSize: '1em', padding: '0.4em 0', margin: '0 0 -1px', border: 0, borderBottom: '2px solid transparent', background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },
+  tabOn: { opacity: 1, fontWeight: 600 },
+  count: { marginLeft: '0.45em', fontWeight: 400, opacity: 0.7, fontSize: '0.9em' },
   shots: { display: 'flex', flexWrap: 'wrap', gap: '0.5em', marginTop: '0.6em' },
   shot: { display: 'block', height: 72, maxWidth: 160, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(128,128,128,0.3)' },
   sub: { margin: '0.35em 0 0', fontSize: '0.85em', opacity: 0.65, whiteSpace: 'pre-wrap' },

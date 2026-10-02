@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, OPEN_EVENT, type Hotkeys } from './hotkeys';
+import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, type Hotkeys } from './hotkeys';
 import { formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
@@ -224,13 +224,32 @@ function ReportPanel({
     setOpen(true);
   };
 
-  // The keys in use, only for the tabs on show.
+  // Shortcuts the person changed in the panel (shipcue report 0a73febd), kept in this browser.
+  const [userKeys, setUserKeys] = useState<Hotkeys>({});
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only there in the browser
+    setUserKeys(loadUserHotkeys());
+  }, []);
+  const [editingKeys, setEditingKeys] = useState(false);
+  const [keyFor, setKeyFor] = useState<string | null>(null);
+  const recordingRef = useRef<string | null>(null);
+  recordingRef.current = keyFor;
+  const setUserKey = (id: string, chord: string | null) => {
+    const next = { ...userKeys };
+    if (chord) next[id] = [chord];
+    else delete next[id];
+    setUserKeys(next);
+    saveUserHotkeys(next);
+  };
+
+  // The keys in use, only for the tabs on show: the app's, then the person's own.
+  const appKeys = useMemo<Hotkeys>(() => (hotkeys === false ? {} : { ...defaultHotkeys(), ...hotkeys }), [hotkeys]);
   const keys = useMemo<Hotkeys>(() => {
     if (hotkeys === false) return {};
-    const all = { ...defaultHotkeys(), ...hotkeys };
+    const all = { ...appKeys, ...userKeys };
     const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id)];
     return Object.fromEntries(ids.map((id) => [id, (all as Hotkeys)[id] ?? []]));
-  }, [hotkeys, tabs, extraTabs]);
+  }, [hotkeys, appKeys, userKeys, tabs, extraTabs]);
 
   // Open on a tab with what the report is about: the text highlighted on the page (not in
   // the panel), or else what the app says is selected.
@@ -265,10 +284,29 @@ function ReportPanel({
   };
   const openOnRef = useRef(openOn);
   openOnRef.current = openOn;
+  const setUserKeyRef = useRef(setUserKey);
+  setUserKeyRef.current = setUserKey;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat) return;
+      // Setting a shortcut: the next chord is the new one, Esc cancels.
+      const rec = recordingRef.current;
+      if (rec) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          setKeyFor(null);
+          return;
+        }
+        const chord = chordOf(e);
+        if (!chord) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setUserKeyRef.current(rec, chord);
+        setKeyFor(null);
+        return;
+      }
       const t = hotkeyType(e, keys);
       if (!t) return;
       e.preventDefault();
@@ -666,14 +704,49 @@ function ReportPanel({
                   </button>
                 </p>
               )}
+              {editingKeys && hotkeys !== false && (
+                <div style={s.keysBox} aria-label="Shortcuts">
+                  {[...tabs.map((t) => ({ id: t.value as string, label: t.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label }))].map(({ id, label }) => (
+                    <div key={id} style={s.keysRow}>
+                      <span>{label}</span>
+                      <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <kbd style={s.keysKbd}>{keyFor === id ? 'Press keys…' : keys[id]?.[0] ? display(keys[id]![0]!) : 'none'}</kbd>
+                        <button type="button" onClick={() => setKeyFor(keyFor === id ? null : id)} style={s.linkBtn}>
+                          {keyFor === id ? 'cancel' : 'change'}
+                        </button>
+                        {userKeys[id] && (
+                          <button type="button" onClick={() => setUserKey(id, null)} style={s.linkBtn} title={`Back to ${appKeys[id]?.[0] ? display(appKeys[id]![0]!) : 'none'}`}>
+                            reset
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                  <p style={{ ...s.hint, marginTop: 6 }}>Saved in this browser. Esc cancels.</p>
+                </div>
+              )}
               <div style={{ ...s.row, alignItems: 'center', marginTop: 12 }}>
-                {pastReportsHref ? (
-                  <a href={pastReportsHref} style={{ ...s.hint, color: '#71717a' }}>
-                    {pastReportsLabel}
-                  </a>
-                ) : (
-                  <span />
-                )}
+                <span style={{ ...s.hint, marginTop: 0 }}>
+                  {pastReportsHref && (
+                    <a href={pastReportsHref} style={{ color: '#71717a' }}>
+                      {pastReportsLabel}
+                    </a>
+                  )}
+                  {pastReportsHref && hotkeys !== false && ' · '}
+                  {hotkeys !== false && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingKeys((v) => !v);
+                        setKeyFor(null);
+                      }}
+                      aria-expanded={editingKeys}
+                      style={{ ...s.linkBtn, fontSize: 10, textDecoration: 'none', color: '#71717a' }}
+                    >
+                      Shortcuts
+                    </button>
+                  )}
+                </span>
                 <button type="button" onClick={send} disabled={!canSend} style={canSend ? s.send : { ...s.send, opacity: 0.5, cursor: 'not-allowed' }}>
                   {busy ? 'Sending…' : 'Send'}
                   <span style={s.kbd} aria-hidden="true">{isMac() ? '⌘↵' : 'Ctrl+↵'}</span>
@@ -839,6 +912,9 @@ function styles(accent: string) {
     sent: { background: '#fff', color: '#18181b', border: '1px solid #e4e4e7', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontFamily: font, boxShadow: '0 8px 24px rgba(24,24,27,0.12)', maxWidth: 320 } as CSSProperties,
     error: { marginTop: 8, borderRadius: 8, background: '#fff1f2', color: '#be123c', padding: '8px 12px', fontSize: 12 } as CSSProperties,
     ghost: { border: '1px solid #d4d4d8', borderRadius: 8, background: '#fff', color: '#3f3f46', padding: '4px 10px', fontSize: 12, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,
+    keysBox: { marginTop: 10, padding: '8px 10px', border: '1px solid #e4e4e7', borderRadius: 8, fontSize: 11, color: '#3f3f46', fontFamily: font } as CSSProperties,
+    keysRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' } as CSSProperties,
+    keysKbd: { minWidth: 44, textAlign: 'center', padding: '1px 6px', border: '1px solid #e4e4e7', borderRadius: 4, background: '#fafafa', fontSize: 10, fontFamily: 'inherit' } as CSSProperties,
     linkBtn: { border: 0, background: 'transparent', color: '#71717a', padding: 0, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' } as CSSProperties,
     recording: { border: 0, borderRadius: 999, background: '#e11d48', color: '#fff', padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' } as CSSProperties,
     send: { border: 0, borderRadius: 8, background: accent, color: '#fff', padding: '6px 12px', fontSize: 14, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,

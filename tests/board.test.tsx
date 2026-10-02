@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe('ShipcueBoard', () => {
-  it('toggles between the queue and the changelog, and shows screenshots', async () => {
+  it('has Open / Fixed / All / Changelog tabs, and shows screenshots', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({
         queue: [item('q1', { screenshots: ['/api/shipcue/board/screenshot/q1/0'] })],
@@ -22,11 +22,16 @@ describe('ShipcueBoard', () => {
       })),
     );
     render(<ShipcueBoard refreshMs={0} />);
-    const queueTab = await screen.findByRole('tab', { name: 'Queue (1)' });
-    expect(queueTab.getAttribute('aria-selected')).toBe('true');
+    const open = await screen.findByRole('tab', { name: 'Open 1' });
+    expect(open.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Fixed 1' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'All 2' })).toBeTruthy();
     expect(screen.getByAltText('Screenshot 1').getAttribute('src')).toBe('/api/shipcue/board/screenshot/q1/0');
-    expect(screen.queryByText('Shipped c1')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: 'Changelog (1)' }));
+    expect(screen.queryByText('asked c1')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'All 2' }));
+    expect(screen.getByText('asked q1')).toBeTruthy();
+    expect(screen.getByText('asked c1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Changelog' }));
     expect(screen.getByText('Shipped c1')).toBeTruthy();
     expect(screen.queryByAltText('Screenshot 1')).toBeNull();
   });

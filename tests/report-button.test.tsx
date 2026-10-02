@@ -266,6 +266,30 @@ describe('ReportButton: hotkeys', () => {
     expect(screen.getByRole('textbox')).toHaveFocus();
   });
 
+  it('lets a person change a shortcut from the panel, saved in this browser', async () => {
+    localStorage.clear();
+    const { unmount } = render(<ReportButton areas={areas} submit={ok()} hotkeys={keys} />);
+    press('KeyB', 'b');
+    await screen.findByRole('heading', { name: 'Report a bug' });
+    await userEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
+    const rows = screen.getAllByRole('button', { name: 'change' });
+    await userEvent.click(rows[0]!); // Bug
+    expect(screen.getByText('Press keys…')).toBeInTheDocument();
+    press('KeyK', 'k', { altKey: true });
+    expect(JSON.parse(localStorage.getItem('shipcue:hotkeys')!)).toEqual({ bug: ['Alt+K'] });
+    unmount();
+
+    // A new page load picks the saved chord up; the old one no longer opens Bug.
+    render(<ReportButton areas={areas} submit={ok()} hotkeys={keys} />);
+    press('KeyB', 'b');
+    expect(screen.queryByRole('heading', { name: 'Report a bug' })).toBeNull();
+    press('KeyK', 'k', { altKey: true });
+    expect(await screen.findByRole('heading', { name: 'Report a bug' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
+    await userEvent.click(screen.getByRole('button', { name: 'reset' }));
+    expect(localStorage.getItem('shipcue:hotkeys')).toBeNull();
+  });
+
   it('puts the text highlighted on the page in an editable Context box, and sends it', async () => {
     const submit = ok();
     render(<><p>Export the members table as CSV</p><ReportButton areas={areas} submit={submit} hotkeys={keys} /></>);

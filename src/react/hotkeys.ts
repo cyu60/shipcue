@@ -61,6 +61,33 @@ export function hotkeyType(e: KeyInfo, hotkeys: Hotkeys, mac = isMac()): string 
   return null;
 }
 
+const USER_KEY = 'shipcue:hotkeys';
+
+/** The shortcuts this person set in the panel, kept in this browser. */
+export function loadUserHotkeys(): Hotkeys {
+  try {
+    const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(USER_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== 'object') return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (e): e is [string, string[]] => Array.isArray(e[1]) && e[1].every((c) => typeof c === 'string'),
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+export function saveUserHotkeys(keys: Hotkeys): void {
+  try {
+    if (Object.keys(keys).length) localStorage.setItem(USER_KEY, JSON.stringify(keys));
+    else localStorage.removeItem(USER_KEY);
+  } catch {
+    // Private mode or blocked storage: the change lasts until the page reloads.
+  }
+}
+
 export const OPEN_EVENT = 'shipcue:open';
 
 export const CLOSE_EVENT = 'shipcue:close';
