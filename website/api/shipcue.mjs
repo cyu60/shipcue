@@ -11,6 +11,7 @@ var PRIORITY_LABEL = {
   high: "High",
   blocking: "Blocking"
 };
+var BLOCKED_FILE_TYPES = ["text/html", "application/xhtml+xml", "image/svg+xml", "text/javascript", "application/javascript", "application/x-msdownload"];
 var VIDEO_TYPES = ["video/webm", "video/mp4", "video/quicktime"];
 var VIDEO_EXTENSION = { "video/webm": "webm", "video/mp4": "mp4", "video/quicktime": "mov" };
 function videoType(mime) {
@@ -39,7 +40,8 @@ function resolveConfig(partial = {}) {
     maxScreenshotBytes: partial.maxScreenshotBytes ?? 5 * 1024 * 1024,
     maxTotalScreenshotBytes: partial.maxTotalScreenshotBytes ?? 4 * 1024 * 1024,
     maxVideoBytes: partial.maxVideoBytes ?? 40 * 1024 * 1024,
-    maxVideoSeconds: partial.maxVideoSeconds ?? 60
+    maxVideoSeconds: partial.maxVideoSeconds ?? 60,
+    allowFiles: partial.allowFiles ?? false
   };
 }
 function toBoardItem(r, screenshots) {
@@ -245,10 +247,11 @@ function sameToken(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 var escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var isImageLink = (u) => u.startsWith("/") || u.startsWith("https://");
-async function toDataUrl(file) {
+var isImageLink = (u) => u.startsWith("/") || u.startsWith("https://") && !/\.(?!png|jpe?g|webp|gif)[a-z0-9]{2,5}(?:[?#]|$)/i.test(u);
+async function toDataUrl(file, withName = false) {
   const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
-  return `data:${file.type};base64,${base64}`;
+  const name = withName && file.name ? `;name=${encodeURIComponent(file.name)}` : "";
+  return `data:${file.type || "application/octet-stream"}${name};base64,${base64}`;
 }
 async function readJson(req) {
   try {
@@ -294,12 +297,22 @@ function createShipcueHandler(opts) {
       config
     );
     if (!checked.ok) return fail(checked.error);
-    const files = form.getAll("screenshot").filter((f) => f instanceof File && f.size > 0);
-    if (files.length > config.maxScreenshots) return fail(`Up to ${config.maxScreenshots} screenshots.`);
-    for (const f of files) {
+    const shots = form.getAll("screenshot").filter((f) => f instanceof File && f.size > 0);
+    const others = form.getAll("file").filter((f) => f instanceof File && f.size > 0);
+    if (others.length && !config.allowFiles) return fail("This app takes screenshots and videos only.");
+    const files = [...shots, ...others];
+    if (files.length > config.maxScreenshots) return fail(`Up to ${config.maxScreenshots} screenshots and files.`);
+    for (const f of shots) {
       if (!IMAGE_TYPES[f.type]) return fail("Screenshots must be PNG, JPG, WebP or GIF.");
+    }
+    for (const f of others) {
+      if (BLOCKED_FILE_TYPES.includes(f.type.split(";")[0].trim().toLowerCase()) || /\.(html?|svg|js|exe)$/i.test(f.name)) {
+        return fail(`${f.name || "That file"} cannot be attached.`);
+      }
+    }
+    for (const f of files) {
       if (f.size > config.maxScreenshotBytes) {
-        return fail(`Each screenshot must be under ${Math.round(config.maxScreenshotBytes / 1024 / 1024)} MB.`);
+        return fail(`Each screenshot or file must be under ${Math.round(config.maxScreenshotBytes / 1024 / 1024)} MB.`);
       }
     }
     const total = files.reduce((n, f) => n + f.size, 0);
@@ -310,7 +323,7 @@ function createShipcueHandler(opts) {
     const screenshots = [];
     for (const [i, f] of files.entries()) {
       const key = `${batch}/${i + 1}.${IMAGE_TYPES[f.type]}`;
-      screenshots.push(opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f));
+      screenshots.push(opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f, !IMAGE_TYPES[f.type]));
     }
     const report = await store.create({ ...checked.value, reporter, screenshots });
     if (opts.onReport) {
@@ -324,13 +337,23 @@ function createShipcueHandler(opts) {
   }
   const VIDEO_WINDOW_MS = 30 * 60 * 1e3;
   async function attachVideo(req, id) {
-    if (!opts.saveVideo) return fail("Not found", 404);
+    if (!opts.saveVideo && !opts.acceptVideoUrl) return fail("This app does not take videos.", 404);
     const report = await store.get(id);
     if (!report) return fail("No such report", 404);
     const reporter = opts.getReporter ? await opts.getReporter(req) : null;
     if (report.reporter !== null && report.reporter !== reporter) return fail("Not your report.", 403);
     if (Date.now() - Date.parse(report.createdAt) > VIDEO_WINDOW_MS) return fail("Too late to add a video to this report.", 403);
     if (report.video) return fail("This report already has a video.", 409);
+    if ((req.headers.get("content-type") ?? "").includes("application/json")) {
+      if (!opts.acceptVideoUrl) return fail("Send the video as a form.");
+      const { url: url2 } = await readJson(req);
+      if (typeof url2 !== "string" || !url2.startsWith("https://") || !await opts.acceptVideoUrl(url2, id)) {
+        return fail("That video link is not one this app stored.", 400);
+      }
+      const saved2 = await store.attachVideo(id, url2);
+      return saved2 ? json({ report: saved2 }) : fail("This report already has a video.", 409);
+    }
+    if (!opts.saveVideo) return fail("This app takes videos by link only.", 400);
     let form;
     try {
       form = await req.formData();
@@ -404,7 +427,7 @@ function createShipcueHandler(opts) {
       headers: { "content-type": "application/json", "cache-control": "no-store" }
     });
   }
-  const boardShots = (r) => r.screenshots.map((src, n) => src.startsWith("data:") ? `${base}/board/screenshot/${r.id}/${n}` : src).filter(isImageLink);
+  const boardShots = (r) => r.screenshots.map((src, n) => src.startsWith("data:") ? /^data:image\/(png|jpeg|webp|gif)[;,]/.test(src) ? `${base}/board/screenshot/${r.id}/${n}` : "" : src).filter(isImageLink);
   async function boardScreenshot(req, id, n) {
     const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
     if (!allowed || !opts.boardScreenshots) return fail("Not found", 404);
@@ -431,6 +454,16 @@ function createShipcueHandler(opts) {
         console.error("shipcue: board screenshot failed", err);
         return fail("Something went wrong. Please try again.", 500);
       }
+    }
+    if (req.method === "GET" && path === `${base}/capabilities`) {
+      const caps = {
+        video: opts.saveVideo ? "form" : opts.acceptVideoUrl ? "url" : null,
+        files: config.allowFiles,
+        maxVideoBytes: config.maxVideoBytes,
+        maxScreenshots: config.maxScreenshots,
+        maxTotalScreenshotBytes: config.maxTotalScreenshotBytes
+      };
+      return new Response(JSON.stringify(caps), { headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
     if (req.method === "GET" && path === `${base}/board`) {
       try {
@@ -466,13 +499,19 @@ var AREAS = [
 var pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 var handler = createShipcueHandler({
   store: postgresStore(pool),
-  config: resolveConfig({ areas: AREAS }),
+  // Any file can come along with a report here, not just screenshots (report e8b2dedd).
+  config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: "/api/shipcue",
   agentToken: process.env.SHIPCUE_TOKEN,
   // The Changelog page reads the queue and the fixes (no reporters or diagnostics).
   board: true,
   // shipcue's own board shows screenshots too (report 9fdd0b45).
-  boardScreenshots: true
+  boardScreenshots: true,
+  // Videos are uploaded to Vercel Blob by /api/shipcue-upload; only this store's report folders count.
+  acceptVideoUrl: (url, id) => {
+    const u = new URL(url);
+    return u.hostname.endsWith(".public.blob.vercel-storage.com") && u.pathname.startsWith(`/videos/${id}/`);
+  }
 });
 function restore(req) {
   const url = new URL(req.url);

@@ -13,7 +13,7 @@
 <meta name="description" content="Set up shipcue: the table, the handler, the button and the agent tools.">
 <meta property="og:title" content="Docs · shipcue">
 <meta property="og:description" content="Set up shipcue: the table, the handler, the button and the agent tools.">
-<meta property="og:image" content="https://shipcue.vercel.app/assets/banner.png">
+<meta property="og:image" content="https://shipcue.ibuildathing.com/assets/banner.png">
 </head>
 <body>
 <div class="wrap">
@@ -72,6 +72,8 @@ export { handler as GET, handler as POST };</code></pre>
   <li>Recent page errors are added to the snapshot as <code>recentErrors</code>. Turn this off with <code>captureErrors={false}</code>.</li>
   <li><code>uploadVideo</code> uploads a recording or video yourself; without it the button posts it to the handler.</li>
   <li><code>pastReportsHref</code> adds a Past reports link to the panel (<code>pastReportsLabel</code> changes its text).</li>
+  <li><code>uploadVideo</code> uploads a video straight to your storage; post its URL to <code>/reports/:id/video</code> and accept it with the handler's <code>acceptVideoUrl</code>. Use it past Vercel's 4.5 MB request limit.</li>
+  <li><code>resolveConfig({ allowFiles: true })</code> takes PDFs, logs and other files next to screenshots (never HTML, SVG or scripts).</li>
   <li>The panel shows the page it will attach, with a "don't attach" link.</li>
 </ul>
 

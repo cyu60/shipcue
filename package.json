@@ -1,6 +1,6 @@
 {
   "name": "shipcue",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "A drop-in bug report and feature request button whose inbox is a queue that people and coding agents both work from.",
   "license": "MIT",
   "type": "module",
@@ -69,7 +69,7 @@
     "type": "git",
     "url": "git+https://github.com/cyu60/shipcue.git"
   },
-  "homepage": "https://shipcue.vercel.app",
+  "homepage": "https://shipcue.ibuildathing.com",
   "bugs": {
     "url": "https://github.com/cyu60/shipcue/issues"
   },

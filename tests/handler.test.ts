@@ -61,9 +61,9 @@ describe('filing a report', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'Screenshots must be PNG, JPG, WebP or GIF.' });
     res = await handle(post('/reports', reportForm({}, Array.from({ length: 11 }, () => png()))));
-    expect(await res.json()).toEqual({ error: 'Up to 10 screenshots.' });
+    expect(await res.json()).toEqual({ error: 'Up to 10 screenshots and files.' });
     res = await handle(post('/reports', reportForm({}, [png(6 * 1024 * 1024)])));
-    expect(await res.json()).toEqual({ error: 'Each screenshot must be under 5 MB.' });
+    expect(await res.json()).toEqual({ error: 'Each screenshot or file must be under 5 MB.' });
     res = await handle(post('/reports', reportForm({ description: 'short' })));
     expect(res.status).toBe(400);
   });
@@ -198,6 +198,63 @@ describe('screenshots per report', () => {
     const res = await handle(post('/reports', reportForm({}, big)));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/add up to more than/);
+  });
+});
+
+describe('capabilities, files and videos by link', () => {
+  const pdf = (bytes = 20) => new File([new Uint8Array(bytes)], 'trace.pdf', { type: 'application/pdf' });
+  const fileForm = (files: File[]) => {
+    const f = reportForm();
+    for (const file of files) f.append('file', file);
+    return f;
+  };
+
+  it('says what it takes', async () => {
+    let caps = await (await setup().handle(new Request(BASE + '/capabilities'))).json();
+    expect(caps).toMatchObject({ video: null, files: false });
+    caps = await (await setup({ saveVideo: async () => 'https://x/v.webm', config: { ...config, allowFiles: true } }).handle(new Request(BASE + '/capabilities'))).json();
+    expect(caps).toMatchObject({ video: 'form', files: true });
+    caps = await (await setup({ acceptVideoUrl: () => true }).handle(new Request(BASE + '/capabilities'))).json();
+    expect(caps.video).toBe('url');
+  });
+
+  it('takes other files only with allowFiles, and never pages or scripts', async () => {
+    let res = await setup().handle(post('/reports', fileForm([pdf()])));
+    expect(await res.json()).toEqual({ error: 'This app takes screenshots and videos only.' });
+    const { store, handle } = setup({ config: { ...config, allowFiles: true } });
+    res = await handle(post('/reports', fileForm([pdf()])));
+    expect(res.status).toBe(201);
+    const saved = await store.get((await res.json()).id);
+    expect(saved?.screenshots[0]).toMatch(/^data:application\/pdf;name=trace\.pdf;base64,/);
+    res = await handle(post('/reports', fileForm([new File(['<script>'], 'x.html', { type: 'text/html' })])));
+    expect(await res.json()).toEqual({ error: 'x.html cannot be attached.' });
+  });
+
+  it('keeps files off the public board', async () => {
+    const { handle } = setup({ board: true, boardScreenshots: true, config: { ...config, allowFiles: true } });
+    await handle(post('/reports', fileForm([pdf()])));
+    const board = await (await handle(new Request(BASE + '/board'))).json();
+    expect(board.queue[0].screenshots).toBeUndefined();
+  });
+
+  it('attaches a video by link when acceptVideoUrl says it is ours', async () => {
+    const accept = vi.fn((url: string, id: string) => url.startsWith(`https://blob.example/videos/${id}/`));
+    const { store, handle } = setup({ acceptVideoUrl: accept });
+    const id = (await (await handle(post('/reports', reportForm()))).json()).id;
+    const bad = await handle(post(`/reports/${id}/video`, JSON.stringify({ url: 'https://evil.example/v.webm' }), { 'content-type': 'application/json' }));
+    expect(bad.status).toBe(400);
+    const ok = await handle(post(`/reports/${id}/video`, JSON.stringify({ url: `https://blob.example/videos/${id}/video.webm` }), { 'content-type': 'application/json' }));
+    expect(ok.status).toBe(200);
+    expect((await store.get(id))?.video).toBe(`https://blob.example/videos/${id}/video.webm`);
+  });
+
+  it('says plainly when it takes no videos', async () => {
+    const { handle } = setup();
+    const id = (await (await handle(post('/reports', reportForm()))).json()).id;
+    const form = new FormData();
+    form.set('video', new File(['x'], 'v.webm', { type: 'video/webm' }));
+    const res = await handle(post(`/reports/${id}/video`, form));
+    expect(await res.json()).toEqual({ error: 'This app does not take videos.' });
   });
 });
 

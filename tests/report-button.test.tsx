@@ -111,8 +111,7 @@ describe('ReportButton', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
     await userEvent.type(screen.getByRole('textbox'), 'Heading disappears on Enter');
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0]![0]).toBe('/api/fq/reports');
+    await waitFor(() => expect(fetchMock.mock.calls.map((c) => c[0])).toContain('/api/fq/reports'));
     vi.unstubAllGlobals();
   });
 });
@@ -139,7 +138,9 @@ describe('ReportButton: video, page, errors and past reports', () => {
   });
   it('posts the video to the handler when no uploadVideo is given', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
-      new Response(JSON.stringify(String(url).endsWith('/reports') ? { id: 'r9' } : { ok: true }), { status: String(url).endsWith('/reports') ? 201 : 200 }),
+      String(url).endsWith('/capabilities')
+        ? new Response(JSON.stringify({ video: 'form', files: false }))
+        : new Response(JSON.stringify(String(url).endsWith('/reports') ? { id: 'r9' } : { ok: true }), { status: String(url).endsWith('/reports') ? 201 : 200 }),
     );
     render(<ReportButton areas={areas} endpoint="/api/shipcue" />);
     await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
@@ -147,6 +148,42 @@ describe('ReportButton: video, page, errors and past reports', () => {
     fireEvent.change(screen.getByLabelText(/attach a video/i), { target: { files: [new File(['x'], 'c.webm', { type: 'video/webm' })] } });
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(fetchSpy.mock.calls.map((c) => String(c[0]))).toContain('/api/shipcue/reports/r9/video'));
+    fetchSpy.mockRestore();
+  });
+  it('offers no video when the handler takes none, and sends other files when it takes them', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      String(url).endsWith('/capabilities')
+        ? new Response(JSON.stringify({ video: null, files: true }))
+        : new Response(JSON.stringify({ id: 'r7' }), { status: 201 }),
+    );
+    render(<ReportButton areas={areas} endpoint="/api/shipcue" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    await waitFor(() => expect(screen.getByText(/paste or drop screenshots, files into/i)).toBeInTheDocument());
+    expect(screen.queryByLabelText(/attach a video/i)).toBeNull();
+    await type();
+    fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { files: [new File(['%PDF'], 'trace.pdf', { type: 'application/pdf' })] } });
+    expect(await screen.findByText('trace.pdf')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(fetchSpy.mock.calls.some((c) => String(c[0]).endsWith('/reports'))).toBe(true));
+    const sent = fetchSpy.mock.calls.find((c) => String(c[0]).endsWith('/reports'))![1]!.body as FormData;
+    expect((sent.get('file') as File).name).toBe('trace.pdf');
+    expect(sent.get('screenshot')).toBeNull();
+    fetchSpy.mockRestore();
+  });
+  it('turns a 404 from the video upload into a plain sentence', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      String(url).endsWith('/capabilities')
+        ? new Response('', { status: 404 })
+        : String(url).endsWith('/reports')
+          ? new Response(JSON.stringify({ id: 'r8' }), { status: 201 })
+          : new Response('', { status: 404 }),
+    );
+    render(<ReportButton areas={areas} endpoint="/api/shipcue" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    await type();
+    fireEvent.change(await screen.findByLabelText(/attach a video/i), { target: { files: [new File(['x'], 'c.webm', { type: 'video/webm' })] } });
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText(/the video was not attached: this app does not take videos/i)).toBeInTheDocument();
     fetchSpy.mockRestore();
   });
   it('still files the report when the video fails, and says so', async () => {

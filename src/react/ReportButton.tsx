@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, type Hotkeys } from './hotkeys';
-import { formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Priority, type ReportType } from '../core';
+import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
@@ -144,7 +144,9 @@ async function postVideo(endpoint: string, reportId: string, video: Blob): Promi
   const res = await fetch(`${endpoint.replace(/\/$/, '')}/reports/${reportId}/video`, { method: 'POST', body: form });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? 'Could not upload the video.');
+    // A host's own limit (Vercel: 4.5 MB per request) answers before the handler does.
+    if (res.status === 413) throw new Error(`The video (${formatBytes(video.size)}) is too big for this app to take. Try a shorter one.`);
+    throw new Error(body.error ?? (res.status === 404 ? 'This app does not take videos.' : 'Could not upload the video.'));
   }
 }
 
@@ -195,16 +197,32 @@ function ReportPanel({
   const recorderRef = useRef<ScreenRecording | null>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   // Video needs somewhere to go: your uploader, or the handler.
-  const videoOn = !!uploadVideo || !submit;
+  // What the handler takes (GET {endpoint}/capabilities), so the panel only offers that
+  // (shipcue report 04192848). 'legacy': an older handler without the route.
+  const [caps, setCaps] = useState<Capabilities | 'loading' | 'legacy'>('loading');
+  useEffect(() => {
+    if (submit || !open || caps !== 'loading') return;
+    let live = true;
+    fetch(`${endpoint.replace(/\/$/, '')}/capabilities`, { cache: 'no-store' })
+      .then(async (res) => (res.ok ? ((await res.json()) as Capabilities) : 'legacy'))
+      .catch(() => 'legacy' as const)
+      .then((c) => live && setCaps(c));
+    return () => {
+      live = false;
+    };
+  }, [open, submit, endpoint, caps]);
+  const known = typeof caps === 'object' ? caps : null;
+  const videoOn = !!uploadVideo || (!submit && (caps === 'legacy' || known?.video === 'form'));
+  const filesOn = !!known?.files;
   const uid = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   // While open, the panel never shrinks back (switching tabs, clearing text), so it does not jump.
-  const tallest = useRef(0);
+  const contentRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
-  useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
+  const previews = useMemo(() => files.map((f) => (ACCEPT.includes(f.type) ? URL.createObjectURL(f) : '')), [files]);
+  useEffect(() => () => previews.forEach((u) => u && URL.revokeObjectURL(u)), [previews]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -376,30 +394,32 @@ function ReportPanel({
     onOpenChangeRef.current?.(open);
   }, [open]);
 
+  // The panel follows its content, growing and shrinking, with a short ease instead of a jump
+  // (shipcue report e8b2dedd; it used to only grow).
   useEffect(() => {
     const el = panelRef.current;
-    if (!open || !el || typeof ResizeObserver === 'undefined') {
-      tallest.current = 0;
-      return;
-    }
+    const inner = contentRef.current;
+    if (!open || !el || !inner || typeof ResizeObserver === 'undefined') return;
     let frame = 0;
+    let first = true;
     // Written on the next frame: changing the size inside the observer's own callback
     // makes the browser report a "ResizeObserver loop" error.
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const h = el.getBoundingClientRect().height;
-        if (h > tallest.current + 0.5) {
-          tallest.current = h;
-          el.style.minHeight = `${Math.ceil(h)}px`;
-        }
+        const cs = getComputedStyle(el);
+        const frameSize = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((n, k) => n + (parseFloat(cs[k as 'paddingTop']) || 0), 0);
+        el.style.transition = first ? '' : 'height 0.16s ease';
+        el.style.height = `${Math.ceil(inner.getBoundingClientRect().height + frameSize)}px`;
+        first = false;
       });
     });
-    ro.observe(el);
+    ro.observe(inner);
     return () => {
       cancelAnimationFrame(frame);
       ro.disconnect();
-      el.style.minHeight = '';
+      el.style.height = '';
+      el.style.transition = '';
     };
   }, [open]);
 
@@ -410,18 +430,34 @@ function ReportPanel({
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
+  // Pasted, dropped or picked: a video goes to the video slot, an image is a screenshot, and
+  // anything else is a file when the handler takes files (shipcue report e8b2dedd).
   const addFiles = async (incoming: File[]) => {
     setError(null);
     const next = [...files];
     for (const raw of incoming) {
+      if (raw.type.startsWith('video/')) {
+        if (videoOn) attachVideo(raw);
+        else setError('This app does not take videos.');
+        continue;
+      }
+      const isImage = raw.type.startsWith('image/') && raw.type !== 'image/svg+xml';
+      if (!isImage && !filesOn) {
+        setError(videoOn ? 'Attach screenshots or a video here.' : 'Screenshots must be PNG, JPG, WebP or GIF.');
+        continue;
+      }
+      if (!isImage && (BLOCKED_FILE_TYPES.includes(raw.type) || /\.(html?|svg|js|exe)$/i.test(raw.name))) {
+        setError(`${raw.name} cannot be attached.`);
+        continue;
+      }
       // Retina screenshots are re-encoded smaller in the browser first.
-      const f = await shrinkImage(raw);
-      if (!ACCEPT.includes(f.type)) {
+      const f = isImage ? await shrinkImage(raw) : raw;
+      if (isImage && !ACCEPT.includes(f.type)) {
         setError('Screenshots must be PNG, JPG, WebP or GIF.');
         continue;
       }
       if (f.size > config.maxScreenshotBytes) {
-        setError(`Each screenshot must be under ${Math.round(config.maxScreenshotBytes / 1024 / 1024)} MB.`);
+        setError(`Each ${isImage ? 'screenshot' : 'file'} must be under ${Math.round(config.maxScreenshotBytes / 1024 / 1024)} MB.`);
         continue;
       }
       if (next.length >= config.maxScreenshots) {
@@ -452,7 +488,7 @@ function ReportPanel({
       form.set('pageUrl', page ?? '');
       form.set('userAgent', navigator.userAgent);
       form.set('diagnostics', snapshot(diagnostics, captureErrors));
-      files.forEach((f) => form.append('screenshot', f, f.name));
+      files.forEach((f) => form.append(ACCEPT.includes(f.type) ? 'screenshot' : 'file', f, f.name));
       const result = submit ? await submit(form) : await postTo(endpoint, form);
       if ('error' in result) throw new Error(result.error);
       // The report is filed either way; a failed video upload is said on the thanks screen.
@@ -485,7 +521,21 @@ function ReportPanel({
   return (
     <div data-shipcue={variant} style={variant === 'floating' ? s.floatingWrap : s.inlineWrap}>
       {open && recording === null && (
-        <div ref={panelRef} role="dialog" aria-label={extra ? (extra.title ?? extra.label) : HEADING[type][0]} style={variant === 'floating' ? s.panel : s.inlinePanel}>
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label={extra ? (extra.title ?? extra.label) : HEADING[type][0]}
+          style={variant === 'floating' ? s.panel : s.inlinePanel}
+          onDragOver={(e) => {
+            if (!extra && e.dataTransfer.types.includes('Files')) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            if (extra || !e.dataTransfer.files.length) return;
+            e.preventDefault();
+            void addFiles(Array.from(e.dataTransfer.files));
+          }}
+        >
+          <div ref={contentRef}>
           <div style={s.row}>
             <div>
               <h3 style={s.h3}>{extra ? (extra.title ?? extra.label) : HEADING[type][0]}</h3>
@@ -549,10 +599,10 @@ function ReportPanel({
                   }
                 }}
                 onPaste={(e) => {
-                  const imgs = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'));
-                  if (imgs.length) {
+                  const pasted = Array.from(e.clipboardData.files);
+                  if (pasted.length) {
                     e.preventDefault();
-                    void addFiles(imgs);
+                    void addFiles(pasted);
                   }
                 }}
                 rows={4}
@@ -610,7 +660,7 @@ function ReportPanel({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={ACCEPT.join(',')}
+                accept={filesOn ? undefined : [...ACCEPT, ...(videoOn ? ['video/webm', 'video/mp4', 'video/quicktime'] : [])].join(',')}
                 multiple
                 hidden
                 onChange={(e) => {
@@ -620,8 +670,15 @@ function ReportPanel({
               />
               <div style={s.thumbs}>
                 {previews.map((src, i) => (
-                  <div key={src + i} style={{ position: 'relative' }}>
-                    <img src={src} alt={`Screenshot ${i + 1}`} style={s.thumb} />
+                  <div key={(src || files[i]!.name) + i} style={{ position: 'relative' }}>
+                    {src ? (
+                      <img src={src} alt={`Screenshot ${i + 1}`} style={s.thumb} />
+                    ) : (
+                      <div title={files[i]!.name} style={{ ...s.thumb, ...s.fileChip }}>
+                        <span style={s.fileName}>{files[i]!.name}</span>
+                        <span>{formatBytes(files[i]!.size)}</span>
+                      </div>
+                    )}
                     <button
                       type="button"
                       aria-label={`Remove screenshot ${i + 1}`}
@@ -636,8 +693,8 @@ function ReportPanel({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    aria-label="Add a screenshot"
-                    title="Add a screenshot"
+                    aria-label={filesOn ? 'Add a screenshot or file' : 'Add a screenshot'}
+                    title={filesOn ? 'Add a screenshot or file' : 'Add a screenshot'}
                     style={s.addShot}
                   >
                     <svg data-icon="photo" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -648,7 +705,10 @@ function ReportPanel({
                   </button>
                 )}
               </div>
-              <p style={s.hint}>Paste a screenshot into the text box, or add up to {config.maxScreenshots}.</p>
+              <p style={s.hint}>
+                Paste or drop {filesOn ? 'screenshots, files' : 'screenshots'}
+                {videoOn ? ' or a video' : ''} into the text box, or add up to {config.maxScreenshots}.
+              </p>
 
               {videoOn && (
                 <div style={{ ...s.thumbs, alignItems: 'center' }}>
@@ -775,6 +835,7 @@ function ReportPanel({
               if it helps
             </p>
           )}
+          </div>
         </div>
       )}
 
@@ -882,6 +943,8 @@ function styles(accent: string) {
     watermark: { margin: '12px 0 0', textAlign: 'center', fontSize: 10, color: '#a1a1aa', fontFamily: font } as CSSProperties,
     watermarkLink: { color: '#71717a', textDecoration: 'none', fontWeight: 600 } as CSSProperties,
     thumbs: { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 } as CSSProperties,
+    fileChip: { display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2, padding: 4, fontSize: 9, color: '#71717a', background: '#fafafa', textAlign: 'center', overflow: 'hidden' } as CSSProperties,
+    fileName: { color: '#3f3f46', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
     thumb: { width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #e4e4e7' } as CSSProperties,
     remove: {
       position: 'absolute',

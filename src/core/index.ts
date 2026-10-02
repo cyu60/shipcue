@@ -47,6 +47,30 @@ export interface ShipcueConfig {
   maxVideoBytes: number;
   /** Screen recordings stop after this long. */
   maxVideoSeconds: number;
+  /**
+   * Take other files too (a PDF, a log, a CSV), kept with the screenshots and under the same
+   * limits. Off by default: turn it on where whoever reads your reports can open any file.
+   */
+  allowFiles: boolean;
+}
+
+/** What the handler takes, from GET {base}/capabilities, so the button only offers that. */
+export interface Capabilities {
+  /** 'form': post the video to the handler; 'url': upload it yourself, then post its URL; null: no videos. */
+  video: 'form' | 'url' | null;
+  files: boolean;
+  maxVideoBytes: number;
+  maxScreenshots: number;
+  maxTotalScreenshotBytes: number;
+}
+
+/** File types never taken as attachments: they could run as a page or a script. */
+export const BLOCKED_FILE_TYPES = ['text/html', 'application/xhtml+xml', 'image/svg+xml', 'text/javascript', 'application/javascript', 'application/x-msdownload'];
+
+/** A file's name from a data URL saved with ;name=..., else null. */
+export function dataUrlName(url: string): string | null {
+  const m = /^data:[^;,]+(?:;[^;,]+)*?;name=([^;,]+)/.exec(url);
+  return m?.[1] ? decodeURIComponent(m[1]) : null;
 }
 
 export const VIDEO_TYPES = ['video/webm', 'video/mp4', 'video/quicktime'] as const;
@@ -85,6 +109,7 @@ export function resolveConfig(partial: Partial<ShipcueConfig> = {}): ShipcueConf
     maxTotalScreenshotBytes: partial.maxTotalScreenshotBytes ?? 4 * 1024 * 1024,
     maxVideoBytes: partial.maxVideoBytes ?? 40 * 1024 * 1024,
     maxVideoSeconds: partial.maxVideoSeconds ?? 60,
+    allowFiles: partial.allowFiles ?? false,
   };
 }
 

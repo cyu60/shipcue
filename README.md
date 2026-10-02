@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://shipcue.vercel.app"><img src="docs/banner.png" alt="shipcue: bug reports your coding agents can fix" width="100%"></a>
+<a href="https://shipcue.ibuildathing.com"><img src="docs/banner.png" alt="shipcue: bug reports your coding agents can fix" width="100%"></a>
 
 <br>
 
@@ -10,7 +10,7 @@
 
 **Drop-in report button** &nbsp;•&nbsp; **Queue in your own Postgres** &nbsp;•&nbsp; **Agents claim over MCP** &nbsp;•&nbsp; **One report, one agent**
 
-🌐 [Website](https://shipcue.vercel.app) &nbsp;•&nbsp; ☁️ [Cloud](https://shipcue.vercel.app/cloud/) &nbsp;•&nbsp; 📖 [Docs](https://shipcue.vercel.app/docs/) &nbsp;•&nbsp; 📝 [Blog](https://shipcue.vercel.app/blog/) &nbsp;•&nbsp; ✉️ [Contact](https://shipcue.vercel.app/contact/)
+🌐 [Website](https://shipcue.ibuildathing.com) &nbsp;•&nbsp; ☁️ [Cloud](https://shipcue.ibuildathing.com/cloud/) &nbsp;•&nbsp; 📖 [Docs](https://shipcue.ibuildathing.com/docs/) &nbsp;•&nbsp; 📝 [Blog](https://shipcue.ibuildathing.com/blog/) &nbsp;•&nbsp; ✉️ [Contact](https://shipcue.ibuildathing.com/contact/)
 
 </div>
 
@@ -40,7 +40,7 @@ It started as the report button inside three apps (a founders dashboard, a hacka
 - **Beta tests and dogfooding sessions.** Testers file what they hit; areas and priority keep the pile in order for the agents.
 - **Feature requests too.** An agent can draft one as a PR, or you close it as won't fix with a reason.
 
-More on the [use cases page](https://shipcue.vercel.app/use-cases/).
+More on the [use cases page](https://shipcue.ibuildathing.com/use-cases/).
 
 ## Install
 
@@ -106,6 +106,8 @@ What else the panel does:
 - **Record screen or attach a video.** Recordings stop at 60 seconds. The video uploads after the report is filed; if it fails, the report is still filed and the panel says so. Pass `uploadVideo={(reportId, blob) => …}` to upload it yourself; otherwise it goes to the handler. With `submit` and no `uploadVideo`, video is hidden.
 - **Recent errors.** Page errors, unhandled rejections and `console.error` calls from before the report are added to the snapshot as `recentErrors`. Turn off with `captureErrors={false}`.
 - **The page.** The panel shows which page it will attach, with a "don't attach" link.
+- **Videos past 4.5 MB.** Hosts like Vercel cap a request at 4.5 MB, so for longer recordings upload the video from the browser straight to your storage with `uploadVideo`, then post its URL to `{endpoint}/reports/:id/video` as `{ url }`; the handler checks it with `acceptVideoUrl(url, id)`. shipcue's own site does this with Vercel Blob client uploads (`website/_src/button.mjs`, `website/_src/upload.mjs`).
+- **Any file.** `resolveConfig({ allowFiles: true })` lets people attach PDFs, logs and other files next to screenshots, under the same limits (never HTML, SVG or scripts). Off by default: turn it on where whoever reads your reports can open any file. Files never show on the public board.
 - **Past reports.** `pastReportsHref="/reports"` adds a Past reports link to the panel and a See your reports link after sending; `pastReportsLabel` changes its text.
 
 The panel has three tabs: **Bug**, **Feature request** and **Agent task** (a direct instruction for an agent; limit them with `types={['bug', 'feature']}` on a public page). The panel ends with a small "Powered by shipcue · ★ Star it on GitHub" line. If shipcue helps you, a star really helps; `watermark={false}` turns it off.
@@ -194,6 +196,7 @@ pnpm build
 
 ## Changelog
 
+- **0.6.6**: the panel grows and shrinks with what is in it; paste or drop a video straight into the text box; `allowFiles` takes other files (PDFs, logs) too; `GET /capabilities` tells the button what the handler takes, so it never offers a video it cannot send; `acceptVideoUrl` takes videos uploaded straight to your storage (past Vercel's 4.5 MB request limit); clear errors instead of "Not found".
 - **0.6.5**: the board's Open / Fixed / All / Changelog tabs are pills again.
 - **0.6.4**: the board's tabs are Open / Fixed / All / Changelog with counts; a small Shortcuts link in the panel lets each person change the hotkeys, saved in their browser.
 - **0.6.3**: the board has a Queue / Changelog toggle and can show screenshots (`boardScreenshots`, opt-in); `pastReportsLabel`; the Agent task tab reads "Delegate a task to your agent."
