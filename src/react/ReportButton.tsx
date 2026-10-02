@@ -695,8 +695,8 @@ function styles(accent: string) {
     color: '#27272a',
     background: '#fff',
   };
-  // Outliner report 22:52: bigger tabs and the shipcue site's solid, rounded buttons.
-  const seg: CSSProperties = { flex: 1, border: 0, borderRadius: 8, padding: '8px 10px', fontSize: 13, fontWeight: 600, fontFamily: font, cursor: 'pointer', whiteSpace: 'nowrap' };
+  // Small, quiet tabs and buttons (Chinat preferred these over bigger, bolder ones).
+  const seg: CSSProperties = { flex: 1, border: 0, borderRadius: 6, padding: '4px 8px', fontSize: 12, fontWeight: 500, fontFamily: font, cursor: 'pointer', whiteSpace: 'nowrap' };
   return {
     floatingWrap: {
       position: 'fixed',
@@ -724,8 +724,8 @@ function styles(accent: string) {
     sub: { margin: '2px 0 0', fontSize: 12, color: '#71717a' } as CSSProperties,
     iconBtn: { border: 0, background: 'transparent', color: '#a1a1aa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 4 } as CSSProperties,
     success: { marginTop: 12, borderRadius: 8, background: '#ecfdf5', color: '#065f46', padding: '8px 12px', fontSize: 12 } as CSSProperties,
-    segment: { display: 'flex', gap: 4, marginTop: 12, background: '#f4f4f5', borderRadius: 10, padding: 3 } as CSSProperties,
-    segOn: { ...seg, background: accent, color: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.12)' } as CSSProperties,
+    segment: { display: 'flex', gap: 4, marginTop: 12, background: '#f4f4f5', borderRadius: 8, padding: 2 } as CSSProperties,
+    segOn: { ...seg, background: '#fff', color: '#18181b', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } as CSSProperties,
     segOff: { ...seg, background: 'transparent', color: '#71717a' } as CSSProperties,
     textarea: { ...field, marginTop: 12, padding: '8px 12px', resize: 'none' } as CSSProperties,
     grid: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 8, marginTop: 8 } as CSSProperties,
@@ -765,10 +765,10 @@ function styles(accent: string) {
     } as CSSProperties,
     sent: { background: '#fff', color: '#18181b', border: '1px solid #e4e4e7', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontFamily: font, boxShadow: '0 8px 24px rgba(24,24,27,0.12)', maxWidth: 320 } as CSSProperties,
     error: { marginTop: 8, borderRadius: 8, background: '#fff1f2', color: '#be123c', padding: '8px 12px', fontSize: 12 } as CSSProperties,
-    ghost: { border: `2px solid ${accent}`, borderRadius: 10, background: '#fff', color: accent, padding: '5px 12px', fontSize: 12, fontWeight: 600, fontFamily: font, cursor: 'pointer' } as CSSProperties,
+    ghost: { border: '1px solid #d4d4d8', borderRadius: 8, background: '#fff', color: '#3f3f46', padding: '4px 10px', fontSize: 12, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,
     linkBtn: { border: 0, background: 'transparent', color: '#71717a', padding: 0, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' } as CSSProperties,
     recording: { border: 0, borderRadius: 999, background: '#e11d48', color: '#fff', padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' } as CSSProperties,
-    send: { border: `2px solid ${accent}`, borderRadius: 10, background: accent, color: '#fff', padding: '8px 16px', fontSize: 14, fontWeight: 600, fontFamily: font, cursor: 'pointer' } as CSSProperties,
+    send: { border: 0, borderRadius: 8, background: accent, color: '#fff', padding: '6px 12px', fontSize: 14, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,
     fab: {
       width: 48,
       height: 48,
