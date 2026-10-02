@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-155%20passing-2E5BFF?style=flat-square" alt="155 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-156%20passing-2E5BFF?style=flat-square" alt="156 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -233,6 +233,7 @@ pnpm build
 
 ## Changelog
 
+- **0.10.3**: in Tabs view only the current tab is underlined (others no longer keep a grey line once visited); shipcue's CueLog opens on the Changelog.
 - **0.10.2**: `launcherIcon` puts your own mark on the button in place of the sailboat (the accent background stays).
 - **0.10.1**: "+ Add context" under the text box: what your app says is selected (as a preview), or an empty box to type or paste into, on any tab.
 - **Extension 0.1.0**: a Chrome extension that reports from any page with a screenshot, a picked element, the selection and page details (time, time zone, location if you allow it). Download at /extension/.

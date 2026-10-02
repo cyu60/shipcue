@@ -324,7 +324,9 @@ const s: Record<string, CSSProperties> = {
   bar: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.6em', marginBottom: '-1.2em' },
   barTabs: { borderBottom: '1px solid rgba(128,128,128,0.25)' },
   underTabs: { display: 'flex', flexWrap: 'wrap', gap: '1.4em' },
-  underTab: { font: 'inherit', fontSize: '0.9em', padding: '0.4em 0', margin: '0 0 -1px', border: 0, borderBottom: '2px solid transparent', background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },
+  // Longhands only, with the colour always set: mixing the border shorthand with a changing
+  // borderBottomColor left a grey line under every tab once it had been current (report 2c9034d0).
+  underTab: { font: 'inherit', fontSize: '0.9em', padding: '0.4em 0', margin: '0 0 -1px', borderTopWidth: 0, borderLeftWidth: 0, borderRightWidth: 0, borderBottomWidth: 2, borderBottomStyle: 'solid', borderBottomColor: 'transparent', background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },
   underTabOn: { opacity: 1, fontWeight: 600 },
   picker: { fontSize: '0.75em', opacity: 0.7, whiteSpace: 'nowrap' },
   pickBtn: { font: 'inherit', padding: '0 0.3em', border: 0, background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },

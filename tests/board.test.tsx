@@ -78,4 +78,14 @@ describe('ShipcueBoard', () => {
     expect(await screen.findByRole('tab', { name: 'Open 2' }, { timeout: 2000 })).toBeTruthy();
     expect(screen.getByText('asked q2')).toBeTruthy();
   });
+
+  it('underlines only the current tab, even after switching around (report 2c9034d0)', async () => {
+    localStorage.clear();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ queue: [item('q1')], changelog: [item('c1', { status: 'fixed' })] })));
+    render(<ShipcueBoard refreshMs={0} liveMs={0} tabStyle="tabs" viewPicker={false} />);
+    await screen.findByRole('tab', { name: 'Open 1' });
+    for (const name of ['Fixed 1', 'All 2', 'Changelog', 'Open 1']) fireEvent.click(screen.getByRole('tab', { name }));
+    const colors = screen.getAllByRole('tab').map((t) => (t as HTMLElement).style.borderBottomColor);
+    expect(colors.filter((c) => c !== 'transparent')).toHaveLength(1);
+  });
 });
