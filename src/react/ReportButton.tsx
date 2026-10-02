@@ -40,6 +40,11 @@ export interface ReportButtonProps {
    * here when you send reports yourself with `submit`. Given here, they win.
    */
   limits?: Partial<Limits>;
+  /**
+   * Open your app's own shortcut editor from the panel's Shortcuts link, for apps whose keymap
+   * opens shipcue (hotkeys={false}). Without it, the link edits shipcue's own hotkeys in place.
+   */
+  onEditShortcuts?: () => void;
   /** Where people can see the reports they sent; shown as a Past reports link. */
   pastReportsHref?: string;
   /** The text of that link. "Past reports" by default. */
@@ -179,6 +184,7 @@ function ReportPanel({
   pastReportsHref,
   pastReportsLabel = 'Past reports',
   limits,
+  onEditShortcuts,
   watermark = true,
   types,
   hotkeys,
@@ -825,15 +831,20 @@ function ReportPanel({
                       {pastReportsLabel}
                     </a>
                   )}
-                  {pastReportsHref && hotkeys !== false && ' · '}
-                  {hotkeys !== false && (
+                  {pastReportsHref && (hotkeys !== false || onEditShortcuts) && ' · '}
+                  {(hotkeys !== false || onEditShortcuts) && (
                     <button
                       type="button"
                       onClick={() => {
+                        if (onEditShortcuts) {
+                          close();
+                          onEditShortcuts();
+                          return;
+                        }
                         setEditingKeys((v) => !v);
                         setKeyFor(null);
                       }}
-                      aria-expanded={editingKeys}
+                      aria-expanded={onEditShortcuts ? undefined : editingKeys}
                       style={{ ...s.linkBtn, fontSize: 10, textDecoration: 'none', color: '#71717a' }}
                     >
                       Shortcuts

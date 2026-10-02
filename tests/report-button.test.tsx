@@ -366,6 +366,19 @@ describe('ReportButton: hotkeys', () => {
     expect(localStorage.getItem('shipcue:hotkeys')).toBeNull();
   });
 
+  it("opens the app's own shortcut editor when the app runs the keymap", async () => {
+    const onEditShortcuts = vi.fn();
+    await openPanel({ hotkeys: false, onEditShortcuts });
+    await userEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
+    expect(onEditShortcuts).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shows no Shortcuts link when hotkeys are off and the app has no editor', async () => {
+    await openPanel({ hotkeys: false });
+    expect(screen.queryByRole('button', { name: 'Shortcuts' })).toBeNull();
+  });
+
   it('puts the text highlighted on the page in an editable Context box, and sends it', async () => {
     const submit = ok();
     render(<><p>Export the members table as CSV</p><ReportButton areas={areas} submit={submit} hotkeys={keys} /></>);
