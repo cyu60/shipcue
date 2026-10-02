@@ -420,3 +420,12 @@ describe('ReportButton: hooks for host apps', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
+
+describe('ReportButton: no button of its own', () => {
+  it('draws no trigger with trigger={false}, and still opens from openReport', async () => {
+    render(<ReportButton areas={areas} submit={ok()} trigger={false} />);
+    expect(screen.queryByRole('button', { name: 'Report a bug or request a feature' })).toBeNull();
+    openReport('feature');
+    expect(await screen.findByRole('heading', { name: 'Request a feature' })).toBeInTheDocument();
+  });
+});

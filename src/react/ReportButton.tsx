@@ -58,6 +58,11 @@ export interface ReportButtonProps {
    * Give one a hotkey with hotkeys={{ [id]: ['Mod+J'] }}, or open it with openReport(id).
    */
   extraTabs?: ExtraTab[];
+  /**
+   * false draws no button of its own: open the panel from your existing menu or help button with
+   * openReport(), or with the hotkeys.
+   */
+  trigger?: boolean;
 }
 
 export interface ExtraTab {
@@ -129,6 +134,7 @@ export function ReportButton({
   getContext,
   onOpenChange,
   extraTabs,
+  trigger = true,
 }: ReportButtonProps) {
   const tabs = useMemo(() => (types?.length ? TYPES.filter((t) => types.includes(t.value)) : TYPES), [types]);
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
@@ -632,20 +638,22 @@ export function ReportButton({
           ● {Math.floor(recording / 60)}:{String(recording % 60).padStart(2, '0')}
         </button>
       )}
-      <button
-        type="button"
-        onClick={() => (open ? close() : openOn())}
-        aria-label={open ? 'Close report' : 'Report a bug or request a feature'}
-        title="Report a bug or request a feature"
-        style={variant === 'floating' ? s.fab : s.inlineBtn}
-      >
-        <svg data-icon="ship" width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 3v12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          <path d="M12 4.5 18 13h-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-          <path d="M12 7.5 7 13h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-          <path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-        </svg>
-      </button>
+      {trigger !== false && (
+        <button
+          type="button"
+          onClick={() => (open ? close() : openOn())}
+          aria-label={open ? 'Close report' : 'Report a bug or request a feature'}
+          title="Report a bug or request a feature"
+          style={variant === 'floating' ? s.fab : s.inlineBtn}
+        >
+          <svg data-icon="ship" width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3v12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <path d="M12 4.5 18 13h-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            <path d="M12 7.5 7 13h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            <path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

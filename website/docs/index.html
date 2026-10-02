@@ -28,7 +28,7 @@
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
 <p>Until the first npm release is out, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
-<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.4.0/shipcue-0.4.0.tgz</code></pre>
+<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.4.1/shipcue-0.4.1.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 
 <h2>1. Create the table</h2>
@@ -102,7 +102,7 @@ export { handler as GET, handler as POST };</code></pre>
   }]}
   onOpenChange={(open) =&gt; setPanelOpen(open)}
 /&gt;</code></pre>
-<p><code>closeReport()</code> closes the panel from anywhere.</p>
+<p><code>closeReport()</code> closes the panel from anywhere. Already have a help or support button? Pass <code>trigger={false}</code> so shipcue draws no button of its own, and call <code>openReport('bug')</code> from your menu.</p>
 
 <h2>4. Connect an agent</h2>
 <pre><code>claude mcp add shipcue \

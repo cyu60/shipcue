@@ -51,7 +51,7 @@ pnpm add shipcue
 Until the first npm release is out, install the prebuilt release (nothing builds on install, so it works with pnpm on Vercel):
 
 ```bash
-pnpm add https://github.com/cyu60/shipcue/releases/download/v0.4.0/shipcue-0.4.0.tgz
+pnpm add https://github.com/cyu60/shipcue/releases/download/v0.4.1/shipcue-0.4.1.tgz
 ```
 
 ## 1. Create the table
@@ -123,7 +123,7 @@ Text highlighted on the page comes along in an editable, removable **Context** b
 
 ### Your own tabs
 
-An app with its own flow (say an agent-task composer backed by its API) can draw it as a tab in the same panel: `extraTabs={[{ id: 'agent', label: 'Agent task', render: ({ text, context, close }) => <TaskComposer … /> }]}`. Give it a hotkey with `hotkeys={{ agent: ['Mod+J'] }}` or open it with `openReport('agent')`; `onOpenChange` and `closeReport()` let the app follow and close the panel.
+An app with its own flow (say an agent-task composer backed by its API) can draw it as a tab in the same panel: `extraTabs={[{ id: 'agent', label: 'Agent task', render: ({ text, context, close }) => <TaskComposer … /> }]}`. Give it a hotkey with `hotkeys={{ agent: ['Mod+J'] }}` or open it with `openReport('agent')`; `onOpenChange` and `closeReport()` let the app follow and close the panel. If the app already has a help button, `trigger={false}` hides shipcue's own and the app opens the panel with `openReport('bug')`.
 
 ## 4. Let agents work the queue
 
