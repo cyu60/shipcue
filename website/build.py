@@ -486,7 +486,7 @@ EXTENSION = """<div class="prose">
   <li>Click <b>Load unpacked</b> and choose the <code>shipcue-extension</code> folder.</li>
   <li>Pin it from the puzzle-piece menu. Open it with the icon, or with <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.</li>
 </ol>
-<p>It works the same in Edge, Brave, Arc and other Chromium browsers. A Chrome Web Store listing is on the way, after which it installs with one click.</p>
+<p>It works the same in Edge, Brave, Arc and other Chromium browsers.</p>
 
 <h2>What comes along</h2>
 <ul>
