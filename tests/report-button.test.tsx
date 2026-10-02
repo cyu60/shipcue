@@ -200,6 +200,24 @@ describe('ReportButton: video, page, errors and past reports', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
     fetchSpy.mockRestore();
   });
+  it('takes its screenshot limit from the handler, not a hard-coded 10', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ video: 'form', files: false, maxVideoBytes: 4e6, maxVideoSeconds: 60, maxScreenshots: 2, maxScreenshotBytes: 5e6, maxTotalScreenshotBytes: 4e6 })),
+    );
+    render(<ReportButton areas={areas} endpoint="/api/shipcue" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    expect(await screen.findByText(/or add up to 2\./i)).toBeInTheDocument();
+    const png = (n: string) => new File([new Uint8Array(50)], n, { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { files: [png('a.png'), png('b.png'), png('c.png')] } });
+    expect(await screen.findByText('Up to 2 screenshots.')).toBeInTheDocument();
+    expect(screen.getAllByAltText(/^Screenshot \d$/)).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /add a screenshot/i })).toBeNull();
+    fetchSpy.mockRestore();
+  });
+  it('lets an app that sends reports itself set the limits', async () => {
+    await openPanel({ limits: { maxScreenshots: 25 } });
+    expect(screen.getByText(/or add up to 25\./i)).toBeInTheDocument();
+  });
   it('words a size refusal from storage plainly, and still files the report', async () => {
     await openPanel({ uploadVideo: vi.fn(async () => { throw new Error('Vercel Blob: File size exceeds the maximum allowed'); }) });
     await type();

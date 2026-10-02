@@ -191,6 +191,7 @@ export { handler as GET, handler as POST };</code></pre>
   <li>A small "Powered by shipcue · Star it on GitHub" line sits at the bottom of the panel. If shipcue helps you, a star really helps us; <code>watermark={false}</code> turns it off.</li>
   <li>Recent page errors are added to the snapshot as <code>recentErrors</code>. Turn this off with <code>captureErrors={false}</code>.</li>
   <li><code>uploadVideo</code> uploads a recording or video yourself; without it the button posts it to the handler.</li>
+  <li><code>limits</code> (e.g. <code>{ maxScreenshots: 20 }</code>) sets how many screenshots and how big a video may be when you send reports with <code>submit</code>; with the built-in endpoint the button reads them from the handler's <code>resolveConfig</code>.</li>
   <li><code>pastReportsHref</code> adds a Past reports link to the panel (<code>pastReportsLabel</code> changes its text).</li>
   <li><code>uploadVideo</code> uploads a video straight to your storage; post its URL to <code>/reports/:id/video</code> and accept it with the handler's <code>acceptVideoUrl</code>. Use it past Vercel's 4.5 MB request limit.</li>
   <li><code>resolveConfig({ allowFiles: true })</code> takes PDFs, logs and other files next to screenshots (never HTML, SVG or scripts).</li>

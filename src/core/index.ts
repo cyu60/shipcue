@@ -60,9 +60,14 @@ export interface Capabilities {
   video: 'form' | 'url' | null;
   files: boolean;
   maxVideoBytes: number;
+  maxVideoSeconds: number;
   maxScreenshots: number;
+  maxScreenshotBytes: number;
   maxTotalScreenshotBytes: number;
 }
+
+/** The limits the button checks before sending; it takes them from the handler, or from its limits prop. */
+export type Limits = Pick<ShipcueConfig, 'maxScreenshots' | 'maxScreenshotBytes' | 'maxTotalScreenshotBytes' | 'maxVideoBytes' | 'maxVideoSeconds'>;
 
 /** File types never taken as attachments: they could run as a page or a script. */
 export const BLOCKED_FILE_TYPES = ['text/html', 'application/xhtml+xml', 'image/svg+xml', 'text/javascript', 'application/javascript', 'application/x-msdownload'];

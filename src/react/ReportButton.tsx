@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, type Hotkeys } from './hotkeys';
-import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Priority, type ReportType } from '../core';
+import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
@@ -34,6 +34,12 @@ export interface ReportButtonProps {
   uploadVideo?: (reportId: string, video: Blob) => Promise<void>;
   /** Attach recent page errors to every report. On by default. */
   captureErrors?: boolean;
+  /**
+   * How many screenshots, how big, and how long a video may be. With the built-in endpoint the
+   * button reads these from the handler (its resolveConfig), so set them there once; pass them
+   * here when you send reports yourself with `submit`. Given here, they win.
+   */
+  limits?: Partial<Limits>;
   /** Where people can see the reports they sent; shown as a Past reports link. */
   pastReportsHref?: string;
   /** The text of that link. "Past reports" by default. */
@@ -172,6 +178,7 @@ function ReportPanel({
   captureErrors = true,
   pastReportsHref,
   pastReportsLabel = 'Past reports',
+  limits,
   watermark = true,
   types,
   hotkeys,
@@ -224,7 +231,22 @@ function ReportPanel({
   const videoOn = !!uploadVideo || (!submit && (caps === 'legacy' || known?.video === 'form'));
   const filesOn = !!known?.files;
   // The real limit is the handler's when it said one (shipcue: fail gracefully on big videos).
-  const maxVideoBytes = !uploadVideo && known ? Math.min(config.maxVideoBytes, known.maxVideoBytes) : config.maxVideoBytes;
+  // Limits are never hard-coded: the handler's (from /capabilities), then the app's limits prop.
+  const lim = useMemo<Limits>(() => {
+    const fromServer: Partial<Limits> = known
+      ? {
+          maxScreenshots: known.maxScreenshots,
+          maxScreenshotBytes: known.maxScreenshotBytes,
+          maxTotalScreenshotBytes: known.maxTotalScreenshotBytes,
+          maxVideoSeconds: known.maxVideoSeconds,
+          // A video uploaded by the app itself is not held to the one-request cap.
+          ...(uploadVideo ? {} : { maxVideoBytes: known.maxVideoBytes }),
+        }
+      : {};
+    const defined = (o: Partial<Limits> | undefined) => Object.fromEntries(Object.entries(o ?? {}).filter(([, v]) => typeof v === 'number' && v > 0));
+    return { ...config, ...defined(fromServer), ...defined(limits) } as Limits;
+  }, [config, known, uploadVideo, limits]);
+  const maxVideoBytes = lim.maxVideoBytes;
   const uid = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -372,7 +394,7 @@ function ReportPanel({
     setError(null);
     try {
       recorderRef.current = await recordScreen({
-        maxSeconds: config.maxVideoSeconds,
+        maxSeconds: lim.maxVideoSeconds,
         maxBytes: maxVideoBytes,
         onTick: setRecording,
         onDone: ({ blob, note }) => {
@@ -467,17 +489,17 @@ function ReportPanel({
         setError('Screenshots must be PNG, JPG, WebP or GIF.');
         continue;
       }
-      if (f.size > config.maxScreenshotBytes) {
-        setError(`Each ${isImage ? 'screenshot' : 'file'} must be under ${Math.round(config.maxScreenshotBytes / 1024 / 1024)} MB.`);
+      if (f.size > lim.maxScreenshotBytes) {
+        setError(`Each ${isImage ? 'screenshot' : 'file'} must be under ${Math.round(lim.maxScreenshotBytes / 1024 / 1024)} MB.`);
         continue;
       }
-      if (next.length >= config.maxScreenshots) {
-        setError(`Up to ${config.maxScreenshots} screenshots.`);
+      if (next.length >= lim.maxScreenshots) {
+        setError(`Up to ${lim.maxScreenshots} screenshots.`);
         break;
       }
       const total = next.reduce((n, x) => n + x.size, 0) + f.size;
-      if (total > config.maxTotalScreenshotBytes) {
-        setError(`That is all the screenshots one report can carry (${formatBytes(config.maxTotalScreenshotBytes)}). Send the rest in another report.`);
+      if (total > lim.maxTotalScreenshotBytes) {
+        setError(`That is all the screenshots one report can carry (${formatBytes(lim.maxTotalScreenshotBytes)}). Send the rest in another report.`);
         break;
       }
       next.push(f);
@@ -700,7 +722,7 @@ function ReportPanel({
                     </button>
                   </div>
                 ))}
-                {files.length < config.maxScreenshots && (
+                {files.length < lim.maxScreenshots && (
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -718,7 +740,7 @@ function ReportPanel({
               </div>
               <p style={s.hint}>
                 Paste or drop {filesOn ? 'screenshots, files' : 'screenshots'}
-                {videoOn ? ' or a video' : ''} into the text box, or add up to {config.maxScreenshots}.
+                {videoOn ? ' or a video' : ''} into the text box, or add up to {lim.maxScreenshots}.
               </p>
 
               {videoOn && (

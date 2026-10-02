@@ -211,7 +211,9 @@ describe('capabilities, files and videos by link', () => {
 
   it('says what it takes', async () => {
     let caps = await (await setup().handle(new Request(BASE + '/capabilities'))).json();
-    expect(caps).toMatchObject({ video: null, files: false });
+    expect(caps).toMatchObject({ video: null, files: false, maxScreenshots: 10, maxScreenshotBytes: 5 * 1024 * 1024, maxVideoSeconds: 60 });
+    caps = await (await setup({ config: { ...config, maxScreenshots: 30 } }).handle(new Request(BASE + '/capabilities'))).json();
+    expect(caps.maxScreenshots).toBe(30);
     caps = await (await setup({ saveVideo: async () => 'https://x/v.webm', config: { ...config, allowFiles: true } }).handle(new Request(BASE + '/capabilities'))).json();
     expect(caps).toMatchObject({ video: 'form', files: true });
     caps = await (await setup({ acceptVideoUrl: () => true }).handle(new Request(BASE + '/capabilities'))).json();

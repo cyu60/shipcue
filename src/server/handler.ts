@@ -331,7 +331,9 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         files: config.allowFiles,
         // A video posted to the handler has to fit in one request; one uploaded straight to storage does not.
         maxVideoBytes: opts.saveVideo ? Math.min(config.maxVideoBytes, opts.maxRequestBytes ?? Math.floor(4.4 * 1024 * 1024)) : config.maxVideoBytes,
+        maxVideoSeconds: config.maxVideoSeconds,
         maxScreenshots: config.maxScreenshots,
+        maxScreenshotBytes: config.maxScreenshotBytes,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
       };
       return new Response(JSON.stringify(caps), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
