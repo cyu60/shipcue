@@ -174,6 +174,7 @@ const handler = createShipcueHandler({
 
 export { handler as GET, handler as POST };</code></pre>
 <p>Screenshots are stored as small data URLs unless you pass <code>saveScreenshot(file, key)</code> to upload them to S3 or Supabase Storage. A failure inside <code>onReport</code> never fails the report.</p>
+<p>Pass <code>saveVideo(file, key)</code> to let reporters attach a screen recording or video (WebM, MP4 or MOV, up to 40 MB) through <code>POST /reports/:id/video</code>. On hosts that cap request bodies, upload from the browser with the button's <code>uploadVideo</code> prop instead.</p>
 
 <h2>3. Add the button</h2>
 <pre><code>import { ReportButton } from 'shipcue/react';
@@ -187,6 +188,10 @@ export { handler as GET, handler as POST };</code></pre>
   <li><code>variant="inline"</code> puts a small button in your header, which works better on phones where a floating bubble covers the controls.</li>
   <li><code>submit={(form) =&gt; action(form)}</code> sends through a Next.js server action instead of <code>fetch</code>.</li>
   <li><code>diagnostics</code> is a snapshot for whoever fixes the report. Keep it under 64 KB. If it throws, the report still goes through.</li>
+  <li>Recent page errors are added to the snapshot as <code>recentErrors</code>. Turn this off with <code>captureErrors={false}</code>.</li>
+  <li><code>uploadVideo</code> uploads a recording or video yourself; without it the button posts it to the handler.</li>
+  <li><code>pastReportsHref</code> adds a Past reports link to the panel.</li>
+  <li>The panel shows the page it will attach, with a "don't attach" link.</li>
 </ul>
 
 <h2>4. Connect an agent</h2>

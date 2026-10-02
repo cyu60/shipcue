@@ -97,6 +97,7 @@ const report: Report = {
   claimedBy: null,
   claimedAt: null,
   resolution: null,
+  video: null,
 };
 
 describe('buildBody', () => {
@@ -145,5 +146,20 @@ describe('toAgentPrompt', () => {
   });
   it('asks for a plan instead of a fix on feature requests', () => {
     expect(toAgentPrompt({ ...report, type: 'feature' }, config)).toContain('Propose the smallest change');
+  });
+});
+
+describe('video (from the report button in the founders dashboard and the outliner)', () => {
+  const withVideo = { ...report, video: 'https://cdn.example.com/r1/video.webm' };
+  it('puts the video link with the screenshots in the body', () => {
+    expect(buildBody(withVideo, config)).toContain('Video: https://cdn.example.com/r1/video.webm\n');
+    expect(buildBody(report, config)).not.toContain('Video:');
+  });
+  it('gives agents the video link', () => {
+    expect(toAgentPrompt(withVideo, config)).toContain('## Video\nhttps://cdn.example.com/r1/video.webm');
+  });
+  it('defaults to 40 MB and 60 seconds of video', () => {
+    expect(resolveConfig().maxVideoBytes).toBe(40 * 1024 * 1024);
+    expect(resolveConfig().maxVideoSeconds).toBe(60);
   });
 });

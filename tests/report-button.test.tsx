@@ -116,3 +116,84 @@ describe('ReportButton', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('ReportButton: video, page, errors and past reports', () => {
+  const type = async () => userEvent.type(screen.getByRole('textbox'), 'The heading vanished on Enter');
+  it('lets you leave the page address off', async () => {
+    const submit = await openPanel();
+    await type();
+    await userEvent.click(screen.getByRole('button', { name: /don.t attach/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect((submit.mock.calls[0]![0] as FormData).get('pageUrl')).toBe('');
+  });
+  it('uploads an attached video after the report is filed, through uploadVideo', async () => {
+    const uploadVideo = vi.fn(async (_id: string, _b: Blob) => {});
+    await openPanel({ uploadVideo });
+    await type();
+    const clip = new File([new Uint8Array(2048)], 'clip.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText(/attach a video/i), { target: { files: [clip] } });
+    expect(screen.getByText('2 KB')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(uploadVideo).toHaveBeenCalledWith('r1', clip));
+  });
+  it('posts the video to the handler when no uploadVideo is given', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      new Response(JSON.stringify(String(url).endsWith('/reports') ? { id: 'r9' } : { ok: true }), { status: String(url).endsWith('/reports') ? 201 : 200 }),
+    );
+    render(<ReportButton areas={areas} endpoint="/api/shipcue" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    await type();
+    fireEvent.change(screen.getByLabelText(/attach a video/i), { target: { files: [new File(['x'], 'c.webm', { type: 'video/webm' })] } });
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(fetchSpy.mock.calls.map((c) => String(c[0]))).toContain('/api/shipcue/reports/r9/video'));
+    fetchSpy.mockRestore();
+  });
+  it('still files the report when the video fails, and says so', async () => {
+    await openPanel({ uploadVideo: vi.fn(async () => { throw new Error('Storage is full'); }) });
+    await type();
+    fireEvent.change(screen.getByLabelText(/attach a video/i), { target: { files: [new File(['x'], 'c.webm', { type: 'video/webm' })] } });
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText(/the video was not attached: storage is full/i)).toBeInTheDocument();
+  });
+  it('refuses files that are not videos', async () => {
+    await openPanel({ uploadVideo: vi.fn() });
+    fireEvent.change(screen.getByLabelText(/attach a video/i), { target: { files: [new File(['x'], 'a.pdf', { type: 'application/pdf' })] } });
+    expect(screen.getByText(/attach a webm, mp4 or mov video/i)).toBeInTheDocument();
+  });
+  it('offers screen recording where the browser can do it', async () => {
+    const getDisplayMedia = vi.fn(async () => { throw new DOMException('no', 'NotAllowedError'); });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia } });
+    (globalThis as unknown as { MediaRecorder: unknown }).MediaRecorder = class { static isTypeSupported() { return true; } };
+    await openPanel({ uploadVideo: vi.fn() });
+    await userEvent.click(screen.getByRole('button', { name: /record screen/i }));
+    expect(getDisplayMedia).toHaveBeenCalled();
+    delete (globalThis as unknown as { MediaRecorder?: unknown }).MediaRecorder;
+  });
+  it('hides video when there is nowhere to send it', async () => {
+    await openPanel(); // submit given, no uploadVideo
+    expect(screen.queryByLabelText(/attach a video/i)).not.toBeInTheDocument();
+  });
+  it('attaches recent errors to the report by default', async () => {
+    const submit = await openPanel({ diagnostics: () => ({ blocks: 3 }) });
+    window.dispatchEvent(new ErrorEvent('error', { message: 'Cannot read x', filename: 'app.js', lineno: 9 }));
+    await type();
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    const diag = JSON.parse(String((submit.mock.calls[0]![0] as FormData).get('diagnostics')));
+    expect(diag.blocks).toBe(3);
+    expect(diag.recentErrors.map((e: { text: string }) => e.text)).toContain('Cannot read x at app.js:9');
+  });
+  it('can leave error capture off', async () => {
+    const submit = await openPanel({ captureErrors: false });
+    window.dispatchEvent(new ErrorEvent('error', { message: 'Hidden' }));
+    await type();
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(String((submit.mock.calls[0]![0] as FormData).get('diagnostics'))).not.toContain('Hidden');
+  });
+  it('links to past reports when given a link', async () => {
+    await openPanel({ pastReportsHref: '/reports' });
+    expect(screen.getByRole('link', { name: /past reports/i })).toHaveAttribute('href', '/reports');
+  });
+});

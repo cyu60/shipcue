@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, type Area, type Priority, type ReportType } from '../core';
+import { formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Priority, type ReportType } from '../core';
+import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
+import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
 
 export type SubmitResult = { id: string } | { error: string };
 
@@ -22,6 +24,17 @@ export interface ReportButtonProps {
   /** Shown after a report is sent, e.g. a link to your queue. */
   successMessage?: React.ReactNode;
   onSubmitted?: (id: string) => void;
+  /**
+   * Upload a video for a filed report yourself, e.g. straight from the browser
+   * to your storage with a presigned URL. Without it, the button posts the
+   * video to the handler ({endpoint}/reports/:id/video, needs saveVideo), and
+   * when `submit` is given and this is not, video is hidden.
+   */
+  uploadVideo?: (reportId: string, video: Blob) => Promise<void>;
+  /** Attach recent page errors to every report. On by default. */
+  captureErrors?: boolean;
+  /** Where people can see the reports they sent; shown as a Past reports link. */
+  pastReportsHref?: string;
 }
 
 const TYPES: { value: ReportType; label: string; placeholder: string }[] = [
@@ -38,12 +51,24 @@ async function postTo(endpoint: string, form: FormData): Promise<SubmitResult> {
   return { error: body.error ?? 'Could not send the report. Please try again.' };
 }
 
-function snapshot(diagnostics?: () => Record<string, unknown>): string {
-  if (!diagnostics) return '{}';
+function snapshot(diagnostics: (() => Record<string, unknown>) | undefined, withErrors: boolean): string {
+  let app: Record<string, unknown> = {};
   try {
-    return JSON.stringify(diagnostics());
+    app = diagnostics ? diagnostics() : {};
   } catch (err) {
-    return JSON.stringify({ diagnosticsError: err instanceof Error ? err.message : String(err) });
+    app = { diagnosticsError: err instanceof Error ? err.message : String(err) };
+  }
+  const errors = withErrors ? recentErrors() : [];
+  return JSON.stringify(errors.length ? { ...app, recentErrors: errors } : app);
+}
+
+async function postVideo(endpoint: string, reportId: string, video: Blob): Promise<void> {
+  const form = new FormData();
+  form.set('video', video, `video.${videoType(video.type) === 'video/mp4' ? 'mp4' : videoType(video.type) === 'video/quicktime' ? 'mov' : 'webm'}`);
+  const res = await fetch(`${endpoint.replace(/\/$/, '')}/reports/${reportId}/video`, { method: 'POST', body: form });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? 'Could not upload the video.');
   }
 }
 
@@ -56,6 +81,9 @@ export function ReportButton({
   accentColor = '#18181b',
   successMessage = 'Thanks. It is in the queue.',
   onSubmitted,
+  uploadVideo,
+  captureErrors = true,
+  pastReportsHref,
 }: ReportButtonProps) {
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
   const [open, setOpen] = useState(false);
@@ -67,6 +95,14 @@ export function ReportButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [page, setPage] = useState<string | null>(null);
+  const [video, setVideo] = useState<{ blob: Blob; preview: string } | null>(null);
+  const [recording, setRecording] = useState<number | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const recorderRef = useRef<ScreenRecording | null>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  // Video needs somewhere to go: your uploader, or the handler.
+  const videoOn = !!uploadVideo || !submit;
   const uid = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,10 +114,55 @@ export function ReportButton({
     if (open) textareaRef.current?.focus();
   }, [open]);
 
+  useEffect(() => {
+    if (captureErrors) startCapturingErrors();
+  }, [captureErrors]);
+  useEffect(() => (video?.preview ? () => URL.revokeObjectURL(video.preview) : undefined), [video]);
+
+  const show = () => {
+    setPage(window.location.href);
+    setOpen(true);
+  };
+
+  const attachVideo = (blob: Blob) => {
+    setError(null);
+    if (!videoType(blob.type)) {
+      setError('Attach a WebM, MP4 or MOV video.');
+      return;
+    }
+    if (blob.size > config.maxVideoBytes) {
+      setError(`That video is ${formatBytes(blob.size)}; videos can be up to ${formatBytes(config.maxVideoBytes)}.`);
+      return;
+    }
+    setVideo({ blob, preview: URL.createObjectURL(blob) });
+  };
+
+  const startRecording = async () => {
+    setError(null);
+    try {
+      recorderRef.current = await recordScreen({
+        maxSeconds: config.maxVideoSeconds,
+        maxBytes: config.maxVideoBytes,
+        onTick: setRecording,
+        onDone: ({ blob, note }) => {
+          recorderRef.current = null;
+          setRecording(null);
+          setOpen(true);
+          if (blob) attachVideo(blob);
+          if (note) setError(note);
+        },
+      });
+      setRecording(0);
+    } catch (e) {
+      setError(shareError(e));
+    }
+  };
+
   const close = () => {
     setOpen(false);
     setDone(false);
     setError(null);
+    setWarning(null);
   };
 
   useEffect(() => {
@@ -124,12 +205,23 @@ export function ReportButton({
       form.set('description', text);
       form.set('priority', priority);
       form.set('area', area);
-      form.set('pageUrl', window.location.href);
+      form.set('pageUrl', page ?? '');
       form.set('userAgent', navigator.userAgent);
-      form.set('diagnostics', snapshot(diagnostics));
+      form.set('diagnostics', snapshot(diagnostics, captureErrors));
       files.forEach((f) => form.append('screenshot', f, f.name));
       const result = submit ? await submit(form) : await postTo(endpoint, form);
       if ('error' in result) throw new Error(result.error);
+      // The report is filed either way; a failed video upload is said on the thanks screen.
+      let videoFailed: string | null = null;
+      if (video && videoOn) {
+        try {
+          await (uploadVideo ? uploadVideo(result.id, video.blob) : postVideo(endpoint, result.id, video.blob));
+        } catch (e) {
+          videoFailed = e instanceof Error ? e.message : 'Could not upload the video.';
+        }
+      }
+      setWarning(videoFailed);
+      setVideo(null);
       setDone(true);
       setText('');
       setFiles([]);
@@ -147,7 +239,7 @@ export function ReportButton({
 
   return (
     <div data-shipcue={variant} style={variant === 'floating' ? s.floatingWrap : s.inlineWrap}>
-      {open && (
+      {open && recording === null && (
         <div role="dialog" aria-label="Report a bug" style={variant === 'floating' ? s.panel : s.inlinePanel}>
           <div style={s.row}>
             <div>
@@ -164,6 +256,15 @@ export function ReportButton({
           {done ? (
             <div role="status" style={s.success}>
               {successMessage}
+              {pastReportsHref && (
+                <>
+                  {' '}
+                  <a href={pastReportsHref} style={{ color: 'inherit', fontWeight: 600 }}>
+                    See your reports
+                  </a>
+                </>
+              )}
+              {warning && <p style={{ margin: '4px 0 0', color: '#be123c' }}>The video was not attached: {warning}</p>}
             </div>
           ) : (
             <>
@@ -257,13 +358,64 @@ export function ReportButton({
               </div>
               <p style={s.hint}>Paste a screenshot into the text box, or add up to {config.maxScreenshots}.</p>
 
+              {videoOn && (
+                <div style={{ ...s.thumbs, alignItems: 'center' }}>
+                  {video ? (
+                    <div style={{ position: 'relative' }}>
+                      <video src={video.preview} controls muted playsInline style={{ height: 72, borderRadius: 6, border: '1px solid #e4e4e7' }} />
+                      <button type="button" aria-label="Remove video" onClick={() => setVideo(null)} style={s.remove}>
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {canRecordScreen() && (
+                        <button type="button" onClick={startRecording} style={s.ghost}>
+                          Record screen
+                        </button>
+                      )}
+                      <button type="button" onClick={() => videoInputRef.current?.click()} style={s.linkBtn}>
+                        or attach a video
+                      </button>
+                    </>
+                  )}
+                  {video && <span style={s.hint}>{formatBytes(video.blob.size)}</span>}
+                  <input
+                    ref={videoInputRef}
+                    type="file"
+                    aria-label="Attach a video"
+                    accept="video/webm,video/mp4,video/quicktime"
+                    hidden
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) attachVideo(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+              )}
+
               {error && (
                 <p role="alert" style={s.error}>
                   {error}
                 </p>
               )}
+              {page && (
+                <p style={{ ...s.hint, marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Page: {decodeURIComponent(new URL(page).pathname)}{' '}
+                  <button type="button" onClick={() => setPage(null)} style={s.linkBtn}>
+                    don&apos;t attach
+                  </button>
+                </p>
+              )}
               <div style={{ ...s.row, alignItems: 'center', marginTop: 12 }}>
-                <p style={s.hint}>The page address is attached automatically.</p>
+                {pastReportsHref ? (
+                  <a href={pastReportsHref} style={{ ...s.hint, color: '#71717a' }}>
+                    Past reports
+                  </a>
+                ) : (
+                  <span />
+                )}
                 <button type="button" onClick={send} disabled={!canSend} style={canSend ? s.send : { ...s.send, opacity: 0.5, cursor: 'not-allowed' }}>
                   {busy ? 'Sending…' : 'Send'}
                 </button>
@@ -273,9 +425,14 @@ export function ReportButton({
         </div>
       )}
 
+      {recording !== null && (
+        <button type="button" onClick={() => recorderRef.current?.stop()} aria-label="Stop recording" title="Stop recording and attach it to the report" style={s.recording}>
+          ● {Math.floor(recording / 60)}:{String(recording % 60).padStart(2, '0')}
+        </button>
+      )}
       <button
         type="button"
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={() => (open ? close() : show())}
         aria-label={open ? 'Close report' : 'Report a bug or request a feature'}
         title="Report a bug or request a feature"
         style={variant === 'floating' ? s.fab : s.inlineBtn}
@@ -381,6 +538,9 @@ function styles(accent: string) {
       cursor: 'pointer',
     } as CSSProperties,
     error: { marginTop: 8, borderRadius: 8, background: '#fff1f2', color: '#be123c', padding: '8px 12px', fontSize: 12 } as CSSProperties,
+    ghost: { border: '1px solid #d4d4d8', borderRadius: 8, background: '#fff', color: '#3f3f46', padding: '4px 10px', fontSize: 12, fontWeight: 500, cursor: 'pointer' } as CSSProperties,
+    linkBtn: { border: 0, background: 'transparent', color: '#71717a', padding: 0, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' } as CSSProperties,
+    recording: { border: 0, borderRadius: 999, background: '#e11d48', color: '#fff', padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' } as CSSProperties,
     send: { border: 0, borderRadius: 8, background: accent, color: '#fff', padding: '6px 12px', fontSize: 14, fontWeight: 500, cursor: 'pointer' } as CSSProperties,
     fab: {
       width: 48,

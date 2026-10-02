@@ -14,6 +14,8 @@ export interface ReportStore {
   claim(id: string, agent: string): Promise<Report | null>;
   release(id: string): Promise<Report | null>;
   close(id: string, status: ClosedStatus, resolution: string | null): Promise<Report | null>;
+  /** Links a video to a report that has none yet. */
+  attachVideo(id: string, url: string): Promise<Report | null>;
 }
 
 /** In-process store for tests, demos and prototypes. Lost on restart. */
@@ -39,6 +41,7 @@ export function memoryStore(): ReportStore {
         claimedBy: null,
         claimedAt: null,
         resolution: null,
+        video: null,
       };
       rows.set(r.id, r);
       return { ...r };
@@ -62,6 +65,9 @@ export function memoryStore(): ReportStore {
     },
     async close(id, status, resolution) {
       return update(id, () => true, () => ({ status, resolution }));
+    },
+    async attachVideo(id, url) {
+      return update(id, (r) => r.video === null, () => ({ video: url }));
     },
   };
 }

@@ -21,6 +21,7 @@ interface Row {
   claimed_by: string | null;
   claimed_at: Date | string | null;
   resolution: string | null;
+  video: string | null;
   created_at: Date | string;
 }
 
@@ -43,11 +44,12 @@ function toReport(r: Row): Report {
     claimedBy: r.claimed_by,
     claimedAt: iso(r.claimed_at),
     resolution: r.resolution,
+    video: r.video ?? null,
   };
 }
 
 const COLUMNS =
-  'id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, created_at';
+  'id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, created_at';
 const QUEUE_ORDER = 'ORDER BY priority_rank DESC, created_at, id';
 
 /** Stores reports in the shipcue_reports table from sql/schema.sql. Use a server-side connection. */
@@ -119,6 +121,14 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports'): ReportS
         `UPDATE ${table} SET status = $2, resolution = $3, updated_at = now()
           WHERE id = $1 AND NOT is_deleted RETURNING ${COLUMNS}`,
         [id, status, resolution],
+      );
+    },
+    async attachVideo(id, url) {
+      if (!isUuid(id)) return null;
+      return one(
+        `UPDATE ${table} SET video = $2, updated_at = now()
+          WHERE id = $1 AND video IS NULL AND NOT is_deleted RETURNING ${COLUMNS}`,
+        [id, url],
       );
     },
   };

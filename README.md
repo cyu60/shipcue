@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-53%20passing-2E5BFF?style=flat-square" alt="53 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-74%20passing-2E5BFF?style=flat-square" alt="74 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -56,7 +56,7 @@ pnpm add github:cyu60/shipcue
 
 ## 1. Create the table
 
-Run [`sql/schema.sql`](sql/schema.sql) on your database (Supabase, InsForge, Neon, RDS or local Postgres).
+Run [`sql/schema.sql`](sql/schema.sql) on your database (Supabase, InsForge, Neon, RDS or local Postgres). Upgrading from 0.1: run it again; it adds the `video` column to the existing table.
 
 ## 2. Mount the handler
 
@@ -85,6 +85,8 @@ export { handler as GET, handler as POST };
 
 The handler is a plain `(Request) => Promise<Response>`, so it also works in Hono, Remix, Bun, Deno and Cloudflare Workers. Screenshots are stored as data URLs unless you pass `saveScreenshot(file, key)` to upload them to S3, Supabase Storage or similar.
 
+**Videos.** Pass `saveVideo(file, key)` to turn on `POST /reports/:id/video`: whoever filed a report can attach one screen recording or video (WebM, MP4 or MOV, up to 40 MB) within 30 minutes. Hosts that cap request bodies (Vercel: 4.5 MB) should upload from the browser instead, with the button's `uploadVideo` prop and a presigned URL.
+
 ## 3. Add the button
 
 ```tsx
@@ -98,6 +100,13 @@ import { ReportButton } from 'shipcue/react';
 ```
 
 Use `variant="inline"` for a header or toolbar button on phones, where a floating bubble covers the controls. Pass `submit={(form) => myServerAction(form)}` to send through a server action instead of `fetch`.
+
+What else the panel does:
+
+- **Record screen or attach a video.** Recordings stop at 60 seconds. The video uploads after the report is filed; if it fails, the report is still filed and the panel says so. Pass `uploadVideo={(reportId, blob) => …}` to upload it yourself; otherwise it goes to the handler. With `submit` and no `uploadVideo`, video is hidden.
+- **Recent errors.** Page errors, unhandled rejections and `console.error` calls from before the report are added to the snapshot as `recentErrors`. Turn off with `captureErrors={false}`.
+- **The page.** The panel shows which page it will attach, with a "don't attach" link.
+- **Past reports.** `pastReportsHref="/reports"` adds a Past reports link to the panel and a See your reports link after sending.
 
 ## 4. Let agents work the queue
 
@@ -138,6 +147,7 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 | Method | Path | Who |
 |---|---|---|
 | `POST` | `/reports` | the button (multipart form) |
+| `POST` | `/reports/:id/video` | the button, the reporter only (multipart, field `video`; needs `saveVideo`) |
 | `GET` | `/reports?status=open` | agent, bearer token |
 | `GET` | `/reports/:id` | agent |
 | `POST` | `/reports/next/claim` | agent |
@@ -159,6 +169,11 @@ pnpm test        # vitest; the Postgres store runs against real Postgres via PGl
 pnpm typecheck
 pnpm build
 ```
+
+## Changelog
+
+- **0.2.0**: screen recording and video attachments, recent errors in the snapshot, a don't-attach-page link, Past reports links, `attachVideo` on stores. Brought over from the report buttons in the Stanford Founders dashboard and Block Outliner.
+- **0.1.0**: first release.
 
 ## Roadmap
 

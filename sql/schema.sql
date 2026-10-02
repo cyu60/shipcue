@@ -23,12 +23,17 @@ CREATE TABLE IF NOT EXISTS shipcue_reports (
   claimed_by    text,
   claimed_at    timestamptz,
   resolution    text,
+  -- A screen recording or video URL, attached after the report is filed.
+  video         text,
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
   -- Soft delete: rows are hidden, never removed.
   is_deleted    boolean NOT NULL DEFAULT false,
   deleted_at    timestamptz
 );
+
+-- Upgrading from 0.1: add the video column to an existing table.
+ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS video text;
 
 CREATE INDEX IF NOT EXISTS shipcue_reports_queue
   ON shipcue_reports (status, priority_rank DESC, created_at)

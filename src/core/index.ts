@@ -41,6 +41,28 @@ export interface ShipcueConfig {
   maxLength: number;
   maxScreenshots: number;
   maxScreenshotBytes: number;
+  /** Largest video someone can record or attach. */
+  maxVideoBytes: number;
+  /** Screen recordings stop after this long. */
+  maxVideoSeconds: number;
+}
+
+export const VIDEO_TYPES = ['video/webm', 'video/mp4', 'video/quicktime'] as const;
+export type VideoType = (typeof VIDEO_TYPES)[number];
+const VIDEO_EXTENSION: Record<VideoType, string> = { 'video/webm': 'webm', 'video/mp4': 'mp4', 'video/quicktime': 'mov' };
+
+/** The video type of a file or recording, without codecs; null if it is not a video shipcue takes. */
+export function videoType(mime: string): VideoType | null {
+  const base = (mime.split(';')[0] ?? '').trim().toLowerCase();
+  return (VIDEO_TYPES as readonly string[]).includes(base) ? (base as VideoType) : null;
+}
+
+export function videoExtension(type: VideoType): string {
+  return VIDEO_EXTENSION[type];
+}
+
+export function formatBytes(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 const OTHER: Area = { value: 'other', label: 'Other' };
@@ -57,6 +79,8 @@ export function resolveConfig(partial: Partial<ShipcueConfig> = {}): ShipcueConf
     maxLength: partial.maxLength ?? 4000,
     maxScreenshots: partial.maxScreenshots ?? 3,
     maxScreenshotBytes: partial.maxScreenshotBytes ?? 5 * 1024 * 1024,
+    maxVideoBytes: partial.maxVideoBytes ?? 40 * 1024 * 1024,
+    maxVideoSeconds: partial.maxVideoSeconds ?? 60,
   };
 }
 
@@ -83,6 +107,8 @@ export interface Report extends ReportInput {
   claimedAt: string | null;
   /** What the fixer said when closing it, e.g. a PR link. */
   resolution: string | null;
+  /** A screen recording or video of the problem, if one was attached. */
+  video: string | null;
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -149,6 +175,7 @@ export function buildBody(r: Report, config: ShipcueConfig): string {
     r.description.trim(),
     '',
     ...(r.screenshots.length ? ['Screenshots:', ...r.screenshots, ''] : []),
+    ...(r.video ? [`Video: ${r.video}`, ''] : []),
     '---',
     `Type: ${TYPE_LABEL[r.type]}`,
     `Priority: ${PRIORITY_LABEL[r.priority]}`,
@@ -186,6 +213,7 @@ export function toAgentPrompt(r: Report, config: ShipcueConfig): string {
     ...(r.userAgent ? [`Browser: ${r.userAgent}`] : []),
     `Filed: ${r.createdAt}${r.reporter ? ` by ${r.reporter}` : ''}`,
     ...(r.screenshots.length ? ['', '## Screenshots', ...r.screenshots.map((s) => `- ${s}`)] : []),
+    ...(r.video ? ['', '## Video', r.video] : []),
     ...(hasDiagnostics ? ['', '## App snapshot', '```json', JSON.stringify(r.diagnostics, null, 2), '```'] : []),
     '',
     '## What to do',

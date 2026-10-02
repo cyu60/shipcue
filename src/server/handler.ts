@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { resolveConfig, toAgentPrompt, validateReport, type ShipcueConfig, type Report } from '../core';
+import { formatBytes, resolveConfig, toAgentPrompt, validateReport, videoExtension, videoType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 
 const IMAGE_TYPES: Record<string, string> = {
@@ -20,6 +20,12 @@ export interface HandlerOptions {
   requireReporter?: boolean;
   /** Upload a screenshot and return its URL. Without it, screenshots are kept as data URLs. */
   saveScreenshot?: (file: File, key: string) => Promise<string>;
+  /**
+   * Upload a report's video and return its URL. Turns on POST {base}/reports/:id/video.
+   * On hosts that cap request bodies (Vercel: 4.5 MB), upload from the browser
+   * instead with the button's uploadVideo prop.
+   */
+  saveVideo?: (file: File, key: string) => Promise<string>;
   /** Runs after a report is saved: email, Slack, a task board. A failure here never fails the report. */
   onReport?: (report: Report) => Promise<void>;
   /** Bearer token for the agent API. Leave unset to switch the agent API off. */
@@ -54,6 +60,7 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
  * One fetch-style handler for both sides of the queue:
  *
  *   POST {base}/reports                 the button files a report (multipart form)
+ *   POST {base}/reports/:id/video       the button attaches a video (multipart, field "video")
  *   GET  {base}/reports?status=open     agent: the queue, most urgent first
  *   GET  {base}/reports/:id             agent: one report plus a ready-made prompt
  *   POST {base}/reports/next/claim      agent: take the most urgent open report
@@ -129,6 +136,35 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     return json({ id: report.id }, 201);
   }
 
+  // A video can be attached by whoever filed the report, once, within this window.
+  const VIDEO_WINDOW_MS = 30 * 60 * 1000;
+
+  async function attachVideo(req: Request, id: string): Promise<Response> {
+    if (!opts.saveVideo) return fail('Not found', 404);
+    const report = await store.get(id);
+    if (!report) return fail('No such report', 404);
+    const reporter = opts.getReporter ? await opts.getReporter(req) : null;
+    if (report.reporter !== null && report.reporter !== reporter) return fail('Not your report.', 403);
+    if (Date.now() - Date.parse(report.createdAt) > VIDEO_WINDOW_MS) return fail('Too late to add a video to this report.', 403);
+    if (report.video) return fail('This report already has a video.', 409);
+
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      return fail('Send the video as a form.');
+    }
+    const file = form.get('video');
+    if (!(file instanceof File) || file.size === 0) return fail('Attach a video.');
+    const type = videoType(file.type);
+    if (!type) return fail('Attach a WebM, MP4 or MOV video.');
+    if (file.size > config.maxVideoBytes) return fail(`Videos can be up to ${formatBytes(config.maxVideoBytes)}.`);
+
+    const url = await opts.saveVideo(file, `${id}/video.${videoExtension(type)}`);
+    const saved = await store.attachVideo(id, url);
+    return saved ? json({ report: saved }) : fail('This report already has a video.', 409);
+  }
+
   const withPrompt = (r: Report) => ({ report: r, prompt: toAgentPrompt(r, config) });
 
   async function agentApi(req: Request, parts: string[]): Promise<Response> {
@@ -179,6 +215,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     const parts = path.slice(`${base}/reports`.length).split('/').filter(Boolean);
     try {
       if (req.method === 'POST' && parts.length === 0) return await fileReport(req);
+      if (req.method === 'POST' && parts.length === 2 && parts[1] === 'video' && parts[0]) return await attachVideo(req, parts[0]);
       return await agentApi(req, parts);
     } catch (err) {
       console.error('shipcue: handler failed', err);

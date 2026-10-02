@@ -77,5 +77,15 @@ export function storeContract(name: string, makeStore: () => Promise<ReportStore
     it('returns null for an unknown id', async () => {
       expect(await store.get('00000000-0000-0000-0000-000000000000')).toBeNull();
     });
+
+    it('attaches one video to a report, once', async () => {
+      const r = await store.create(sample());
+      expect(r.video).toBeNull();
+      const withVideo = await store.attachVideo(r.id, 'https://cdn.example.com/v.webm');
+      expect(withVideo?.video).toBe('https://cdn.example.com/v.webm');
+      expect((await store.get(r.id))?.video).toBe('https://cdn.example.com/v.webm');
+      expect(await store.attachVideo(r.id, 'https://cdn.example.com/other.webm')).toBeNull();
+      expect(await store.attachVideo('00000000-0000-0000-0000-000000000000', 'x')).toBeNull();
+    });
   });
 }

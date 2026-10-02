@@ -132,3 +132,57 @@ describe('the agent queue API', () => {
     expect((await handle(post(`/reports/${id}/close`, JSON.stringify({ status: 'open' }), agent))).status).toBe(400);
   });
 });
+
+describe('attaching a video', () => {
+  const webm = (bytes = 100) => new File([new Uint8Array(bytes)], 'clip.webm', { type: 'video/webm' });
+  const videoForm = (file: File) => {
+    const f = new FormData();
+    f.set('video', file);
+    return f;
+  };
+  async function filed(opts: Partial<Parameters<typeof createShipcueHandler>[0]> = {}) {
+    const saveVideo = vi.fn(async (_f: File, key: string) => `https://cdn.example.com/${key}`);
+    const env = setup({ saveVideo, ...opts });
+    const { id } = await (await env.handle(post('/reports', reportForm()))).json();
+    return { ...env, id, saveVideo };
+  }
+
+  it('saves the video and links it to the report', async () => {
+    const { store, handle, id, saveVideo } = await filed();
+    const res = await handle(post(`/reports/${id}/video`, videoForm(webm())));
+    expect(res.status).toBe(200);
+    expect(saveVideo).toHaveBeenCalledWith(expect.any(File), `${id}/video.webm`);
+    expect((await store.get(id))?.video).toBe(`https://cdn.example.com/${id}/video.webm`);
+  });
+  it('is off unless saveVideo is given', async () => {
+    const { handle, id } = await filed({ saveVideo: undefined });
+    expect((await handle(post(`/reports/${id}/video`, videoForm(webm())))).status).toBe(404);
+  });
+  it('takes only videos, within the size limit', async () => {
+    const { handle, id } = await filed({ config: resolveConfig({ areas: [{ value: 'editor', label: 'Editor' }], maxVideoBytes: 50 }) });
+    expect((await handle(post(`/reports/${id}/video`, videoForm(new File(['x'], 'a.pdf', { type: 'application/pdf' }))))).status).toBe(400);
+    expect((await handle(post(`/reports/${id}/video`, videoForm(webm(100))))).status).toBe(400);
+  });
+  it('only lets the reporter attach it, once, soon after filing', async () => {
+    const { handle, id } = await filed();
+    const stranger = createShipcueHandler({
+      store: (await filed()).store, config, basePath: '/api/shipcue', getReporter: async () => 'eve@example.com', saveVideo: async () => 'x',
+    });
+    expect((await stranger(post(`/reports/${id}/video`, videoForm(webm())))).status).toBe(404);
+    expect((await handle(post(`/reports/${id}/video`, videoForm(webm())))).status).toBe(200);
+    expect((await handle(post(`/reports/${id}/video`, videoForm(webm())))).status).toBe(409);
+  });
+  it('refuses another reporter on the same store', async () => {
+    const { store, handle, id } = await filed();
+    void handle;
+    const eve = createShipcueHandler({ store, config, basePath: '/api/shipcue', getReporter: async () => 'eve@example.com', saveVideo: async () => 'x' });
+    expect((await eve(post(`/reports/${id}/video`, videoForm(webm())))).status).toBe(403);
+  });
+  it('refuses videos for old reports', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { handle, id } = await filed();
+    vi.setSystemTime(Date.now() + 31 * 60 * 1000);
+    expect((await handle(post(`/reports/${id}/video`, videoForm(webm())))).status).toBe(403);
+    vi.useRealTimers();
+  });
+});
