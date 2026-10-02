@@ -1,7 +1,7 @@
 // The report button on every page of the site, so shipcue's own reports go through shipcue.
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ReportButton } from '../../src/react';
+import { ReportButton, openReport } from '../../src/react';
 import { AREAS } from './areas.mjs';
 
 function areaFor(path) {
@@ -10,6 +10,9 @@ function areaFor(path) {
   if (path.startsWith('/blog')) return 'blog';
   return 'home';
 }
+
+// The Contact page's buttons open the panel through this.
+window.shipcue = { openReport };
 
 const el = document.createElement('div');
 document.body.appendChild(el);

@@ -29,7 +29,10 @@ pre code { background: none; padding: 0; }
 
 /* Header */
 .site-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 0; flex-wrap: wrap; }
-.brand { font: 900 34px/1 var(--display); color: var(--ink); text-decoration: none; letter-spacing: -0.5px; }
+.brand { font: 900 34px/1 var(--display); color: var(--ink); text-decoration: none; letter-spacing: -0.5px; display: inline-flex; align-items: center; gap: 10px; }
+.logo { width: 38px; height: 38px; border-radius: 10px; background: var(--ink); color: var(--ticket); display: inline-flex; align-items: center; justify-content: center; }
+.logo svg { width: 24px; height: 24px; }
+button.btn { font-family: var(--body); }
 .nav { display: flex; gap: 22px; flex-wrap: wrap; }
 .nav a { color: var(--ink); text-decoration: none; font-weight: 500; }
 .nav a:hover, .nav a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 2px; }

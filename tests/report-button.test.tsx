@@ -207,11 +207,12 @@ describe('ReportButton: watermark', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });
 
-  it('keeps it after a report is sent', async () => {
+  it('keeps it when the panel opens again after a send', async () => {
     await openPanel();
     await userEvent.type(screen.getByRole('textbox'), 'The heading disappears on Enter');
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
     await screen.findByRole('status');
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
     expect(screen.getByRole('link', { name: /star shipcue on github/i })).toBeInTheDocument();
   });
 
@@ -427,5 +428,40 @@ describe('ReportButton: no button of its own', () => {
     expect(screen.queryByRole('button', { name: 'Report a bug or request a feature' })).toBeNull();
     openReport('feature');
     expect(await screen.findByRole('heading', { name: 'Request a feature' })).toBeInTheDocument();
+  });
+});
+
+describe('ReportButton: add a screenshot', () => {
+  it('is a photo icon, not text', async () => {
+    await openPanel();
+    const add = screen.getByRole('button', { name: 'Add a screenshot' });
+    expect(add.querySelector('svg[data-icon="photo"]')).not.toBeNull();
+    expect(add).not.toHaveTextContent('screenshot');
+  });
+});
+
+describe('ReportButton: after a send you carry on', () => {
+  it('closes the panel and says it was sent in a short note', async () => {
+    const submit = ok();
+    render(<ReportButton areas={areas} submit={submit} pastReportsHref="/reports" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    await userEvent.type(screen.getByRole('textbox'), 'The heading disappears on Enter');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    const note = await screen.findByRole('status');
+    expect(note).toHaveTextContent('Thanks. It is in the queue.');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('link', { name: 'See your reports' })).toHaveAttribute('href', '/reports');
+  });
+
+  it('opens on an empty form next time', async () => {
+    render(<ReportButton areas={areas} submit={ok()} />);
+    const fab = screen.getByRole('button', { name: 'Report a bug or request a feature' });
+    await userEvent.click(fab);
+    await userEvent.type(screen.getByRole('textbox'), 'The heading disappears on Enter');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status');
+    await userEvent.click(fab);
+    expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('');
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

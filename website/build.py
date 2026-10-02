@@ -3,7 +3,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 HEAD = (ROOT / "_head.txt").read_text()
-EMAIL = "chinatchinat123@gmail.com"
 NAV = [("/", "Home"), ("/use-cases/", "Use cases"), ("/docs/", "Docs"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/contact/", "Contact")]
 
 
@@ -21,11 +20,11 @@ def page(path, title, description, body, current):
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main">{nav}</nav></header>
+<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 4.5 18 13h-6z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 7.5 7 13h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>shipcue</a><nav class="nav" aria-label="Main">{nav}</nav></header>
 <main>
 {body}
 </main>
-<footer class="site-foot"><span>shipcue is open source under the MIT license.</span><span><a href="mailto:{EMAIL}">{EMAIL}</a></span></footer>
+<footer class="site-foot"><span>shipcue is open source under the MIT license. <a href="https://github.com/cyu60/shipcue">Star it on GitHub</a></span><span><a href="/contact/">Contact us through shipcue</a></span></footer>
 </div>
 </body>
 </html>
@@ -149,7 +148,7 @@ DOCS = """
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
 <p>Until the first npm release is out, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
-<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.4.1/shipcue-0.4.1.tgz</code></pre>
+<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.5.0/shipcue-0.5.0.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 
 <h2>1. Create the table</h2>
@@ -396,16 +395,21 @@ RENAME_POST = """
 </article>
 """
 
-CONTACT = f"""
+CONTACT = """
 <div class="prose">
 <h1>Contact</h1>
-<p class="lede">Questions, early access, or a report queue you want an agent working through? Email Chinat.</p>
-<p><a class="btn btn-ink" href="mailto:{EMAIL}?subject=shipcue">Email {EMAIL}</a></p>
+<p class="lede">The way to reach us is shipcue itself. Questions, ideas, early access or something that broke: send it here and it lands in the same queue we work from.</p>
+<div class="actions">
+  <button class="btn btn-ink" type="button" onclick="window.shipcue && window.shipcue.openReport('feature')">Ask a question or request a feature</button>
+  <button class="btn btn-plain" type="button" onclick="window.shipcue && window.shipcue.openReport('bug')">Report a bug</button>
+</div>
+<p>You can also press the ship button at the bottom right of any page, or <code>⌃F</code> / <code>⌃B</code> on a Mac (<code>Alt+Shift+F</code> / <code>Alt+Shift+B</code> elsewhere).</p>
 <h2>Good things to include</h2>
 <ul>
   <li>What your app is built with: framework, database, auth</li>
   <li>Where your bug reports go today</li>
   <li>Whether you want to self-host or would rather use the hosted Cloud</li>
+  <li>How to reach you back, if you are not signed in anywhere we can see</li>
 </ul>
 </div>
 """

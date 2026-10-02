@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='2' width='24' height='28' rx='5' fill='%23FFD43B' stroke='%2316203A' stroke-width='3'/><text x='16' y='24' font-family='Arial' font-weight='900' font-size='14' text-anchor='middle' fill='%2316203A'>#</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2316203A'/><g transform='translate(4 4)' fill='none' stroke='%23FFD43B' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'><path d='M12 3v12'/><path d='M12 4.5 18 13h-6z'/><path d='M12 7.5 7 13h5'/><path d='M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z'/></g></svg>">
 <script src="/assets/shipcue-button.js" defer></script>
 <title>Docs · shipcue</title>
 <meta name="description" content="Set up shipcue: the table, the handler, the button and the agent tools.">
@@ -17,7 +17,7 @@
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
+<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 4.5 18 13h-6z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 7.5 7 13h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/contact/">Contact</a></nav></header>
 <main>
 
 <div class="prose">
@@ -28,7 +28,7 @@
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
 <p>Until the first npm release is out, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
-<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.4.1/shipcue-0.4.1.tgz</code></pre>
+<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.5.0/shipcue-0.5.0.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 
 <h2>1. Create the table</h2>
@@ -135,7 +135,7 @@ POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR
 </div>
 
 </main>
-<footer class="site-foot"><span>shipcue is open source under the MIT license.</span><span><a href="mailto:chinatchinat123@gmail.com">chinatchinat123@gmail.com</a></span></footer>
+<footer class="site-foot"><span>shipcue is open source under the MIT license. <a href="https://github.com/cyu60/shipcue">Star it on GitHub</a></span><span><a href="/contact/">Contact us through shipcue</a></span></footer>
 </div>
 </body>
 </html>

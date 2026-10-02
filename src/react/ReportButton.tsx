@@ -142,6 +142,13 @@ export function ReportButton({
   const [text, setText] = useState('');
   const [context, setContext] = useState<string | null>(null);
   const [extraId, setExtraId] = useState<string | null>(null);
+  // After a send the panel closes and this short note says so (outliner report 22:47).
+  const [sent, setSent] = useState<{ warning: string | null } | null>(null);
+  useEffect(() => {
+    if (!sent) return;
+    const t = setTimeout(() => setSent(null), sent.warning ? 8000 : 4000);
+    return () => clearTimeout(t);
+  }, [sent]);
   const extra = extraTabs?.find((x) => x.id === extraId) ?? null;
   const [type, setType] = useState<ReportType>(() => tabs[0]?.value ?? 'bug');
   const [priority, setPriority] = useState<Priority>('medium');
@@ -149,11 +156,9 @@ export function ReportButton({
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
   const [page, setPage] = useState<string | null>(null);
   const [video, setVideo] = useState<{ blob: Blob; preview: string } | null>(null);
   const [recording, setRecording] = useState<number | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const recorderRef = useRef<ScreenRecording | null>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   // Video needs somewhere to go: your uploader, or the handler.
@@ -180,6 +185,7 @@ export function ReportButton({
 
   const show = () => {
     setPage(window.location.href);
+    setSent(null);
     setOpen(true);
   };
 
@@ -217,10 +223,8 @@ export function ReportButton({
       setFiles([]);
       setVideo(null);
       setError(null);
-      setWarning(null);
       setContext(picked || null);
     } else if (picked) setContext(picked);
-    setDone(false);
     if (!open) show();
     else textareaRef.current?.focus();
   };
@@ -283,9 +287,7 @@ export function ReportButton({
 
   const close = () => {
     setOpen(false);
-    setDone(false);
     setError(null);
-    setWarning(null);
   };
   const closeRef = useRef(close);
   closeRef.current = close;
@@ -355,9 +357,9 @@ export function ReportButton({
           videoFailed = e instanceof Error ? e.message : 'Could not upload the video.';
         }
       }
-      setWarning(videoFailed);
       setVideo(null);
-      setDone(true);
+      setOpen(false);
+      setSent({ warning: videoFailed });
       setText('');
       setContext(null);
       setFiles([]);
@@ -389,20 +391,7 @@ export function ReportButton({
             </button>
           </div>
 
-          {done ? (
-            <div role="status" style={s.success}>
-              {successMessage}
-              {pastReportsHref && (
-                <>
-                  {' '}
-                  <a href={pastReportsHref} style={{ color: 'inherit', fontWeight: 600 }}>
-                    See your reports
-                  </a>
-                </>
-              )}
-              {warning && <p style={{ margin: '4px 0 0', color: '#be123c' }}>The video was not attached: {warning}</p>}
-            </div>
-          ) : (
+          {(
             <>
               <div role="radiogroup" aria-label="Report type" style={s.segment}>
                 {tabs.map((t) => {
@@ -537,8 +526,18 @@ export function ReportButton({
                   </div>
                 ))}
                 {files.length < config.maxScreenshots && (
-                  <button type="button" onClick={() => fileInputRef.current?.click()} style={s.addShot}>
-                    + screenshot
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    aria-label="Add a screenshot"
+                    title="Add a screenshot"
+                    style={s.addShot}
+                  >
+                    <svg data-icon="photo" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+                      <circle cx="9" cy="10" r="1.6" stroke="currentColor" strokeWidth="1.6" />
+                      <path d="m4 17 5-4.5 3.5 3 2.5-2 5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+                    </svg>
                   </button>
                 )}
               </div>
@@ -633,6 +632,20 @@ export function ReportButton({
         </div>
       )}
 
+      {sent && (
+        <div role="status" style={s.sent}>
+          {successMessage}
+          {pastReportsHref && (
+            <>
+              {' '}
+              <a href={pastReportsHref} style={{ color: 'inherit', fontWeight: 600 }}>
+                See your reports
+              </a>
+            </>
+          )}
+          {sent.warning && <p style={{ margin: '4px 0 0', color: '#be123c' }}>The video was not attached: {sent.warning}</p>}
+        </div>
+      )}
       {recording !== null && (
         <button type="button" onClick={() => recorderRef.current?.stop()} aria-label="Stop recording" title="Stop recording and attach it to the report" style={s.recording}>
           ● {Math.floor(recording / 60)}:{String(recording % 60).padStart(2, '0')}
@@ -682,7 +695,8 @@ function styles(accent: string) {
     color: '#27272a',
     background: '#fff',
   };
-  const seg: CSSProperties = { flex: 1, border: 0, borderRadius: 6, padding: '4px 8px', fontSize: 12, fontWeight: 500, cursor: 'pointer' };
+  // Outliner report 22:52: bigger tabs and the shipcue site's solid, rounded buttons.
+  const seg: CSSProperties = { flex: 1, border: 0, borderRadius: 8, padding: '8px 10px', fontSize: 13, fontWeight: 600, fontFamily: font, cursor: 'pointer', whiteSpace: 'nowrap' };
   return {
     floatingWrap: {
       position: 'fixed',
@@ -710,8 +724,8 @@ function styles(accent: string) {
     sub: { margin: '2px 0 0', fontSize: 12, color: '#71717a' } as CSSProperties,
     iconBtn: { border: 0, background: 'transparent', color: '#a1a1aa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 4 } as CSSProperties,
     success: { marginTop: 12, borderRadius: 8, background: '#ecfdf5', color: '#065f46', padding: '8px 12px', fontSize: 12 } as CSSProperties,
-    segment: { display: 'flex', gap: 4, marginTop: 12, background: '#f4f4f5', borderRadius: 8, padding: 2 } as CSSProperties,
-    segOn: { ...seg, background: '#fff', color: '#18181b', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } as CSSProperties,
+    segment: { display: 'flex', gap: 4, marginTop: 12, background: '#f4f4f5', borderRadius: 10, padding: 3 } as CSSProperties,
+    segOn: { ...seg, background: accent, color: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.12)' } as CSSProperties,
     segOff: { ...seg, background: 'transparent', color: '#71717a' } as CSSProperties,
     textarea: { ...field, marginTop: 12, padding: '8px 12px', resize: 'none' } as CSSProperties,
     grid: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 8, marginTop: 8 } as CSSProperties,
@@ -743,14 +757,18 @@ function styles(accent: string) {
       borderRadius: 6,
       background: 'transparent',
       color: '#71717a',
-      fontSize: 10,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 0,
       cursor: 'pointer',
     } as CSSProperties,
+    sent: { background: '#fff', color: '#18181b', border: '1px solid #e4e4e7', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontFamily: font, boxShadow: '0 8px 24px rgba(24,24,27,0.12)', maxWidth: 320 } as CSSProperties,
     error: { marginTop: 8, borderRadius: 8, background: '#fff1f2', color: '#be123c', padding: '8px 12px', fontSize: 12 } as CSSProperties,
-    ghost: { border: '1px solid #d4d4d8', borderRadius: 8, background: '#fff', color: '#3f3f46', padding: '4px 10px', fontSize: 12, fontWeight: 500, cursor: 'pointer' } as CSSProperties,
+    ghost: { border: `2px solid ${accent}`, borderRadius: 10, background: '#fff', color: accent, padding: '5px 12px', fontSize: 12, fontWeight: 600, fontFamily: font, cursor: 'pointer' } as CSSProperties,
     linkBtn: { border: 0, background: 'transparent', color: '#71717a', padding: 0, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' } as CSSProperties,
     recording: { border: 0, borderRadius: 999, background: '#e11d48', color: '#fff', padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' } as CSSProperties,
-    send: { border: 0, borderRadius: 8, background: accent, color: '#fff', padding: '6px 12px', fontSize: 14, fontWeight: 500, cursor: 'pointer' } as CSSProperties,
+    send: { border: `2px solid ${accent}`, borderRadius: 10, background: accent, color: '#fff', padding: '8px 16px', fontSize: 14, fontWeight: 600, fontFamily: font, cursor: 'pointer' } as CSSProperties,
     fab: {
       width: 48,
       height: 48,
