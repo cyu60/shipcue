@@ -50,8 +50,8 @@ const COLUMNS =
   'id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, created_at';
 const QUEUE_ORDER = 'ORDER BY priority_rank DESC, created_at, id';
 
-/** Stores reports in the fixqueue_reports table from sql/schema.sql. Use a server-side connection. */
-export function postgresStore(db: Queryable, table = 'fixqueue_reports'): ReportStore {
+/** Stores reports in the shipcue_reports table from sql/schema.sql. Use a server-side connection. */
+export function postgresStore(db: Queryable, table = 'shipcue_reports'): ReportStore {
   if (!/^[a-z_][a-z0-9_.]*$/i.test(table)) throw new Error(`Bad table name: ${table}`);
   const one = async (text: string, params: unknown[]) => {
     const { rows } = await db.query(text, params);

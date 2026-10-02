@@ -1,16 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createFixqueueHandler, memoryStore } from '../src/server';
+import { createShipcueHandler, memoryStore } from '../src/server';
 import { resolveConfig } from '../src/core';
 
-const BASE = 'https://app.example.com/api/fixqueue';
+const BASE = 'https://app.example.com/api/shipcue';
 const config = resolveConfig({ areas: [{ value: 'editor', label: 'Editor' }] });
 
-function setup(opts: Partial<Parameters<typeof createFixqueueHandler>[0]> = {}) {
+function setup(opts: Partial<Parameters<typeof createShipcueHandler>[0]> = {}) {
   const store = memoryStore();
-  const handle = createFixqueueHandler({
+  const handle = createShipcueHandler({
     store,
     config,
-    basePath: '/api/fixqueue',
+    basePath: '/api/shipcue',
     getReporter: async () => 'ada@example.com',
     agentToken: 'secret',
     ...opts,

@@ -34,7 +34,7 @@ export interface Area {
   label: string;
 }
 
-export interface FixqueueConfig {
+export interface ShipcueConfig {
   /** The parts of your app a report can be about. "Other" is always added. */
   areas: Area[];
   minLength: number;
@@ -49,7 +49,7 @@ const MAX_USER_AGENT = 300;
 const MAX_DIAGNOSTICS_BYTES = 64 * 1024;
 const HEADLINE_MAX = 60;
 
-export function resolveConfig(partial: Partial<FixqueueConfig> = {}): FixqueueConfig {
+export function resolveConfig(partial: Partial<ShipcueConfig> = {}): ShipcueConfig {
   const areas = partial.areas ?? [];
   return {
     areas: areas.some((a) => a.value === OTHER.value) ? areas : [...areas, OTHER],
@@ -95,7 +95,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /** Checks untrusted input (form fields or JSON) against the config. */
-export function validateReport(raw: Record<string, unknown>, config: FixqueueConfig): Result<ReportInput> {
+export function validateReport(raw: Record<string, unknown>, config: ShipcueConfig): Result<ReportInput> {
   const description = String(raw.description ?? '').trim();
   if (description.length < config.minLength) {
     return { ok: false, error: `Tell us a little more (at least ${config.minLength} characters).` };
@@ -129,14 +129,14 @@ export function validateReport(raw: Record<string, unknown>, config: FixqueueCon
   };
 }
 
-export function areaLabel(area: string, config: FixqueueConfig): string {
+export function areaLabel(area: string, config: ShipcueConfig): string {
   return config.areas.find((a) => a.value === area)?.label ?? area;
 }
 
 /** "Bug [High] Editor: first line of the description" */
 export function buildTitle(
   r: Pick<ReportInput, 'type' | 'priority' | 'area' | 'description'>,
-  config: FixqueueConfig,
+  config: ShipcueConfig,
 ): string {
   const firstLine = (r.description.trim().split('\n')[0] ?? '').trim();
   const headline = firstLine.slice(0, HEADLINE_MAX) + (firstLine.length > HEADLINE_MAX ? '…' : '');
@@ -144,7 +144,7 @@ export function buildTitle(
 }
 
 /** Plain-text body for a task, issue or email. */
-export function buildBody(r: Report, config: FixqueueConfig): string {
+export function buildBody(r: Report, config: ShipcueConfig): string {
   return [
     r.description.trim(),
     '',
@@ -169,7 +169,7 @@ export function sortQueue<T extends Pick<Report, 'priority' | 'createdAt'>>(repo
 }
 
 /** The report as a task a coding agent can pick up and work on. */
-export function toAgentPrompt(r: Report, config: FixqueueConfig): string {
+export function toAgentPrompt(r: Report, config: ShipcueConfig): string {
   const ask =
     r.type === 'bug'
       ? 'Reproduce it, write a failing test, fix it, and close the report with the PR link.'

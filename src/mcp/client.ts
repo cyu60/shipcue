@@ -1,7 +1,7 @@
 import type { Report, Status } from '../core';
 
 export interface AgentClientOptions {
-  /** Where createFixqueueHandler is mounted, e.g. https://app.example.com/api/fixqueue */
+  /** Where createShipcueHandler is mounted, e.g. https://app.example.com/api/shipcue */
   url: string;
   token: string;
   /** Name stored as claimed_by, e.g. "claude-code@laptop". */
@@ -28,7 +28,7 @@ export function createAgentClient(opts: AgentClientOptions) {
     });
     if (res.status === 204) return null;
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) throw new Error(body.error ?? `fixqueue responded ${res.status}`);
+    if (!res.ok) throw new Error(body.error ?? `shipcue responded ${res.status}`);
     return body as T;
   }
   const post = <T>(path: string, body: unknown = {}) => call<T>(path, { method: 'POST', body });

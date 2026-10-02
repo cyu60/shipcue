@@ -1,16 +1,16 @@
 <div align="center">
 
-<a href="https://fixqueue.vercel.app"><img src="docs/banner.png" alt="fixqueue: bug reports your coding agents can fix" width="100%"></a>
+<a href="https://shipcue.vercel.app"><img src="docs/banner.png" alt="shipcue: bug reports your coding agents can fix" width="100%"></a>
 
 <br>
 
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-53%20passing-2E5BFF?style=flat-square" alt="53 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
-# fixqueue: Bug Reports Your Coding Agents Can Fix
+# shipcue: Bug Reports Your Coding Agents Can Fix
 
 **Drop-in report button** &nbsp;•&nbsp; **Queue in your own Postgres** &nbsp;•&nbsp; **Agents claim over MCP** &nbsp;•&nbsp; **One report, one agent**
 
-🌐 [Website](https://fixqueue.vercel.app) &nbsp;•&nbsp; ☁️ [Cloud](https://fixqueue.vercel.app/cloud/) &nbsp;•&nbsp; 📖 [Docs](https://fixqueue.vercel.app/docs/) &nbsp;•&nbsp; 📝 [Blog](https://fixqueue.vercel.app/blog/) &nbsp;•&nbsp; ✉️ [Contact](https://fixqueue.vercel.app/contact/)
+🌐 [Website](https://shipcue.vercel.app) &nbsp;•&nbsp; ☁️ [Cloud](https://shipcue.vercel.app/cloud/) &nbsp;•&nbsp; 📖 [Docs](https://shipcue.vercel.app/docs/) &nbsp;•&nbsp; 📝 [Blog](https://shipcue.vercel.app/blog/) &nbsp;•&nbsp; ✉️ [Contact](https://shipcue.vercel.app/contact/)
 
 </div>
 
@@ -20,7 +20,7 @@ A drop-in bug report and feature request button whose inbox is a queue that peop
 
 <p align="center"><img src="docs/report-button.png" alt="The report button open on a feature request: bug or feature toggle, description, priority, where, screenshot upload and Send" width="420"></p>
 
-Someone in your app clicks the button, says what broke or what they want, pastes a screenshot, and sends. fixqueue files it with the page address, browser and a snapshot of app state you choose. Then Claude Code, Codex or a teammate claims the most urgent report, gets a ready-made task prompt, fixes it, and closes it with the PR link.
+Someone in your app clicks the button, says what broke or what they want, pastes a screenshot, and sends. shipcue files it with the page address, browser and a snapshot of app state you choose. Then Claude Code, Codex or a teammate claims the most urgent report, gets a ready-made task prompt, fixes it, and closes it with the PR link.
 
 ```
 user files a report  →  queue (your Postgres)  →  agent claims the top one  →  PR  →  closed as fixed
@@ -35,7 +35,7 @@ It started as the report button inside three apps (a founders dashboard, a hacka
 ## Install
 
 ```bash
-pnpm add fixqueue
+pnpm add shipcue
 ```
 
 ## 1. Create the table
@@ -44,21 +44,21 @@ Run [`sql/schema.sql`](sql/schema.sql) on your database (Supabase, InsForge, Neo
 
 ## 2. Mount the handler
 
-Next.js App Router, `app/api/fixqueue/[...path]/route.ts`:
+Next.js App Router, `app/api/shipcue/[...path]/route.ts`:
 
 ```ts
 import { Pool } from 'pg';
-import { createFixqueueHandler, postgresStore } from 'fixqueue/server';
-import { resolveConfig } from 'fixqueue';
+import { createShipcueHandler, postgresStore } from 'shipcue/server';
+import { resolveConfig } from 'shipcue';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-const handler = createFixqueueHandler({
+const handler = createShipcueHandler({
   store: postgresStore(pool),
   config: resolveConfig({ areas: [{ value: 'editor', label: 'Editor' }, { value: 'billing', label: 'Billing' }] }),
   getReporter: async (req) => (await getSession(req))?.email ?? null, // your auth
   requireReporter: true,
-  agentToken: process.env.FIXQUEUE_TOKEN, // leave unset to switch the agent API off
+  agentToken: process.env.SHIPCUE_TOKEN, // leave unset to switch the agent API off
   onReport: async (report) => {
     // email the team, post to Slack, mirror to your task board...
   },
@@ -72,7 +72,7 @@ The handler is a plain `(Request) => Promise<Response>`, so it also works in Hon
 ## 3. Add the button
 
 ```tsx
-import { ReportButton } from 'fixqueue/react';
+import { ReportButton } from 'shipcue/react';
 
 <ReportButton
   areas={[{ value: 'editor', label: 'Editor' }, { value: 'billing', label: 'Billing' }]}
@@ -86,10 +86,10 @@ Use `variant="inline"` for a header or toolbar button on phones, where a floatin
 ## 4. Let agents work the queue
 
 ```bash
-claude mcp add fixqueue \
-  -e FIXQUEUE_URL=https://your.app/api/fixqueue \
-  -e FIXQUEUE_TOKEN=... \
-  -- npx fixqueue-mcp
+claude mcp add shipcue \
+  -e SHIPCUE_URL=https://your.app/api/shipcue \
+  -e SHIPCUE_TOKEN=... \
+  -- npx shipcue-mcp
 ```
 
 Tools: `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`.
@@ -133,7 +133,7 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 
 ```bash
 pnpm install && pnpm build
-FIXQUEUE_TOKEN=dev node examples/demo-server.mjs
+SHIPCUE_TOKEN=dev node examples/demo-server.mjs
 ```
 
 ## Development

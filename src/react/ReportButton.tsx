@@ -9,7 +9,7 @@ export type SubmitResult = { id: string } | { error: string };
 export interface ReportButtonProps {
   /** The parts of your app a report can be about. "Other" is always added. */
   areas?: Area[];
-  /** Where createFixqueueHandler is mounted. Ignored when `submit` is given. */
+  /** Where createShipcueHandler is mounted. Ignored when `submit` is given. */
   endpoint?: string;
   /** Send the form yourself, e.g. through a Next.js server action. */
   submit?: (form: FormData) => Promise<SubmitResult>;
@@ -49,7 +49,7 @@ function snapshot(diagnostics?: () => Record<string, unknown>): string {
 
 export function ReportButton({
   areas,
-  endpoint = '/api/fixqueue',
+  endpoint = '/api/shipcue',
   submit,
   diagnostics,
   variant = 'floating',
@@ -146,7 +146,7 @@ export function ReportButton({
   const s = styles(accentColor);
 
   return (
-    <div data-fixqueue={variant} style={variant === 'floating' ? s.floatingWrap : s.inlineWrap}>
+    <div data-shipcue={variant} style={variant === 'floating' ? s.floatingWrap : s.inlineWrap}>
       {open && (
         <div role="dialog" aria-label="Report a bug" style={variant === 'floating' ? s.panel : s.inlinePanel}>
           <div style={s.row}>

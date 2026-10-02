@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // MCP server so Claude Code, Codex or any MCP client can work the queue.
-//   claude mcp add fixqueue -e FIXQUEUE_URL=https://app.example.com/api/fixqueue -e FIXQUEUE_TOKEN=... -- npx fixqueue-mcp
+//   claude mcp add shipcue -e SHIPCUE_URL=https://app.example.com/api/shipcue -e SHIPCUE_TOKEN=... -- npx shipcue-mcp
 
 import { hostname } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -8,15 +8,15 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { createAgentClient } from './client';
 
-const url = process.env.FIXQUEUE_URL;
-const token = process.env.FIXQUEUE_TOKEN;
+const url = process.env.SHIPCUE_URL;
+const token = process.env.SHIPCUE_TOKEN;
 if (!url || !token) {
-  console.error('fixqueue-mcp: set FIXQUEUE_URL and FIXQUEUE_TOKEN');
+  console.error('shipcue-mcp: set SHIPCUE_URL and SHIPCUE_TOKEN');
   process.exit(1);
 }
 
-const client = createAgentClient({ url, token, agent: process.env.FIXQUEUE_AGENT ?? `mcp@${hostname()}` });
-const server = new McpServer({ name: 'fixqueue', version: '0.1.0' });
+const client = createAgentClient({ url, token, agent: process.env.SHIPCUE_AGENT ?? `mcp@${hostname()}` });
+const server = new McpServer({ name: 'shipcue', version: '0.1.0' });
 
 const text = (value: unknown) => ({
   content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],

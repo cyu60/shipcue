@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentClient } from '../src/mcp/client';
-import { createFixqueueHandler, memoryStore } from '../src/server';
+import { createShipcueHandler, memoryStore } from '../src/server';
 
 async function setup() {
   const store = memoryStore();
-  const handler = createFixqueueHandler({ store, agentToken: 'secret' });
+  const handler = createShipcueHandler({ store, agentToken: 'secret' });
   const fetchVia = (url: string | URL | Request, init?: RequestInit) => handler(new Request(url, init));
-  const client = createAgentClient({ url: 'https://app.example.com/api/fixqueue', token: 'secret', agent: 'claude', fetch: fetchVia });
+  const client = createAgentClient({ url: 'https://app.example.com/api/shipcue', token: 'secret', agent: 'claude', fetch: fetchVia });
   const add = (priority: 'low' | 'blocking') =>
     store.create({
       type: 'bug',
@@ -58,9 +58,9 @@ describe('agent client (what the MCP tools call)', () => {
 
   it('fails clearly on a wrong token', async () => {
     const store = memoryStore();
-    const handler = createFixqueueHandler({ store, agentToken: 'secret' });
+    const handler = createShipcueHandler({ store, agentToken: 'secret' });
     const client = createAgentClient({
-      url: 'https://x/api/fixqueue',
+      url: 'https://x/api/shipcue',
       token: 'wrong',
       fetch: (u, i) => handler(new Request(u, i)),
     });

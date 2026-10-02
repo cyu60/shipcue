@@ -17,15 +17,15 @@ def page(path, title, description, body, current):
 <meta name="description" content="{description}">
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{description}">
-<meta property="og:image" content="https://fixqueue.vercel.app/assets/banner.png">
+<meta property="og:image" content="https://shipcue.vercel.app/assets/banner.png">
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/">fixqueue</a><nav class="nav" aria-label="Main">{nav}</nav></header>
+<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main">{nav}</nav></header>
 <main>
 {body}
 </main>
-<footer class="site-foot"><span>fixqueue is open source under the MIT license.</span><span><a href="mailto:{EMAIL}">{EMAIL}</a></span></footer>
+<footer class="site-foot"><span>shipcue is open source under the MIT license.</span><span><a href="mailto:{EMAIL}">{EMAIL}</a></span></footer>
 </div>
 </body>
 </html>
@@ -65,7 +65,7 @@ HOME = """
 <h2>Add it in three steps</h2>
 <div class="prose">
 <p>Create the table, mount one handler, drop in the button.</p>
-<pre><code>import { ReportButton } from 'fixqueue/react';
+<pre><code>import { ReportButton } from 'shipcue/react';
 
 &lt;ReportButton
   areas={[{ value: 'editor', label: 'Editor' }]}
@@ -135,26 +135,26 @@ HOME = """
 DOCS = """
 <div class="prose">
 <h1>Docs</h1>
-<p class="lede">Set up fixqueue in a Next.js app in about ten minutes. The handler is a plain <code>(Request) =&gt; Response</code> function, so it also runs in Hono, Remix, Bun, Deno and Cloudflare Workers.</p>
-<div class="note">fixqueue is in early preview. The npm package and the public repository open soon. <a href="/contact/">Ask for early access</a>.</div>
+<p class="lede">Set up shipcue in a Next.js app in about ten minutes. The handler is a plain <code>(Request) =&gt; Response</code> function, so it also runs in Hono, Remix, Bun, Deno and Cloudflare Workers.</p>
+<div class="note">shipcue is in early preview. The npm package and the public repository open soon. <a href="/contact/">Ask for early access</a>.</div>
 
 <h2>1. Create the table</h2>
-<p>Run <code>sql/schema.sql</code> on your database. It creates one table, <code>fixqueue_reports</code>, and an index that keeps the queue fast. It works on Supabase, InsForge, Neon, RDS and plain Postgres.</p>
+<p>Run <code>sql/schema.sql</code> on your database. It creates one table, <code>shipcue_reports</code>, and an index that keeps the queue fast. It works on Supabase, InsForge, Neon, RDS and plain Postgres.</p>
 
 <h2>2. Mount the handler</h2>
-<p>In <code>app/api/fixqueue/[...path]/route.ts</code>:</p>
+<p>In <code>app/api/shipcue/[...path]/route.ts</code>:</p>
 <pre><code>import { Pool } from 'pg';
-import { createFixqueueHandler, postgresStore } from 'fixqueue/server';
-import { resolveConfig } from 'fixqueue';
+import { createShipcueHandler, postgresStore } from 'shipcue/server';
+import { resolveConfig } from 'shipcue';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-const handler = createFixqueueHandler({
+const handler = createShipcueHandler({
   store: postgresStore(pool),
   config: resolveConfig({ areas: [{ value: 'editor', label: 'Editor' }] }),
   getReporter: async (req) =&gt; (await getSession(req))?.email ?? null,
   requireReporter: true,
-  agentToken: process.env.FIXQUEUE_TOKEN,
+  agentToken: process.env.SHIPCUE_TOKEN,
   onReport: async (report) =&gt; { /* email the team, post to Slack */ },
 });
 
@@ -162,7 +162,7 @@ export { handler as GET, handler as POST };</code></pre>
 <p>Screenshots are stored as small data URLs unless you pass <code>saveScreenshot(file, key)</code> to upload them to S3 or Supabase Storage. A failure inside <code>onReport</code> never fails the report.</p>
 
 <h2>3. Add the button</h2>
-<pre><code>import { ReportButton } from 'fixqueue/react';
+<pre><code>import { ReportButton } from 'shipcue/react';
 
 &lt;ReportButton
   areas={[{ value: 'editor', label: 'Editor' }]}
@@ -176,14 +176,14 @@ export { handler as GET, handler as POST };</code></pre>
 </ul>
 
 <h2>4. Connect an agent</h2>
-<pre><code>claude mcp add fixqueue \\
-  -e FIXQUEUE_URL=https://your.app/api/fixqueue \\
-  -e FIXQUEUE_TOKEN=... \\
-  -- npx fixqueue-mcp</code></pre>
+<pre><code>claude mcp add shipcue \\
+  -e SHIPCUE_URL=https://your.app/api/shipcue \\
+  -e SHIPCUE_TOKEN=... \\
+  -- npx shipcue-mcp</code></pre>
 <p>The agent gets six tools: <code>list_reports</code>, <code>claim_next_report</code>, <code>get_report</code>, <code>claim_report</code>, <code>release_report</code> and <code>close_report</code>. A claimed report arrives as a task prompt with the description, page, screenshots, app snapshot and what to do next: reproduce, write a failing test, fix, close with the PR link.</p>
 
 <h2>HTTP API</h2>
-<p>Everything except filing a report needs <code>Authorization: Bearer $FIXQUEUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
+<p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
 <pre><code>POST /reports                 file a report (multipart form, from the button)
 GET  /reports?status=open     the queue, most urgent first
 GET  /reports/:id             one report plus its task prompt
@@ -209,7 +209,7 @@ CLOUD = """
 <div class="prose">
 <h1>Cloud</h1>
 <p class="lede">The same queue without running a database: add the button, get a hosted queue, connect your agents.</p>
-<div class="note">fixqueue Cloud is planned, not built yet. Self-hosting is the way to use fixqueue today. <a href="/contact/">Tell us you want it</a> and we will build it with you.</div>
+<div class="note">shipcue Cloud is planned, not built yet. Self-hosting is the way to use shipcue today. <a href="/contact/">Tell us you want it</a> and we will build it with you.</div>
 <h2>What it would add</h2>
 <ul>
   <li>A hosted queue and screenshot storage, so you only add the button</li>
@@ -245,7 +245,7 @@ POST = """
 <h2>The part that changed</h2>
 <p>What is different now is who reads the report. More and more of my fixes start with Claude Code, and a good bug report is exactly the thing an agent needs: what happened, where, on which browser, with a screenshot and a snapshot of the app's state. The report is basically a task prompt already. It just never reached the agent.</p>
 
-<p>So fixqueue treats the inbox as a queue. Reports sit in your own Postgres, most urgent first. An agent connects over MCP, claims the top report, gets it as a task (reproduce it, write a failing test, fix it), and closes it with the PR link. The claim is atomic, so you can point several agents at the queue and none of them will ever pick up the same report.</p>
+<p>So shipcue treats the inbox as a queue. Reports sit in your own Postgres, most urgent first. An agent connects over MCP, claims the top report, gets it as a task (reproduce it, write a failing test, fix it), and closes it with the PR link. The claim is atomic, so you can point several agents at the queue and none of them will ever pick up the same report.</p>
 
 <h2>Why self-hosted</h2>
 <p>There are good hosted feedback tools already. I wanted something that lives in the database I already have, that I can read with SQL, and that does not need another login for the team. It is one table, one handler and one React component.</p>
@@ -259,7 +259,7 @@ CONTACT = f"""
 <div class="prose">
 <h1>Contact</h1>
 <p class="lede">Questions, early access, or a report queue you want an agent working through? Email Chinat.</p>
-<p><a class="btn btn-ink" href="mailto:{EMAIL}?subject=fixqueue">Email {EMAIL}</a></p>
+<p><a class="btn btn-ink" href="mailto:{EMAIL}?subject=shipcue">Email {EMAIL}</a></p>
 <h2>Good things to include</h2>
 <ul>
   <li>What your app is built with: framework, database, auth</li>
@@ -269,10 +269,10 @@ CONTACT = f"""
 </div>
 """
 
-page("index.html", "fixqueue: bug reports your coding agents can fix", "A report button, a queue in your own Postgres, and an MCP server so coding agents can fix what people report.", HOME, "/")
-page("docs/index.html", "Docs · fixqueue", "Set up fixqueue: the table, the handler, the button and the agent tools.", DOCS, "/docs/")
-page("cloud/index.html", "Cloud · fixqueue", "fixqueue Cloud: the same queue without running a database. Planned.", CLOUD, "/cloud/")
-page("blog/index.html", "Blog · fixqueue", "Notes on building fixqueue.", BLOG, "/blog/")
-page("blog/agents-should-read-your-bug-reports/index.html", "Your bug report button should feed your agents · fixqueue", "Why fixqueue treats the bug report inbox as a queue that agents work from.", POST, "/blog/")
-page("contact/index.html", "Contact · fixqueue", "Get in touch about fixqueue.", CONTACT, "/contact/")
+page("index.html", "shipcue: bug reports your coding agents can fix", "A report button, a queue in your own Postgres, and an MCP server so coding agents can fix what people report.", HOME, "/")
+page("docs/index.html", "Docs · shipcue", "Set up shipcue: the table, the handler, the button and the agent tools.", DOCS, "/docs/")
+page("cloud/index.html", "Cloud · shipcue", "shipcue Cloud: the same queue without running a database. Planned.", CLOUD, "/cloud/")
+page("blog/index.html", "Blog · shipcue", "Notes on building shipcue.", BLOG, "/blog/")
+page("blog/agents-should-read-your-bug-reports/index.html", "Your bug report button should feed your agents · shipcue", "Why shipcue treats the bug report inbox as a queue that agents work from.", POST, "/blog/")
+page("contact/index.html", "Contact · shipcue", "Get in touch about shipcue.", CONTACT, "/contact/")
 print("built")

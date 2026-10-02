@@ -1,5 +1,5 @@
 {
-  "name": "fixqueue",
+  "name": "shipcue",
   "version": "0.1.0",
   "description": "A drop-in bug report and feature request button whose inbox is a queue that people and coding agents both work from.",
   "license": "MIT",
@@ -24,7 +24,7 @@
     }
   },
   "bin": {
-    "fixqueue-mcp": "./dist/mcp/bin.js"
+    "shipcue-mcp": "./dist/mcp/bin.js"
   },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",

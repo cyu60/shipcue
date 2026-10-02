@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { resolveConfig, toAgentPrompt, validateReport, type FixqueueConfig, type Report } from '../core';
+import { resolveConfig, toAgentPrompt, validateReport, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 
 const IMAGE_TYPES: Record<string, string> = {
@@ -11,8 +11,8 @@ const IMAGE_TYPES: Record<string, string> = {
 
 export interface HandlerOptions {
   store: ReportStore;
-  config?: FixqueueConfig;
-  /** Where the handler is mounted, e.g. "/api/fixqueue". */
+  config?: ShipcueConfig;
+  /** Where the handler is mounted, e.g. "/api/shipcue". */
   basePath?: string;
   /** Who is filing: an email, user id or name from your session. Null when signed out. */
   getReporter?: (req: Request) => Promise<string | null>;
@@ -61,11 +61,11 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
  *   POST {base}/reports/:id/release     agent: give it back
  *   POST {base}/reports/:id/close       agent: { status: fixed|wontfix, resolution }
  *
- * In Next.js: app/api/fixqueue/[...path]/route.ts → export { handler as GET, handler as POST }.
+ * In Next.js: app/api/shipcue/[...path]/route.ts → export { handler as GET, handler as POST }.
  */
-export function createFixqueueHandler(opts: HandlerOptions): (req: Request) => Promise<Response> {
+export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Promise<Response> {
   const config = opts.config ?? resolveConfig();
-  const base = (opts.basePath ?? '/api/fixqueue').replace(/\/$/, '');
+  const base = (opts.basePath ?? '/api/shipcue').replace(/\/$/, '');
   const { store } = opts;
 
   async function fileReport(req: Request): Promise<Response> {
@@ -123,7 +123,7 @@ export function createFixqueueHandler(opts: HandlerOptions): (req: Request) => P
       try {
         await opts.onReport(report);
       } catch (err) {
-        console.error('fixqueue: onReport failed', err);
+        console.error('shipcue: onReport failed', err);
       }
     }
     return json({ id: report.id }, 201);
@@ -181,7 +181,7 @@ export function createFixqueueHandler(opts: HandlerOptions): (req: Request) => P
       if (req.method === 'POST' && parts.length === 0) return await fileReport(req);
       return await agentApi(req, parts);
     } catch (err) {
-      console.error('fixqueue: handler failed', err);
+      console.error('shipcue: handler failed', err);
       return fail('Something went wrong. Please try again.', 500);
     }
   };

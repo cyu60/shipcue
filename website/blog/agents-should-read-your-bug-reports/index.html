@@ -8,15 +8,15 @@
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='2' width='24' height='28' rx='5' fill='%23FFD43B' stroke='%2316203A' stroke-width='3'/><text x='16' y='24' font-family='Arial' font-weight='900' font-size='14' text-anchor='middle' fill='%2316203A'>#</text></svg>">
-<title>Your bug report button should feed your agents · fixqueue</title>
-<meta name="description" content="Why fixqueue treats the bug report inbox as a queue that agents work from.">
-<meta property="og:title" content="Your bug report button should feed your agents · fixqueue">
-<meta property="og:description" content="Why fixqueue treats the bug report inbox as a queue that agents work from.">
-<meta property="og:image" content="https://fixqueue.vercel.app/assets/banner.png">
+<title>Your bug report button should feed your agents · shipcue</title>
+<meta name="description" content="Why shipcue treats the bug report inbox as a queue that agents work from.">
+<meta property="og:title" content="Your bug report button should feed your agents · shipcue">
+<meta property="og:description" content="Why shipcue treats the bug report inbox as a queue that agents work from.">
+<meta property="og:image" content="https://shipcue.vercel.app/assets/banner.png">
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/">fixqueue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/docs/">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/" aria-current="page">Blog</a><a href="/contact/">Contact</a></nav></header>
+<header class="site-head"><a class="brand" href="/">shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/docs/">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/" aria-current="page">Blog</a><a href="/contact/">Contact</a></nav></header>
 <main>
 
 <article class="prose">
@@ -32,7 +32,7 @@
 <h2>The part that changed</h2>
 <p>What is different now is who reads the report. More and more of my fixes start with Claude Code, and a good bug report is exactly the thing an agent needs: what happened, where, on which browser, with a screenshot and a snapshot of the app's state. The report is basically a task prompt already. It just never reached the agent.</p>
 
-<p>So fixqueue treats the inbox as a queue. Reports sit in your own Postgres, most urgent first. An agent connects over MCP, claims the top report, gets it as a task (reproduce it, write a failing test, fix it), and closes it with the PR link. The claim is atomic, so you can point several agents at the queue and none of them will ever pick up the same report.</p>
+<p>So shipcue treats the inbox as a queue. Reports sit in your own Postgres, most urgent first. An agent connects over MCP, claims the top report, gets it as a task (reproduce it, write a failing test, fix it), and closes it with the PR link. The claim is atomic, so you can point several agents at the queue and none of them will ever pick up the same report.</p>
 
 <h2>Why self-hosted</h2>
 <p>There are good hosted feedback tools already. I wanted something that lives in the database I already have, that I can read with SQL, and that does not need another login for the team. It is one table, one handler and one React component.</p>
@@ -42,7 +42,7 @@
 </article>
 
 </main>
-<footer class="site-foot"><span>fixqueue is open source under the MIT license.</span><span><a href="mailto:chinatchinat123@gmail.com">chinatchinat123@gmail.com</a></span></footer>
+<footer class="site-foot"><span>shipcue is open source under the MIT license.</span><span><a href="mailto:chinatchinat123@gmail.com">chinatchinat123@gmail.com</a></span></footer>
 </div>
 </body>
 </html>

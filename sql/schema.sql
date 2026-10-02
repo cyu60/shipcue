@@ -1,9 +1,9 @@
--- fixqueue: one table holds every bug report and feature request.
+-- shipcue: one table holds every bug report and feature request.
 -- Plain Postgres; works on Supabase, InsForge, Neon, RDS or a local server.
 -- Row-level security for apps that let browsers read the table directly is
 -- in supabase-rls.sql. The server handler only needs this file.
 
-CREATE TABLE IF NOT EXISTS fixqueue_reports (
+CREATE TABLE IF NOT EXISTS shipcue_reports (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   type          text NOT NULL CHECK (type IN ('bug', 'feature')),
   priority      text NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'blocking')),
@@ -30,6 +30,6 @@ CREATE TABLE IF NOT EXISTS fixqueue_reports (
   deleted_at    timestamptz
 );
 
-CREATE INDEX IF NOT EXISTS fixqueue_reports_queue
-  ON fixqueue_reports (status, priority_rank DESC, created_at)
+CREATE INDEX IF NOT EXISTS shipcue_reports_queue
+  ON shipcue_reports (status, priority_rank DESC, created_at)
   WHERE NOT is_deleted;
