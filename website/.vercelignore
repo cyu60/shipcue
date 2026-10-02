@@ -1,2 +1,5 @@
 _head.txt
 build.py
+build-assets.mjs
+_src
+.env*

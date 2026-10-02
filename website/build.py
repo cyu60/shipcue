@@ -188,6 +188,7 @@ export { handler as GET, handler as POST };</code></pre>
   <li><code>variant="inline"</code> puts a small button in your header, which works better on phones where a floating bubble covers the controls.</li>
   <li><code>submit={(form) =&gt; action(form)}</code> sends through a Next.js server action instead of <code>fetch</code>.</li>
   <li><code>diagnostics</code> is a snapshot for whoever fixes the report. Keep it under 64 KB. If it throws, the report still goes through.</li>
+  <li>A small "Powered by shipcue · Star it on GitHub" line sits at the bottom of the panel. If shipcue helps you, a star really helps us; <code>watermark={false}</code> turns it off.</li>
   <li>Recent page errors are added to the snapshot as <code>recentErrors</code>. Turn this off with <code>captureErrors={false}</code>.</li>
   <li><code>uploadVideo</code> uploads a recording or video yourself; without it the button posts it to the handler.</li>
   <li><code>pastReportsHref</code> adds a Past reports link to the panel.</li>

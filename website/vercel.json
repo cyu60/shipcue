@@ -1,0 +1,3 @@
+{
+  "rewrites": [{ "source": "/api/shipcue/:rest(.*)", "destination": "/api/shipcue?__p=:rest" }]
+}

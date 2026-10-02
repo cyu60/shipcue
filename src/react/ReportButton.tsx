@@ -35,6 +35,8 @@ export interface ReportButtonProps {
   captureErrors?: boolean;
   /** Where people can see the reports they sent; shown as a Past reports link. */
   pastReportsHref?: string;
+  /** A small "Powered by shipcue" line asking people to star it on GitHub. On by default. */
+  watermark?: boolean;
 }
 
 const TYPES: { value: ReportType; label: string; placeholder: string }[] = [
@@ -84,6 +86,7 @@ export function ReportButton({
   uploadVideo,
   captureErrors = true,
   pastReportsHref,
+  watermark = true,
 }: ReportButtonProps) {
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
   const [open, setOpen] = useState(false);
@@ -422,6 +425,25 @@ export function ReportButton({
               </div>
             </>
           )}
+          {watermark && (
+            <p style={s.watermark}>
+              Powered by{' '}
+              <a href="https://github.com/cyu60/shipcue" target="_blank" rel="noopener noreferrer" style={s.watermarkLink}>
+                shipcue
+              </a>
+              {' · '}
+              <a
+                href="https://github.com/cyu60/shipcue"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Star shipcue on GitHub"
+                style={s.watermarkLink}
+              >
+                ★ Star it on GitHub
+              </a>{' '}
+              if it helps
+            </p>
+          )}
         </div>
       )}
 
@@ -500,7 +522,7 @@ function styles(accent: string) {
       maxHeight: '85vh',
     } as CSSProperties,
     row: { display: 'flex', justifyContent: 'space-between', gap: 8 } as CSSProperties,
-    h3: { margin: 0, fontSize: 14, fontWeight: 600 } as CSSProperties,
+    h3: { margin: 0, fontSize: 14, fontWeight: 600, fontFamily: font, lineHeight: 1.3, letterSpacing: 'normal', color: '#18181b' } as CSSProperties,
     sub: { margin: '2px 0 0', fontSize: 12, color: '#71717a' } as CSSProperties,
     iconBtn: { border: 0, background: 'transparent', color: '#a1a1aa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 4 } as CSSProperties,
     success: { marginTop: 12, borderRadius: 8, background: '#ecfdf5', color: '#065f46', padding: '8px 12px', fontSize: 12 } as CSSProperties,
@@ -512,6 +534,8 @@ function styles(accent: string) {
     label: { display: 'block', fontSize: 11, fontWeight: 500, color: '#71717a' } as CSSProperties,
     select: { ...field, marginTop: 4, padding: '6px 8px' } as CSSProperties,
     hint: { margin: '2px 0 0', fontSize: 10, color: '#a1a1aa', fontWeight: 400 } as CSSProperties,
+    watermark: { margin: '12px 0 0', textAlign: 'center', fontSize: 10, color: '#a1a1aa', fontFamily: font } as CSSProperties,
+    watermarkLink: { color: '#71717a', textDecoration: 'none', fontWeight: 600 } as CSSProperties,
     thumbs: { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 } as CSSProperties,
     thumb: { width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #e4e4e7' } as CSSProperties,
     remove: {

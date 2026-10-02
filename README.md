@@ -108,6 +108,8 @@ What else the panel does:
 - **The page.** The panel shows which page it will attach, with a "don't attach" link.
 - **Past reports.** `pastReportsHref="/reports"` adds a Past reports link to the panel and a See your reports link after sending.
 
+The panel ends with a small "Powered by shipcue · ★ Star it on GitHub" line. If shipcue helps you, a star really helps; `watermark={false}` turns it off.
+
 ## 4. Let agents work the queue
 
 ```bash

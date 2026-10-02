@@ -197,3 +197,26 @@ describe('ReportButton: video, page, errors and past reports', () => {
     expect(screen.getByRole('link', { name: /past reports/i })).toHaveAttribute('href', '/reports');
   });
 });
+
+describe('ReportButton: watermark', () => {
+  it('asks people to star shipcue on GitHub, in a new tab', async () => {
+    await openPanel();
+    const link = screen.getByRole('link', { name: /star shipcue on github/i });
+    expect(link).toHaveAttribute('href', 'https://github.com/cyu60/shipcue');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+  });
+
+  it('keeps it after a report is sent', async () => {
+    await openPanel();
+    await userEvent.type(screen.getByRole('textbox'), 'The heading disappears on Enter');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status');
+    expect(screen.getByRole('link', { name: /star shipcue on github/i })).toBeInTheDocument();
+  });
+
+  it('can be turned off', async () => {
+    await openPanel({ watermark: false });
+    expect(screen.queryByRole('link', { name: /star shipcue on github/i })).toBeNull();
+  });
+});

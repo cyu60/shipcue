@@ -1,0 +1,28 @@
+// The site's own shipcue queue: reports from the button on shipcue.vercel.app.
+import pg from 'pg';
+import { createShipcueHandler, postgresStore } from '../../src/server';
+import { resolveConfig } from '../../src/core';
+import { AREAS } from './areas.mjs';
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+
+const handler = createShipcueHandler({
+  store: postgresStore(pool),
+  config: resolveConfig({ areas: AREAS }),
+  basePath: '/api/shipcue',
+  agentToken: process.env.SHIPCUE_TOKEN,
+});
+
+// vercel.json rewrites /api/shipcue/<rest> to /api/shipcue?__p=<rest>; put the path back.
+function restore(req) {
+  const url = new URL(req.url);
+  const rest = url.searchParams.get('__p');
+  if (rest === null) return req;
+  url.searchParams.delete('__p');
+  url.pathname = `/api/shipcue/${rest}`;
+  const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+  return new Request(url, { method: req.method, headers: req.headers, body: hasBody ? req.body : undefined, duplex: 'half' });
+}
+
+export const GET = (req) => handler(restore(req));
+export const POST = (req) => handler(restore(req));
