@@ -216,6 +216,15 @@ describe('capabilities, files and videos by link', () => {
     expect(caps).toMatchObject({ video: 'form', files: true });
     caps = await (await setup({ acceptVideoUrl: () => true }).handle(new Request(BASE + '/capabilities'))).json();
     expect(caps.video).toBe('url');
+    expect(caps.maxVideoBytes).toBe(40 * 1024 * 1024);
+  });
+
+  it('caps videos posted to the handler at one request (4.4 MB unless raised)', async () => {
+    const saveVideo = async () => 'https://x/v.webm';
+    let caps = await (await setup({ saveVideo }).handle(new Request(BASE + '/capabilities'))).json();
+    expect(caps.maxVideoBytes).toBe(Math.floor(4.4 * 1024 * 1024));
+    caps = await (await setup({ saveVideo, maxRequestBytes: 100 * 1024 * 1024 }).handle(new Request(BASE + '/capabilities'))).json();
+    expect(caps.maxVideoBytes).toBe(40 * 1024 * 1024);
   });
 
   it('takes other files only with allowFiles, and never pages or scripts', async () => {

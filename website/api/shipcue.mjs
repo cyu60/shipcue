@@ -459,7 +459,8 @@ function createShipcueHandler(opts) {
       const caps = {
         video: opts.saveVideo ? "form" : opts.acceptVideoUrl ? "url" : null,
         files: config.allowFiles,
-        maxVideoBytes: config.maxVideoBytes,
+        // A video posted to the handler has to fit in one request; one uploaded straight to storage does not.
+        maxVideoBytes: opts.saveVideo ? Math.min(config.maxVideoBytes, opts.maxRequestBytes ?? Math.floor(4.4 * 1024 * 1024)) : config.maxVideoBytes,
         maxScreenshots: config.maxScreenshots,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes
       };

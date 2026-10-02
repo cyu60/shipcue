@@ -138,6 +138,15 @@ function snapshot(diagnostics: (() => Record<string, unknown>) | undefined, with
   return JSON.stringify(errors.length ? { ...app, recentErrors: errors } : app);
 }
 
+/** A failed video upload as a sentence: storage and hosts word size refusals in their own ways. */
+export function videoError(e: unknown, size: number, max: number): string {
+  const msg = e instanceof Error ? e.message : '';
+  if (/too big|too large|exceeds|size limit|maximum.*size|payload|413/i.test(msg)) {
+    return `the video (${formatBytes(size)}) is too big to upload here (up to ${formatBytes(max)}). The report itself was sent.`;
+  }
+  return msg || 'Could not upload the video. The report itself was sent.';
+}
+
 async function postVideo(endpoint: string, reportId: string, video: Blob): Promise<void> {
   const form = new FormData();
   form.set('video', video, `video.${videoType(video.type) === 'video/mp4' ? 'mp4' : videoType(video.type) === 'video/quicktime' ? 'mov' : 'webm'}`);
@@ -214,6 +223,8 @@ function ReportPanel({
   const known = typeof caps === 'object' ? caps : null;
   const videoOn = !!uploadVideo || (!submit && (caps === 'legacy' || known?.video === 'form'));
   const filesOn = !!known?.files;
+  // The real limit is the handler's when it said one (shipcue: fail gracefully on big videos).
+  const maxVideoBytes = !uploadVideo && known ? Math.min(config.maxVideoBytes, known.maxVideoBytes) : config.maxVideoBytes;
   const uid = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -350,8 +361,8 @@ function ReportPanel({
       setError('Attach a WebM, MP4 or MOV video.');
       return;
     }
-    if (blob.size > config.maxVideoBytes) {
-      setError(`That video is ${formatBytes(blob.size)}; videos can be up to ${formatBytes(config.maxVideoBytes)}.`);
+    if (blob.size > maxVideoBytes) {
+      setError(`That video is ${formatBytes(blob.size)}, over the ${formatBytes(maxVideoBytes)} limit. Record a shorter clip or trim it, or send the report without it.`);
       return;
     }
     setVideo({ blob, preview: URL.createObjectURL(blob) });
@@ -362,7 +373,7 @@ function ReportPanel({
     try {
       recorderRef.current = await recordScreen({
         maxSeconds: config.maxVideoSeconds,
-        maxBytes: config.maxVideoBytes,
+        maxBytes: maxVideoBytes,
         onTick: setRecording,
         onDone: ({ blob, note }) => {
           recorderRef.current = null;
@@ -497,7 +508,7 @@ function ReportPanel({
         try {
           await (uploadVideo ? uploadVideo(result.id, video.blob) : postVideo(endpoint, result.id, video.blob));
         } catch (e) {
-          videoFailed = e instanceof Error ? e.message : 'Could not upload the video.';
+          videoFailed = videoError(e, video.blob.size, maxVideoBytes);
         }
       }
       setVideo(null);

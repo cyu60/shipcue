@@ -186,6 +186,27 @@ describe('ReportButton: video, page, errors and past reports', () => {
     expect(await screen.findByText(/the video was not attached: this app does not take videos/i)).toBeInTheDocument();
     fetchSpy.mockRestore();
   });
+  it('refuses a video over the handler limit up front, keeping what was typed', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ video: 'form', files: false, maxVideoBytes: 1000, maxScreenshots: 10, maxTotalScreenshotBytes: 4e6 })),
+    );
+    render(<ReportButton areas={areas} endpoint="/api/shipcue" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    await type();
+    fireEvent.change(await screen.findByLabelText(/attach a video/i), { target: { files: [new File([new Uint8Array(2000)], 'big.webm', { type: 'video/webm' })] } });
+    expect(await screen.findByText(/that video is 2 kb, over the 1 kb limit/i)).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('The heading vanished on Enter');
+    expect(screen.queryByRole('button', { name: 'Remove video' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+    fetchSpy.mockRestore();
+  });
+  it('words a size refusal from storage plainly, and still files the report', async () => {
+    await openPanel({ uploadVideo: vi.fn(async () => { throw new Error('Vercel Blob: File size exceeds the maximum allowed'); }) });
+    await type();
+    fireEvent.change(screen.getByLabelText(/attach a video/i), { target: { files: [new File(['x'], 'c.webm', { type: 'video/webm' })] } });
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText(/too big to upload here.*the report itself was sent/i)).toBeInTheDocument();
+  });
   it('still files the report when the video fails, and says so', async () => {
     await openPanel({ uploadVideo: vi.fn(async () => { throw new Error('Storage is full'); }) });
     await type();

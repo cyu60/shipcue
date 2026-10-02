@@ -49,6 +49,12 @@ export interface HandlerOptions {
    * {base}/reports/:id/video. Return true only for URLs in your own storage for that report.
    */
   acceptVideoUrl?: (url: string, reportId: string) => boolean | Promise<boolean>;
+  /**
+   * The biggest request your host lets through. Videos posted to the handler (saveVideo)
+   * must fit in one request, so the button caps them at this. 4.4 MB by default, under
+   * Vercel's 4.5 MB; raise it on hosts without that limit.
+   */
+  maxRequestBytes?: number;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -323,7 +329,8 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       const caps: Capabilities = {
         video: opts.saveVideo ? 'form' : opts.acceptVideoUrl ? 'url' : null,
         files: config.allowFiles,
-        maxVideoBytes: config.maxVideoBytes,
+        // A video posted to the handler has to fit in one request; one uploaded straight to storage does not.
+        maxVideoBytes: opts.saveVideo ? Math.min(config.maxVideoBytes, opts.maxRequestBytes ?? Math.floor(4.4 * 1024 * 1024)) : config.maxVideoBytes,
         maxScreenshots: config.maxScreenshots,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
       };
