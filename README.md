@@ -48,10 +48,10 @@ More on the [use cases page](https://shipcue.vercel.app/use-cases/).
 pnpm add shipcue
 ```
 
-Until the first npm release is out, install from GitHub (it builds on install):
+Until the first npm release is out, install the prebuilt release (nothing builds on install, so it works with pnpm on Vercel):
 
 ```bash
-pnpm add github:cyu60/shipcue
+pnpm add https://github.com/cyu60/shipcue/releases/download/v0.3.0/shipcue-0.3.0.tgz
 ```
 
 ## 1. Create the table
