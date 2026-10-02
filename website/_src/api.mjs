@@ -13,6 +13,8 @@ const handler = createShipcueHandler({
   agentToken: process.env.SHIPCUE_TOKEN,
   // The Changelog page reads the queue and the fixes (no reporters or diagnostics).
   board: true,
+  // shipcue's own board shows screenshots too (report 9fdd0b45).
+  boardScreenshots: true,
 });
 
 // vercel.json rewrites /api/shipcue/<rest> to /api/shipcue?__p=<rest>; put the path back.

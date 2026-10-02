@@ -4,8 +4,10 @@ import { TYPE_LABEL, type Board, type BoardItem } from '../core';
 export interface ShipcueBoardProps {
   /** Where the handler is mounted, e.g. "/api/shipcue" (it must be created with `board`). */
   endpoint?: string;
-  /** Which lists to show. Both by default. */
+  /** Which lists to show. Both by default, with a Queue / Changelog toggle between them. */
   show?: 'both' | 'queue' | 'changelog';
+  /** With show="both", the list the toggle starts on. */
+  initialView?: 'queue' | 'changelog';
   /** Heading color and the small accents. */
   accentColor?: string;
   /** Re-read the board this often while the page is open (ms). 0 turns it off. */
@@ -21,6 +23,7 @@ export interface ShipcueBoardProps {
 export function ShipcueBoard({
   endpoint = '/api/shipcue',
   show = 'both',
+  initialView = 'queue',
   accentColor = '#16203A',
   refreshMs = 60_000,
   className,
@@ -28,6 +31,7 @@ export function ShipcueBoard({
 }: ShipcueBoardProps) {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<'queue' | 'changelog'>(initialView);
 
   useEffect(() => {
     let live = true;
@@ -55,9 +59,27 @@ export function ShipcueBoard({
   if (error && !board) return <p className={className} style={{ ...s.muted, ...style }}>{error}</p>;
   if (!board) return <p className={className} style={{ ...s.muted, ...style }}>Loading…</p>;
 
+  // With both lists, a toggle picks one (shipcue report 9fdd0b45).
+  const current = show === 'both' ? view : show;
   return (
     <div className={className} style={{ ...s.wrap, ...style }}>
-      {show !== 'changelog' && (
+      {show === 'both' && (
+        <div role="tablist" aria-label="Queue or changelog" style={s.toggle}>
+          {(['queue', 'changelog'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={view === v}
+              onClick={() => setView(v)}
+              style={view === v ? { ...s.toggleBtn, background: accentColor, color: '#fff' } : s.toggleBtn}
+            >
+              {v === 'queue' ? `Queue (${board.queue.length})` : `Changelog (${board.changelog.length})`}
+            </button>
+          ))}
+        </div>
+      )}
+      {current === 'queue' && (
         <section>
           <h2 style={{ ...s.h2, color: accentColor }}>Queue</h2>
           <p style={s.muted}>
@@ -75,7 +97,7 @@ export function ShipcueBoard({
           </ul>
         </section>
       )}
-      {show !== 'queue' && (
+      {current === 'changelog' && (
         <section>
           <h2 style={{ ...s.h2, color: accentColor }}>Changelog</h2>
           <p style={s.muted}>{board.changelog.length === 0 ? 'Nothing shipped yet.' : 'What was fixed, latest first.'}</p>
@@ -117,6 +139,15 @@ function Item({ r, accent, changelog = false, done = false }: { r: BoardItem; ac
       ) : (
         <p style={s.main}>{r.description}</p>
       )}
+      {r.screenshots?.length ? (
+        <div style={s.shots}>
+          {r.screenshots.map((src, i) => (
+            <a key={src} href={src} target="_blank" rel="noopener noreferrer" aria-label={`Screenshot ${i + 1}`}>
+              <img src={src} alt={`Screenshot ${i + 1}`} loading="lazy" style={s.shot} />
+            </a>
+          ))}
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -132,5 +163,9 @@ const s: Record<string, CSSProperties> = {
   tag: { padding: '0 0.55em', border: '1px solid rgba(128,128,128,0.4)', borderRadius: 999 },
   main: { margin: 0, whiteSpace: 'pre-wrap' },
   done: { opacity: 0.5 },
+  toggle: { display: 'inline-flex', gap: 4, padding: 3, border: '1px solid rgba(128,128,128,0.3)', borderRadius: 999, justifySelf: 'start' },
+  toggleBtn: { font: 'inherit', fontSize: '0.85em', padding: '0.25em 0.9em', border: 0, borderRadius: 999, background: 'none', color: 'inherit', cursor: 'pointer' },
+  shots: { display: 'flex', flexWrap: 'wrap', gap: '0.5em', marginTop: '0.6em' },
+  shot: { display: 'block', height: 72, maxWidth: 160, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(128,128,128,0.3)' },
   sub: { margin: '0.35em 0 0', fontSize: '0.85em', opacity: 0.65, whiteSpace: 'pre-wrap' },
 };

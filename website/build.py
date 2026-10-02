@@ -191,7 +191,7 @@ export { handler as GET, handler as POST };</code></pre>
   <li>A small "Powered by shipcue · Star it on GitHub" line sits at the bottom of the panel. If shipcue helps you, a star really helps us; <code>watermark={false}</code> turns it off.</li>
   <li>Recent page errors are added to the snapshot as <code>recentErrors</code>. Turn this off with <code>captureErrors={false}</code>.</li>
   <li><code>uploadVideo</code> uploads a recording or video yourself; without it the button posts it to the handler.</li>
-  <li><code>pastReportsHref</code> adds a Past reports link to the panel.</li>
+  <li><code>pastReportsHref</code> adds a Past reports link to the panel (<code>pastReportsLabel</code> changes its text).</li>
   <li>The panel shows the page it will attach, with a "don't attach" link.</li>
 </ul>
 
@@ -235,6 +235,7 @@ export { handler as GET, handler as POST };</code></pre>
 <h2>5. Show the queue and a changelog</h2>
 <p>Let people see what is waiting and what got fixed. Switch the board on in the handler, then drop the component on any page:</p>
 <pre><code>createShipcueHandler({ ..., board: true })   // or (req) =&gt; isSignedIn(req)
+                                             // boardScreenshots: true also shows screenshots (opt-in)
 
 import { ShipcueBoard } from 'shipcue/react';
 &lt;ShipcueBoard endpoint="/api/shipcue" /&gt;        // or &lt;ShipcueQueue /&gt;, &lt;ShipcueChangelog /&gt;</code></pre>

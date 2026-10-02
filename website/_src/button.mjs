@@ -22,6 +22,9 @@ createRoot(el).render(
     areas: AREAS,
     accentColor: '#16203A',
     captureErrors: true,
+    // Past reports, the queue and the changelog all live on one page (report e29431fc).
+    pastReportsHref: '/changelog/',
+    pastReportsLabel: 'Past reports & changelog',
     diagnostics: () => ({ path: location.pathname, section: areaFor(location.pathname), width: innerWidth }),
   }),
 );

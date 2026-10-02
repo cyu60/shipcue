@@ -220,6 +220,32 @@ describe('the public board', () => {
     expect(text).not.toMatch(/ada@example.com|secret|diagnostics|reporter/);
   });
 
+  it('leaves screenshots off the board unless boardScreenshots is on', async () => {
+    const { handle } = setup({ board: true });
+    const id = (await (await handle(post('/reports', reportForm({}, [png()])))).json()).id;
+    const board = await (await handle(new Request(BASE + '/board'))).json();
+    expect(board.queue[0].screenshots).toBeUndefined();
+    expect((await handle(new Request(`${BASE}/board/screenshot/${id}/0`))).status).toBe(404);
+  });
+
+  it('with boardScreenshots, links each screenshot and serves it as an image only', async () => {
+    const { handle } = setup({ board: true, boardScreenshots: true });
+    const id = (await (await handle(post('/reports', reportForm({}, [png(12), png(5)])))).json()).id;
+    const board = await (await handle(new Request(BASE + '/board'))).json();
+    const path = new URL(BASE).pathname;
+    expect(board.queue[0].screenshots).toEqual([`${path}/board/screenshot/${id}/0`, `${path}/board/screenshot/${id}/1`]);
+    expect(JSON.stringify(board)).not.toMatch(/data:/);
+    const res = await handle(new Request(`${BASE}/board/screenshot/${id}/0`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect((await res.arrayBuffer()).byteLength).toBe(12);
+    expect((await handle(new Request(`${BASE}/board/screenshot/${id}/7`))).status).toBe(404);
+    // Closed as won't fix: off the board, so its screenshots are too.
+    await handle(post(`/reports/${id}/close`, JSON.stringify({ status: 'wontfix', resolution: 'no' }), agent));
+    expect((await handle(new Request(`${BASE}/board/screenshot/${id}/0`))).status).toBe(404);
+  });
+
   it('can be limited per request', async () => {
     const { handle } = setup({ board: (req) => req.headers.get('cookie') === 'admin=1' });
     expect((await handle(new Request(BASE + '/board'))).status).toBe(404);

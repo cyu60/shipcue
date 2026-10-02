@@ -42,7 +42,7 @@ function resolveConfig(partial = {}) {
     maxVideoSeconds: partial.maxVideoSeconds ?? 60
   };
 }
-function toBoardItem(r) {
+function toBoardItem(r, screenshots) {
   return {
     id: r.id,
     type: r.type,
@@ -52,7 +52,8 @@ function toBoardItem(r) {
     status: r.status,
     resolution: r.resolution,
     createdAt: r.createdAt,
-    updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt
+    updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt,
+    ...screenshots?.length ? { screenshots } : {}
   };
 }
 var includes = (list, v) => typeof v === "string" && list.includes(v);
@@ -243,6 +244,8 @@ function sameToken(given, expected) {
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+var escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var isImageLink = (u) => u.startsWith("/") || u.startsWith("https://");
 async function toDataUrl(file) {
   const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
   return `data:${file.type};base64,${base64}`;
@@ -392,16 +395,43 @@ function createShipcueHandler(opts) {
       store.list({ status: "claimed" }),
       store.list({ status: "fixed" })
     ]);
+    const item = (r) => toBoardItem(r, opts.boardScreenshots ? boardShots(r) : void 0);
     const result = {
-      queue: [...claimed, ...open].slice(0, BOARD_LIMIT).map(toBoardItem),
-      changelog: fixed.map(toBoardItem).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
+      queue: [...claimed, ...open].slice(0, BOARD_LIMIT).map(item),
+      changelog: fixed.map(item).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
     };
     return new Response(JSON.stringify(result), {
       headers: { "content-type": "application/json", "cache-control": "no-store" }
     });
   }
+  const boardShots = (r) => r.screenshots.map((src, n) => src.startsWith("data:") ? `${base}/board/screenshot/${r.id}/${n}` : src).filter(isImageLink);
+  async function boardScreenshot(req, id, n) {
+    const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
+    if (!allowed || !opts.boardScreenshots) return fail("Not found", 404);
+    const r = await store.get(id);
+    if (!r || !["open", "claimed", "fixed"].includes(r.status)) return fail("Not found", 404);
+    const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/.exec(r.screenshots[n] ?? "");
+    if (!m) return fail("Not found", 404);
+    return new Response(Buffer.from(m[2] ?? "", "base64"), {
+      headers: {
+        "content-type": m[1] ?? "image/png",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'; sandbox",
+        "cache-control": "public, max-age=3600"
+      }
+    });
+  }
   return async function handler2(req) {
     const path = new URL(req.url).pathname;
+    const shot = req.method === "GET" ? new RegExp(`^${escapeRe(base)}/board/screenshot/([^/]+)/(\\d{1,2})$`).exec(path) : null;
+    if (shot) {
+      try {
+        return await boardScreenshot(req, shot[1] ?? "", Number(shot[2]));
+      } catch (err) {
+        console.error("shipcue: board screenshot failed", err);
+        return fail("Something went wrong. Please try again.", 500);
+      }
+    }
     if (req.method === "GET" && path === `${base}/board`) {
       try {
         return await board(req);
@@ -440,7 +470,9 @@ var handler = createShipcueHandler({
   basePath: "/api/shipcue",
   agentToken: process.env.SHIPCUE_TOKEN,
   // The Changelog page reads the queue and the fixes (no reporters or diagnostics).
-  board: true
+  board: true,
+  // shipcue's own board shows screenshots too (report 9fdd0b45).
+  boardScreenshots: true
 });
 function restore(req) {
   const url = new URL(req.url);

@@ -37,6 +37,12 @@ export interface HandlerOptions {
    * per request, e.g. signed-in people only.
    */
   board?: boolean | ((req: Request) => Promise<boolean> | boolean);
+  /**
+   * Show each report's screenshots on the board too. Off by default: screenshots can show
+   * private things, so turn it on only where everyone who can see the board may see them.
+   * Data-URL screenshots are served from GET {base}/board/screenshot/:id/:n, as images only.
+   */
+  boardScreenshots?: boolean;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -48,6 +54,10 @@ function sameToken(given: string, expected: string): boolean {
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** A screenshot the board may show: an https/relative link, or the board's own route. */
+const isImageLink = (u: string) => u.startsWith('/') || u.startsWith('https://');
 
 async function toDataUrl(file: File): Promise<string> {
   const base64 = Buffer.from(await file.arrayBuffer()).toString('base64');
@@ -231,10 +241,11 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       store.list({ status: 'claimed' }),
       store.list({ status: 'fixed' }),
     ]);
+    const item = (r: Report) => toBoardItem(r, opts.boardScreenshots ? boardShots(r) : undefined);
     const result: Board = {
-      queue: [...claimed, ...open].slice(0, BOARD_LIMIT).map(toBoardItem),
+      queue: [...claimed, ...open].slice(0, BOARD_LIMIT).map(item),
       changelog: fixed
-        .map(toBoardItem)
+        .map(item)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .slice(0, BOARD_LIMIT),
     };
@@ -243,8 +254,39 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     });
   }
 
+  // Stored URLs pass through; data URLs become short links, so the board stays small.
+  const boardShots = (r: Report) =>
+    r.screenshots.map((src, n) => (src.startsWith('data:') ? `${base}/board/screenshot/${r.id}/${n}` : src)).filter(isImageLink);
+
+  async function boardScreenshot(req: Request, id: string, n: number): Promise<Response> {
+    const allowed = typeof opts.board === 'function' ? await opts.board(req) : opts.board === true;
+    if (!allowed || !opts.boardScreenshots) return fail('Not found', 404);
+    const r = await store.get(id);
+    // Only what the board lists: open, claimed or fixed.
+    if (!r || !['open', 'claimed', 'fixed'].includes(r.status)) return fail('Not found', 404);
+    const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/.exec(r.screenshots[n] ?? '');
+    if (!m) return fail('Not found', 404);
+    return new Response(Buffer.from(m[2] ?? '', 'base64'), {
+      headers: {
+        'content-type': m[1] ?? 'image/png',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+        'cache-control': 'public, max-age=3600',
+      },
+    });
+  }
+
   return async function handler(req: Request): Promise<Response> {
     const path = new URL(req.url).pathname;
+    const shot = req.method === 'GET' ? new RegExp(`^${escapeRe(base)}/board/screenshot/([^/]+)/(\\d{1,2})$`).exec(path) : null;
+    if (shot) {
+      try {
+        return await boardScreenshot(req, shot[1] ?? '', Number(shot[2]));
+      } catch (err) {
+        console.error('shipcue: board screenshot failed', err);
+        return fail('Something went wrong. Please try again.', 500);
+      }
+    }
     if (req.method === 'GET' && path === `${base}/board`) {
       try {
         return await board(req);

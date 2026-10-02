@@ -106,7 +106,7 @@ What else the panel does:
 - **Record screen or attach a video.** Recordings stop at 60 seconds. The video uploads after the report is filed; if it fails, the report is still filed and the panel says so. Pass `uploadVideo={(reportId, blob) => …}` to upload it yourself; otherwise it goes to the handler. With `submit` and no `uploadVideo`, video is hidden.
 - **Recent errors.** Page errors, unhandled rejections and `console.error` calls from before the report are added to the snapshot as `recentErrors`. Turn off with `captureErrors={false}`.
 - **The page.** The panel shows which page it will attach, with a "don't attach" link.
-- **Past reports.** `pastReportsHref="/reports"` adds a Past reports link to the panel and a See your reports link after sending.
+- **Past reports.** `pastReportsHref="/reports"` adds a Past reports link to the panel and a See your reports link after sending; `pastReportsLabel` changes its text.
 
 The panel has three tabs: **Bug**, **Feature request** and **Agent task** (a direct instruction for an agent; limit them with `types={['bug', 'feature']}` on a public page). The panel ends with a small "Powered by shipcue · ★ Star it on GitHub" line. If shipcue helps you, a star really helps; `watermark={false}` turns it off.
 
@@ -175,7 +175,7 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 
 ## Queue and changelog pages
 
-Switch on `board` in the handler (`true`, or `(req) => boolean` to limit who sees it), then render `<ShipcueBoard endpoint="/api/shipcue" />` (or `<ShipcueQueue />` / `<ShipcueChangelog />`) from `shipcue/react`. It lists open and in-progress reports, most urgent first, and fixed ones with their resolution, latest first. No reporter, page, diagnostics or attachments ever leave the server. Close reports with a one-line, user-facing `resolution` and the changelog writes itself.
+Switch on `board` in the handler (`true`, or `(req) => boolean` to limit who sees it), then render `<ShipcueBoard endpoint="/api/shipcue" />` (or `<ShipcueQueue />` / `<ShipcueChangelog />`) from `shipcue/react`. It lists open and in-progress reports, most urgent first, and fixed ones with their resolution, latest first. No reporter, page, diagnostics or attachments ever leave the server. Close reports with a one-line, user-facing `resolution` and the changelog writes itself. With both lists, a Queue / Changelog toggle picks one (`initialView` sets where it starts). Add `boardScreenshots: true` to show each report's screenshots too: off by default, since screenshots can show private things.
 
 ## Try it locally
 
@@ -194,6 +194,7 @@ pnpm build
 
 ## Changelog
 
+- **0.6.3**: the board has a Queue / Changelog toggle and can show screenshots (`boardScreenshots`, opt-in); `pastReportsLabel`; the Agent task tab reads "Delegate a task to your agent."
 - **0.6.2**: the Queue keeps finished reports, greyed out under the open ones; the board takes the page's own type; no more "ResizeObserver loop" console error from the panel.
 - **0.6.1**: `showParam` (e.g. `"shipcue"`) keeps the button and hotkeys off until the page is opened with `?shipcue=true`; the open panel keeps its height instead of jumping as you switch tabs or clear text.
 - **0.6.0**: `<ShipcueBoard />` / `<ShipcueQueue />` / `<ShipcueChangelog />` and the opt-in `GET /board`; up to 10 screenshots per report (default, with a 4 MB total so a report fits a 4.5 MB request); hotkeys are caught before the page's own key handlers, so ⌘J always reaches the Agent task tab; reports carry `updatedAt`.

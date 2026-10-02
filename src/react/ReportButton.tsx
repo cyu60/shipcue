@@ -36,6 +36,8 @@ export interface ReportButtonProps {
   captureErrors?: boolean;
   /** Where people can see the reports they sent; shown as a Past reports link. */
   pastReportsHref?: string;
+  /** The text of that link. "Past reports" by default. */
+  pastReportsLabel?: string;
   /** A small "Powered by shipcue" line asking people to star it on GitHub. On by default. */
   watermark?: boolean;
   /** Which tabs to show, in order. All three by default; on a public page you may want to leave out 'task'. */
@@ -113,7 +115,7 @@ const TYPES: { value: ReportType; label: string; placeholder: string }[] = [
 const HEADING: Record<ReportType, [string, string]> = {
   bug: ['Report a bug', 'Say what you did and what happened.'],
   feature: ['Request a feature', 'Say what you want and why it helps.'],
-  task: ['New agent task', 'Say what you want done. A coding agent picks it up from the queue.'],
+  task: ['New agent task', 'Delegate a task to your agent.'],
 };
 
 const ACCEPT = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -158,6 +160,7 @@ function ReportPanel({
   uploadVideo,
   captureErrors = true,
   pastReportsHref,
+  pastReportsLabel = 'Past reports',
   watermark = true,
   types,
   hotkeys,
@@ -666,7 +669,7 @@ function ReportPanel({
               <div style={{ ...s.row, alignItems: 'center', marginTop: 12 }}>
                 {pastReportsHref ? (
                   <a href={pastReportsHref} style={{ ...s.hint, color: '#71717a' }}>
-                    Past reports
+                    {pastReportsLabel}
                   </a>
                 ) : (
                   <span />

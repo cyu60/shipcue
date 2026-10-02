@@ -131,6 +131,8 @@ export interface BoardItem {
   resolution: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Screenshot URLs, only when the handler is created with boardScreenshots. */
+  screenshots?: string[];
 }
 
 export interface Board {
@@ -140,7 +142,7 @@ export interface Board {
   changelog: BoardItem[];
 }
 
-export function toBoardItem(r: Report): BoardItem {
+export function toBoardItem(r: Report, screenshots?: string[]): BoardItem {
   return {
     id: r.id,
     type: r.type,
@@ -151,6 +153,7 @@ export function toBoardItem(r: Report): BoardItem {
     resolution: r.resolution,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt,
+    ...(screenshots?.length ? { screenshots } : {}),
   };
 }
 
