@@ -8,12 +8,22 @@
   "redirects": [
     {
       "source": "/changelog",
-      "destination": "/cue/",
+      "destination": "/cuelog/",
       "permanent": true
     },
     {
       "source": "/changelog/",
-      "destination": "/cue/",
+      "destination": "/cuelog/",
+      "permanent": true
+    },
+    {
+      "source": "/cue",
+      "destination": "/cuelog/",
+      "permanent": true
+    },
+    {
+      "source": "/cue/",
+      "destination": "/cuelog/",
       "permanent": true
     }
   ]

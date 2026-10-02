@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 HEAD = (ROOT / "_head.txt").read_text()
-NAV = [("/", "Home"), ("/use-cases/", "Use cases"), ("/docs/", "Docs"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/cue/", "Cue"), ("/contact/", "Contact")]
+NAV = [("/", "Home"), ("/use-cases/", "Use cases"), ("/docs/", "Docs"), ("/cloud/", "Cloud"), ("/blog/", "Blog"), ("/cuelog/", "CueLog"), ("/contact/", "Contact")]
 
 
 def page(path, title, description, body, current):
@@ -198,7 +198,7 @@ export { handler as GET, handler as POST };</code></pre>
   <li>The panel shows the page it will attach, with a "don't attach" link.</li>
 </ul>
 
-<p><img src="/assets/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, paste or drop screenshots, files or a video, screen recording, Your cue and Shortcuts links, and a Powered by shipcue line" width="408" style="max-width:100%;height:auto;border-radius:16px;margin-top:8px"></p>
+<p><img src="/assets/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, paste or drop screenshots, files or a video, screen recording, See the CueLog and Shortcuts links, and a Powered by shipcue line" width="408" style="max-width:100%;height:auto;border-radius:16px;margin-top:8px"></p>
 
 <h2>Keyboard shortcuts</h2>
 <p>The panel opens from the keyboard on any page, on the tab you ask for. Whatever is highlighted on the page comes along in an editable <b>Context</b> box (remove it with one click), so you can select a paragraph and turn it into an agent task in one go. When nothing is highlighted, <code>getContext={() =&gt; selectedRowsAsText()}</code> lets your app supply what is selected, like rows or blocks. Agents see it as its own Context section in the task prompt.</p>
@@ -242,7 +242,7 @@ export { handler as GET, handler as POST };</code></pre>
 
 import { ShipcueBoard } from 'shipcue/react';
 &lt;ShipcueBoard endpoint="/api/shipcue" /&gt;        // or &lt;ShipcueQueue /&gt;, &lt;ShipcueChangelog /&gt;</code></pre>
-<p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. It updates live as reports come in, and each viewer can switch between pills and tabs, cards and a list. See it on <a href="/cue/">shipcue's own cue</a>.</p>
+<p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. It updates live as reports come in, and each viewer can switch between pills and tabs, cards and a list. See it on <a href="/cuelog/">shipcue's own CueLog</a>.</p>
 
 <h2>6. Broadcast and listen</h2>
 <p>Tell people or agents when a report is filed, claimed, released, closed or gets a video. Each broadcaster gets the events it asks for; one that fails never fails the request.</p>
@@ -453,13 +453,13 @@ page("use-cases/index.html", "Use cases · shipcue", "Who shipcue is for: hackat
 page("blog/hackathon-teams-and-agents/index.html", "Coordinating a hackathon team when everyone has agents · shipcue", "Why a shared queue keeps a hackathon team's coding agents from colliding.", HACKATHON_POST, "/blog/")
 page("blog/fixqueue-is-now-shipcue/index.html", "fixqueue is now shipcue, and it is open source · shipcue", "The new name, the public repository, and what to rename if you set it up early.", RENAME_POST, "/blog/")
 CHANGELOG = """<div class="prose">
-<h1>Cue</h1>
-<p class="lede">Everything people have asked shipcue for, straight from its own cue: what is waiting, and what got fixed and how. Send something with the ship button and it shows up here.</p>
+<h1>CueLog</h1>
+<p class="lede">Everything people have asked shipcue for, straight from its own CueLog: what is waiting, and what got fixed and how. Send something with the ship button and it shows up here.</p>
 </div>
 <div id="shipcue-board" class="board"></div>
 <script src="/assets/shipcue-board.js" defer></script>
 """
 
-page("cue/index.html", "Cue · shipcue", "What people asked shipcue for, what is in the cue, and what got fixed.", CHANGELOG, "/cue/")
+page("cuelog/index.html", "CueLog · shipcue", "What people asked shipcue for, what is waiting, and what got fixed.", CHANGELOG, "/cuelog/")
 page("contact/index.html", "Contact · shipcue", "Get in touch about shipcue.", CONTACT, "/contact/")
 print("built")
