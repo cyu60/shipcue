@@ -6,7 +6,7 @@ type View = 'open' | 'fixed' | 'all' | 'changelog';
 export interface ShipcueBoardProps {
   /** Where the handler is mounted, e.g. "/api/shipcue" (it must be created with `board`). */
   endpoint?: string;
-  /** Which lists to show. Both by default, as Open / Fixed / All / Changelog tabs. */
+  /** Which lists to show. Both by default, as Open / Fixed / All / Changelog pills. */
   show?: 'both' | 'queue' | 'changelog';
   /** With show="both", the tab it starts on. 'queue' is the same as 'open'. */
   initialView?: View | 'queue';
@@ -61,7 +61,7 @@ export function ShipcueBoard({
   if (error && !board) return <p className={className} style={{ ...s.muted, ...style }}>{error}</p>;
   if (!board) return <p className={className} style={{ ...s.muted, ...style }}>Loading…</p>;
 
-  // With both lists, a tab row like Habitect's Reports page: Open, Fixed, All, Changelog
+  // With both lists, pill tabs: Open, Fixed, All, Changelog, with counts
   // (shipcue reports 9fdd0b45, 15720123).
   const TABS: { id: View; label: string; count?: number }[] = [
     { id: 'open', label: 'Open', count: board.queue.length },
@@ -89,7 +89,7 @@ export function ShipcueBoard({
               aria-selected={view === t.id}
               aria-label={t.count !== undefined ? `${t.label} ${t.count}` : t.label}
               onClick={() => setView(t.id)}
-              style={view === t.id ? { ...s.tab, ...s.tabOn, borderBottomColor: accentColor, color: accentColor } : s.tab}
+              style={view === t.id ? { ...s.tab, background: accentColor, color: '#fff' } : s.tab}
             >
               {t.label}
               {t.count !== undefined && <span style={s.count}>{t.count}</span>}
@@ -195,9 +195,9 @@ const s: Record<string, CSSProperties> = {
   tag: { padding: '0 0.55em', border: '1px solid rgba(128,128,128,0.4)', borderRadius: 999 },
   main: { margin: 0, whiteSpace: 'pre-wrap' },
   done: { opacity: 0.5 },
-  tabs: { display: 'flex', gap: '1.6em', borderBottom: '1px solid rgba(128,128,128,0.25)', marginBottom: '-1.2em' },
-  tab: { font: 'inherit', fontSize: '1em', padding: '0.4em 0', margin: '0 0 -1px', border: 0, borderBottom: '2px solid transparent', background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },
-  tabOn: { opacity: 1, fontWeight: 600 },
+  // Pills, as Chinat prefers them to an underlined tab row.
+  tabs: { display: 'inline-flex', flexWrap: 'wrap', gap: 4, padding: 3, border: '1px solid rgba(128,128,128,0.3)', borderRadius: 999, justifySelf: 'start', marginBottom: '-1.2em' },
+  tab: { font: 'inherit', fontSize: '0.85em', padding: '0.25em 0.9em', border: 0, borderRadius: 999, background: 'none', color: 'inherit', cursor: 'pointer' },
   count: { marginLeft: '0.45em', fontWeight: 400, opacity: 0.7, fontSize: '0.9em' },
   shots: { display: 'flex', flexWrap: 'wrap', gap: '0.5em', marginTop: '0.6em' },
   shot: { display: 'block', height: 72, maxWidth: 160, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(128,128,128,0.3)' },
