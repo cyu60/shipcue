@@ -555,7 +555,11 @@ export function ReportButton({
                   ) : (
                     <>
                       {canRecordScreen() && (
-                        <button type="button" onClick={startRecording} style={s.ghost}>
+                        <button type="button" onClick={startRecording} style={{ ...s.ghost, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <svg data-icon="video" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <rect x="2.5" y="6" width="13" height="12" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+                            <path d="m15.5 10.5 5-3v9l-5-3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                          </svg>
                           Record screen
                         </button>
                       )}

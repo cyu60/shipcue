@@ -51,7 +51,7 @@ pnpm add shipcue
 Until the first npm release is out, install the prebuilt release (nothing builds on install, so it works with pnpm on Vercel):
 
 ```bash
-pnpm add https://github.com/cyu60/shipcue/releases/download/v0.5.1/shipcue-0.5.1.tgz
+pnpm add https://github.com/cyu60/shipcue/releases/download/v0.5.2/shipcue-0.5.2.tgz
 ```
 
 ## 1. Create the table

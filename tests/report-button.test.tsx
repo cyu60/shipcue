@@ -166,7 +166,9 @@ describe('ReportButton: video, page, errors and past reports', () => {
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia } });
     (globalThis as unknown as { MediaRecorder: unknown }).MediaRecorder = class { static isTypeSupported() { return true; } };
     await openPanel({ uploadVideo: vi.fn() });
-    await userEvent.click(screen.getByRole('button', { name: /record screen/i }));
+    const record = screen.getByRole('button', { name: /record screen/i });
+    expect(record.querySelector('svg[data-icon="video"]')).not.toBeNull();
+    await userEvent.click(record);
     expect(getDisplayMedia).toHaveBeenCalled();
     delete (globalThis as unknown as { MediaRecorder?: unknown }).MediaRecorder;
   });
