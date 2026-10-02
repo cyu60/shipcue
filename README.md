@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-132%20passing-2E5BFF?style=flat-square" alt="132 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-141%20passing-2E5BFF?style=flat-square" alt="141 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -175,10 +175,40 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 | `POST` | `/reports/:id/release` | agent |
 | `POST` | `/reports/:id/close` | agent, `{ status: "fixed" \| "wontfix", resolution }` |
 | `GET` | `/board` | anyone, only with `board` on: the queue and the changelog |
+| `GET` | `/board/version` | anyone, only with `board` on: a short string that changes when any report does |
+| `GET` | `/capabilities` | the button: what this handler takes (video, files, limits) |
 
 ## Queue and changelog pages
 
-Switch on `board` in the handler (`true`, or `(req) => boolean` to limit who sees it), then render `<ShipcueBoard endpoint="/api/shipcue" />` (or `<ShipcueQueue />` / `<ShipcueChangelog />`) from `shipcue/react`. It lists open and in-progress reports, most urgent first, and fixed ones with their resolution, latest first. No reporter, page, diagnostics or attachments ever leave the server. Close reports with a one-line, user-facing `resolution` and the changelog writes itself. With both lists it shows Open / Fixed / All / Changelog pills with counts, and a small View control lets each viewer switch to tabs or a compact list (`tabStyle`, `layout`, `viewPicker`) (`initialView` sets where it starts). Add `boardScreenshots: true` to show each report's screenshots too: off by default, since screenshots can show private things.
+Switch on `board` in the handler (`true`, or `(req) => boolean` to limit who sees it), then render `<ShipcueBoard endpoint="/api/shipcue" />` (or `<ShipcueQueue />` / `<ShipcueChangelog />`) from `shipcue/react`. It lists open and in-progress reports, most urgent first, and fixed ones with their resolution, latest first. No reporter, page, diagnostics or attachments ever leave the server. Close reports with a one-line, user-facing `resolution` and the changelog writes itself. With both lists it shows Open / Fixed / All / Changelog pills with counts, and a small View control lets each viewer switch to tabs or a compact list (`tabStyle`, `layout`, `viewPicker`) (`initialView` sets where it starts). Add `boardScreenshots: true` to show each report's screenshots too: off by default, since screenshots can show private things. The board is live: it checks a tiny `/board/version` every 5 seconds while the page is in view and re-reads as soon as a report is filed or changes (`liveMs`, 0 turns it off).
+
+## Broadcast and listen
+
+Tell people or agents when something happens to a report. Each broadcaster gets the events it lists (`report.filed`, `report.claimed`, `report.released`, `report.closed`, `report.video`), after the change is saved; one that fails or is slow is logged and never fails the request.
+
+```ts
+import { createShipcueHandler, slack, webhook } from 'shipcue/server';
+
+createShipcueHandler({
+  // ...
+  broadcasters: [
+    slack({ webhookUrl: process.env.SLACK_WEBHOOK!, link: 'https://app.example.com/reports' }),
+    // Zapier, n8n, an email or SMS bridge, or an agent on a VPS, Mac mini or Tailscale address.
+    // Signed: check x-shipcue-signature with signBody(secret, rawBody).
+    webhook({ url: 'https://mac-mini.tailnet.ts.net/shipcue', secret: process.env.HOOK_SECRET, events: ['report.filed'] }),
+    // Or anything: { name: 'sms', events: ['report.filed'], send: async (e) => sendText(describeEvent(e)) }
+  ],
+});
+```
+
+An agent that would rather not open a port listens instead: `shipcue-listen` polls the queue with the agent token and runs a command per event, with the event as JSON on stdin and `SHIPCUE_EVENT` / `SHIPCUE_REPORT_ID` in its environment, one at a time.
+
+```bash
+SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=... \
+  npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"
+# --on filed,claimed,released,closed,video   --every 15 (seconds)   --backlog   --once
+# No command: prints one JSON line per event.
+```
 
 ## Try it locally
 
@@ -197,6 +227,7 @@ pnpm build
 
 ## Changelog
 
+- **0.8.0**: broadcasters (`slack()`, signed `webhook()`, or your own) hear when a report is filed, claimed, released, closed or gets a video; `shipcue-listen` runs a command per event for agents on a Mac mini, VPS or Tailscale without opening a port; the board updates live (`/board/version`, `liveMs`); list mode stays inside its column.
 - **0.7.0**: the board has a small View control, so each viewer picks pills or tabs and cards or a one-line list (kept in their browser; apps set the default with `tabStyle` and `layout`, or hide it with `viewPicker={false}`); the thanks note says "See your cue" (`seeReportsLabel`); shipcue's own Changelog page is now Cue, at /cue/.
 - **0.6.9**: `onEditShortcuts`: apps whose own keymap opens shipcue (`hotkeys={false}`) get the panel's Shortcuts link too, opening their shortcut editor.
 - **0.6.8**: no hard-coded limits in the panel: it reads how many screenshots, how big, and how long a video may be from the handler (`/capabilities`, i.e. your `resolveConfig`), and apps that send reports with `submit` pass `limits={{ maxScreenshots: 20 }}`.

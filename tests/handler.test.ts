@@ -314,6 +314,19 @@ describe('the public board', () => {
     expect((await handle(new Request(`${BASE}/board/screenshot/${id}/0`))).status).toBe(404);
   });
 
+  it('has a cheap version that moves when a report is filed or changes', async () => {
+    const { handle } = setup({ board: true });
+    const v = async () => (await (await handle(new Request(BASE + '/board/version'))).json()).version as string;
+    const v0 = await v();
+    const id = (await (await handle(post('/reports', reportForm()))).json()).id;
+    const v1 = await v();
+    expect(v1).not.toBe(v0);
+    expect(await v()).toBe(v1);
+    await handle(post(`/reports/${id}/close`, JSON.stringify({ status: 'fixed', resolution: 'done' }), agent));
+    expect(await v()).not.toBe(v1);
+    expect((await setup().handle(new Request(BASE + '/board/version'))).status).toBe(404);
+  });
+
   it('can be limited per request', async () => {
     const { handle } = setup({ board: (req) => req.headers.get('cookie') === 'admin=1' });
     expect((await handle(new Request(BASE + '/board'))).status).toBe(404);

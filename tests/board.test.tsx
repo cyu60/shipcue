@@ -62,4 +62,20 @@ describe('ShipcueBoard', () => {
     await screen.findByRole('tab', { name: 'Open 1' });
     expect(screen.queryByRole('radio', { name: 'Pills' })).toBeNull();
   });
+
+  it('picks up a new report on its own, without a reload', async () => {
+    let version = 'a';
+    let queue = [item('q1')];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      String(url).endsWith('/board/version')
+        ? new Response(JSON.stringify({ version }))
+        : new Response(JSON.stringify({ queue, changelog: [] })),
+    );
+    render(<ShipcueBoard refreshMs={0} liveMs={20} />);
+    await screen.findByRole('tab', { name: 'Open 1' });
+    queue = [item('q1'), item('q2')];
+    version = 'b';
+    expect(await screen.findByRole('tab', { name: 'Open 2' }, { timeout: 2000 })).toBeTruthy();
+    expect(screen.getByText('asked q2')).toBeTruthy();
+  });
 });

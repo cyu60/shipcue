@@ -95,6 +95,12 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports'): ReportS
         ? many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted AND status = $1 ${QUEUE_ORDER}`, [filter.status])
         : many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted ${QUEUE_ORDER}`, []);
     },
+    async version() {
+      // One cheap row: how many reports, and when the last one changed.
+      const { rows } = await db.query(`SELECT count(*)::text AS n, coalesce(max(updated_at), max(created_at))::text AS at FROM ${table} WHERE NOT is_deleted`, []);
+      const r = (rows[0] ?? {}) as { n?: string; at?: string | null };
+      return `${r.n ?? 0}:${r.at ?? ''}`;
+    },
     async claimNext(agent) {
       // SKIP LOCKED: two agents asking at once get two different reports.
       return one(

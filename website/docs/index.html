@@ -122,7 +122,20 @@ export { handler as GET, handler as POST };</code></pre>
 
 import { ShipcueBoard } from 'shipcue/react';
 &lt;ShipcueBoard endpoint="/api/shipcue" /&gt;        // or &lt;ShipcueQueue /&gt;, &lt;ShipcueChangelog /&gt;</code></pre>
-<p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. See it on <a href="/cue/">shipcue's own cue</a>.</p>
+<p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. It updates live as reports come in, and each viewer can switch between pills and tabs, cards and a list. See it on <a href="/cue/">shipcue's own cue</a>.</p>
+
+<h2>6. Broadcast and listen</h2>
+<p>Tell people or agents when a report is filed, claimed, released, closed or gets a video. Each broadcaster gets the events it asks for; one that fails never fails the request.</p>
+<pre><code>import { slack, webhook } from 'shipcue/server';
+
+createShipcueHandler({ ...,
+  broadcasters: [
+    slack({ webhookUrl: process.env.SLACK_WEBHOOK }),
+    webhook({ url: 'https://mac-mini.tailnet.ts.net/shipcue', secret: process.env.HOOK_SECRET, events: ['report.filed'] }),
+  ],
+})</code></pre>
+<p>An agent that would rather not open a port can listen instead. <code>shipcue-listen</code> polls the queue and runs a command for each event, with the event as JSON on stdin:</p>
+<pre><code>SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=...   npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"</code></pre>
 
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
@@ -133,7 +146,9 @@ POST /reports/next/claim      take the most urgent open report (204 when empty)
 POST /reports/:id/claim       take a specific report (409 if someone has it)
 POST /reports/:id/release     give it back to the queue
 POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }
-GET  /board                   no token: the queue and the changelog (only with board on)</code></pre>
+GET  /board                   no token: the queue and the changelog (only with board on)
+GET  /board/version           no token: changes whenever a report does (for a live board)
+GET  /capabilities            no token: what the handler takes (video, files, limits)</code></pre>
 
 <h2>What a report holds</h2>
 <ul>

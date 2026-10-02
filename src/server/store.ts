@@ -16,6 +16,12 @@ export interface ReportStore {
   close(id: string, status: ClosedStatus, resolution: string | null): Promise<Report | null>;
   /** Links a video to a report that has none yet. */
   attachVideo(id: string, url: string): Promise<Report | null>;
+  /**
+   * A short string that changes whenever any report is filed or changes, so a live board can
+   * check it often and re-read only when it moves. Optional: without it the handler works it out
+   * from the lists.
+   */
+  version?(): Promise<string>;
 }
 
 /** In-process store for tests, demos and prototypes. Lost on restart. */
@@ -70,6 +76,10 @@ export function memoryStore(): ReportStore {
     },
     async attachVideo(id, url) {
       return update(id, (r) => r.video === null, () => ({ video: url }));
+    },
+    async version() {
+      const latest = [...rows.values()].reduce((m, r) => ((r.updatedAt ?? r.createdAt) > m ? (r.updatedAt ?? r.createdAt) : m), '');
+      return `${rows.size}:${latest}`;
     },
   };
 }

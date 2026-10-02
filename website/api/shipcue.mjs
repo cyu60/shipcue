@@ -188,6 +188,11 @@ function postgresStore(db, table = "shipcue_reports") {
     async list(filter = {}) {
       return filter.status ? many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted AND status = $1 ${QUEUE_ORDER}`, [filter.status]) : many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted ${QUEUE_ORDER}`, []);
     },
+    async version() {
+      const { rows } = await db.query(`SELECT count(*)::text AS n, coalesce(max(updated_at), max(created_at))::text AS at FROM ${table} WHERE NOT is_deleted`, []);
+      const r = rows[0] ?? {};
+      return `${r.n ?? 0}:${r.at ?? ""}`;
+    },
     async claimNext(agent) {
       return one(
         `UPDATE ${table} SET status = 'claimed', claimed_by = $1, claimed_at = now(), updated_at = now()
@@ -233,6 +238,31 @@ function postgresStore(db, table = "shipcue_reports") {
 
 // src/server/handler.ts
 import { timingSafeEqual } from "node:crypto";
+
+// src/server/broadcast.ts
+async function broadcast(broadcasters, event, timeoutMs = 4e3) {
+  const wanted = (broadcasters ?? []).filter((b) => !b.events || b.events.includes(event.type));
+  if (!wanted.length) return;
+  await Promise.all(
+    wanted.map(async (b) => {
+      let timer;
+      try {
+        await Promise.race([
+          b.send(event),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs);
+          })
+        ]);
+      } catch (err) {
+        console.error(`shipcue: broadcaster ${b.name} failed on ${event.type}:`, err instanceof Error ? err.message : err);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    })
+  );
+}
+
+// src/server/handler.ts
 var IMAGE_TYPES = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -265,6 +295,7 @@ function createShipcueHandler(opts) {
   const config = opts.config ?? resolveConfig();
   const base = (opts.basePath ?? "/api/shipcue").replace(/\/$/, "");
   const { store } = opts;
+  const emit = (type, report) => report ? broadcast(opts.broadcasters, { type, at: (/* @__PURE__ */ new Date()).toISOString(), report }) : Promise.resolve();
   async function fileReport(req) {
     const reporter = opts.getReporter ? await opts.getReporter(req) : null;
     if (opts.requireReporter && !reporter) return fail("Sign in to send a report.", 401);
@@ -333,6 +364,7 @@ function createShipcueHandler(opts) {
         console.error("shipcue: onReport failed", err);
       }
     }
+    await emit("report.filed", report);
     return json({ id: report.id }, 201);
   }
   const VIDEO_WINDOW_MS = 30 * 60 * 1e3;
@@ -351,6 +383,7 @@ function createShipcueHandler(opts) {
         return fail("That video link is not one this app stored.", 400);
       }
       const saved2 = await store.attachVideo(id, url2);
+      await emit("report.video", saved2);
       return saved2 ? json({ report: saved2 }) : fail("This report already has a video.", 409);
     }
     if (!opts.saveVideo) return fail("This app takes videos by link only.", 400);
@@ -367,6 +400,7 @@ function createShipcueHandler(opts) {
     if (file.size > config.maxVideoBytes) return fail(`Videos can be up to ${formatBytes(config.maxVideoBytes)}.`);
     const url = await opts.saveVideo(file, `${id}/video.${videoExtension(type)}`);
     const saved = await store.attachVideo(id, url);
+    await emit("report.video", saved);
     return saved ? json({ report: saved }) : fail("This report already has a video.", 409);
   }
   const withPrompt = (r) => ({ report: r, prompt: toAgentPrompt(r, config) });
@@ -390,21 +424,25 @@ function createShipcueHandler(opts) {
     const agentName = String(body.agent ?? "agent").slice(0, 100);
     if (id === "next" && action === "claim") {
       const r = await store.claimNext(agentName);
+      await emit("report.claimed", r);
       return r ? json(withPrompt(r)) : new Response(null, { status: 204 });
     }
     if (action === "claim") {
       const r = await store.claim(id, agentName);
+      await emit("report.claimed", r);
       if (r) return json(withPrompt(r));
       return await store.get(id) ? fail("Someone else has it", 409) : fail("No such report", 404);
     }
     if (action === "release") {
       const r = await store.release(id);
+      await emit("report.released", r);
       return r ? json({ report: r }) : fail("Not claimed", 409);
     }
     if (action === "close") {
       if (body.status !== "fixed" && body.status !== "wontfix") return fail("status must be fixed or wontfix");
       const resolution = body.resolution == null ? null : String(body.resolution).slice(0, 2e3);
       const r = await store.close(id, body.status, resolution);
+      await emit("report.closed", r);
       return r ? json({ report: r }) : fail("No such report", 404);
     }
     return fail("Not found", 404);
@@ -467,6 +505,22 @@ function createShipcueHandler(opts) {
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes
       };
       return new Response(JSON.stringify(caps), { headers: { "content-type": "application/json", "cache-control": "no-store" } });
+    }
+    if (req.method === "GET" && path === `${base}/board/version`) {
+      try {
+        const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
+        if (!allowed) return fail("Not found", 404);
+        let version;
+        if (store.version) version = await store.version();
+        else {
+          const all = await store.list();
+          version = `${all.length}:${all.reduce((m, r) => (r.updatedAt ?? r.createdAt) > m ? r.updatedAt ?? r.createdAt : m, "")}`;
+        }
+        return new Response(JSON.stringify({ version }), { headers: { "content-type": "application/json", "cache-control": "no-store" } });
+      } catch (err) {
+        console.error("shipcue: board version failed", err);
+        return fail("Something went wrong. Please try again.", 500);
+      }
     }
     if (req.method === "GET" && path === `${base}/board`) {
       try {

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { BLOCKED_FILE_TYPES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateReport, videoExtension, videoType, type Board, type Capabilities, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
+import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 
 const IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -55,6 +56,13 @@ export interface HandlerOptions {
    * Vercel's 4.5 MB; raise it on hosts without that limit.
    */
   maxRequestBytes?: number;
+  /**
+   * Who hears about reports: people (Slack, email, a text bridge) or agents (a webhook on a
+   * VPS, Mac mini or Tailscale address). Each gets the events it lists, after the change is
+   * saved; one that fails or is slow is logged and never fails the request. See webhook(),
+   * slack() and the shipcue-listen command for agents that would rather poll.
+   */
+  broadcasters?: Broadcaster[];
 }
 
 const json = (body: unknown, status = 200) =>
@@ -105,6 +113,8 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
   const config = opts.config ?? resolveConfig();
   const base = (opts.basePath ?? '/api/shipcue').replace(/\/$/, '');
   const { store } = opts;
+  const emit = (type: ShipcueEventType, report: Report | null) =>
+    report ? broadcast(opts.broadcasters, { type, at: new Date().toISOString(), report }) : Promise.resolve();
 
   async function fileReport(req: Request): Promise<Response> {
     const reporter = opts.getReporter ? await opts.getReporter(req) : null;
@@ -180,6 +190,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         console.error('shipcue: onReport failed', err);
       }
     }
+    await emit('report.filed', report);
     return json({ id: report.id }, 201);
   }
 
@@ -202,6 +213,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         return fail('That video link is not one this app stored.', 400);
       }
       const saved = await store.attachVideo(id, url);
+      await emit('report.video', saved);
       return saved ? json({ report: saved }) : fail('This report already has a video.', 409);
     }
     if (!opts.saveVideo) return fail('This app takes videos by link only.', 400);
@@ -220,6 +232,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
 
     const url = await opts.saveVideo!(file, `${id}/video.${videoExtension(type)}`);
     const saved = await store.attachVideo(id, url);
+    await emit('report.video', saved);
     return saved ? json({ report: saved }) : fail('This report already has a video.', 409);
   }
 
@@ -247,21 +260,25 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     const agentName = String(body.agent ?? 'agent').slice(0, 100);
     if (id === 'next' && action === 'claim') {
       const r = await store.claimNext(agentName);
+      await emit('report.claimed', r);
       return r ? json(withPrompt(r)) : new Response(null, { status: 204 });
     }
     if (action === 'claim') {
       const r = await store.claim(id, agentName);
+      await emit('report.claimed', r);
       if (r) return json(withPrompt(r));
       return (await store.get(id)) ? fail('Someone else has it', 409) : fail('No such report', 404);
     }
     if (action === 'release') {
       const r = await store.release(id);
+      await emit('report.released', r);
       return r ? json({ report: r }) : fail('Not claimed', 409);
     }
     if (action === 'close') {
       if (body.status !== 'fixed' && body.status !== 'wontfix') return fail('status must be fixed or wontfix');
       const resolution = body.resolution == null ? null : String(body.resolution).slice(0, 2000);
       const r = await store.close(id, body.status, resolution);
+      await emit('report.closed', r);
       return r ? json({ report: r }) : fail('No such report', 404);
     }
     return fail('Not found', 404);
@@ -337,6 +354,23 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
       };
       return new Response(JSON.stringify(caps), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
+    if (req.method === 'GET' && path === `${base}/board/version`) {
+      // A live board polls this every few seconds and re-reads /board only when it moves.
+      try {
+        const allowed = typeof opts.board === 'function' ? await opts.board(req) : opts.board === true;
+        if (!allowed) return fail('Not found', 404);
+        let version: string;
+        if (store.version) version = await store.version();
+        else {
+          const all = await store.list();
+          version = `${all.length}:${all.reduce((m, r) => ((r.updatedAt ?? r.createdAt) > m ? (r.updatedAt ?? r.createdAt) : m), '')}`;
+        }
+        return new Response(JSON.stringify({ version }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+      } catch (err) {
+        console.error('shipcue: board version failed', err);
+        return fail('Something went wrong. Please try again.', 500);
+      }
     }
     if (req.method === 'GET' && path === `${base}/board`) {
       try {
