@@ -1074,6 +1074,12 @@ function useDraggableButton(enabled: boolean) {
         onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
           if (e.button !== 0) return;
           start.current = { px: e.clientX, py: e.clientY, moved: false };
+          // Captured from the press, so a quick drag that leaves the 48px button still moves it.
+          try {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+          } catch {
+            // An unknown pointer (some synthetic events).
+          }
         },
         onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => {
           const st = start.current;
@@ -1082,11 +1088,6 @@ function useDraggableButton(enabled: boolean) {
           if (!st.moved) {
             st.moved = true;
             setDragging(true);
-            try {
-              e.currentTarget.setPointerCapture?.(e.pointerId);
-            } catch {
-              // An unknown pointer (some synthetic events): the drag still works within the button's reach.
-            }
           }
           setPos(clamp(e.clientX, e.clientY));
         },

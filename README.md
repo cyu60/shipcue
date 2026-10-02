@@ -234,6 +234,7 @@ pnpm build
 
 ## Changelog
 
+- **0.10.5**: a quick drag of the button works too (the pointer is held from the press).
 - **0.10.4**: drag the floating button anywhere on the page; it stays where you leave it (kept in your browser) and the panel opens toward the middle of the screen. `movable={false}` pins it bottom-right.
 - **0.10.3**: in Tabs view only the current tab is underlined (others no longer keep a grey line once visited); shipcue's CueLog opens on the Changelog.
 - **0.10.2**: `launcherIcon` puts your own mark on the button in place of the sailboat (the accent background stays).
