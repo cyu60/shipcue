@@ -19,6 +19,7 @@ export interface ShipcueText {
   priority: string;
   where: string;
   context: string;
+  addContext: string;
   preview: string;
   raw: string;
   remove: string;
@@ -81,6 +82,7 @@ export const DEFAULT_TEXT: ShipcueText = {
   priority: 'Priority',
   where: 'Where',
   context: 'Context',
+  addContext: '+ Add context',
   preview: 'Preview',
   raw: 'Raw',
   remove: 'remove',

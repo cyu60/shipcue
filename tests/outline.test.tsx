@@ -38,3 +38,24 @@ describe('the Context preview (report 0fcc360a)', () => {
     expect(screen.getByRole('textbox', { name: 'Context' })).toHaveValue('one plain sentence');
   });
 });
+
+describe('adding context by hand (Habitect report 17748c25)', () => {
+  it('opens an empty box to type into when nothing is selected', async () => {
+    render(<ReportButton areas={[]} submit={ok()} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    await userEvent.click(screen.getByRole('button', { name: '+ Add context' }));
+    const box = screen.getByRole('textbox', { name: 'Context' });
+    expect(box).toHaveValue('');
+    expect(box).toHaveFocus();
+    expect(screen.queryByRole('button', { name: '+ Add context' })).toBeNull();
+  });
+
+  it("takes what the app says is selected, as a preview", async () => {
+    let selected: string | null = null;
+    render(<ReportButton areas={[]} submit={ok()} getContext={() => selected} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    selected = '- picked block\n  - its child';
+    await userEvent.click(screen.getByRole('button', { name: '+ Add context' }));
+    expect(within(screen.getByLabelText('Context preview')).getByText('its child')).toBeInTheDocument();
+  });
+});

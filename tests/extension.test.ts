@@ -10,6 +10,7 @@ type Lib = {
 };
 let lib: Lib;
 beforeAll(async () => {
+  // @ts-expect-error a plain browser script, no types
   await import('../extension/lib.js');
   lib = (globalThis as unknown as { shipcueLib: Lib }).shipcueLib;
 });

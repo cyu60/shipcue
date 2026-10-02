@@ -678,6 +678,27 @@ function ReportPanel({
                 placeholder={current.placeholder}
                 style={s.textarea}
               />
+              {context === null && (
+                // Add context by hand on any tab (Habitect report 17748c25): what the app says is
+                // selected if anything, else an empty box to type or paste into.
+                <button
+                  type="button"
+                  style={{ ...s.linkBtn, marginTop: 6, textDecoration: 'none' }}
+                  onClick={() => {
+                    let picked: string | null = null;
+                    try {
+                      picked = getContext?.()?.trim() || null;
+                    } catch {
+                      picked = null;
+                    }
+                    setContext(picked ?? '');
+                    setContextView(picked ? 'preview' : 'raw');
+                    if (!picked) setTimeout(() => document.getElementById(`${uid}-context`)?.focus(), 0);
+                  }}
+                >
+                  {t.addContext}
+                </button>
+              )}
               {context !== null && (() => {
                 // A bulleted outline opens as a Preview; plain text, or anything being edited, as Raw.
                 const showPreview = contextView === 'preview' && (!!renderContext || isOutlineText(context));

@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-151%20passing-2E5BFF?style=flat-square" alt="151 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-153%20passing-2E5BFF?style=flat-square" alt="153 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -232,6 +232,7 @@ pnpm build
 
 ## Changelog
 
+- **0.10.1**: "+ Add context" under the text box: what your app says is selected (as a preview), or an empty box to type or paste into, on any tab.
 - **Extension 0.1.0**: a Chrome extension that reports from any page with a screenshot, a picked element, the selection and page details (time, time zone, location if you allow it). Download at /extension/.
 - **0.10.0**: `text`: every word the panel and the board show can be your app's own (tab names, headings, placeholders, buttons, links, the thanks note, empty states); `DEFAULT_TEXT` lists them. `pastReportsLabel` and `seeReportsLabel` still work.
 - **0.9.0**: the Context box has a Preview / Raw switch: an outline shows as bullets with nesting, `[[links]]`, `#tags` and `((refs))` set apart; pass `renderContext={(text) => <YourRenderer text={text} />}` to draw it your app's way.
