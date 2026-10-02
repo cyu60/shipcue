@@ -324,3 +324,29 @@ describe('ReportButton: hotkeys', () => {
     expect(await screen.findByRole('heading', { name: 'Request a feature' })).toBeInTheDocument();
   });
 });
+
+describe('ReportButton: a hotkey always starts a fresh form', () => {
+  const keys = { bug: ['Ctrl+B'], feature: ['Ctrl+F'], task: ['Ctrl+J'] };
+  const press = (code: string, key: string) => fireEvent.keyDown(window, { code, key, ctrlKey: true });
+
+  it('after a send, the hotkey opens an empty form instead of the thanks screen', async () => {
+    render(<ReportButton areas={areas} submit={ok()} hotkeys={keys} />);
+    press('KeyB', 'b');
+    await userEvent.type(await screen.findByRole('textbox'), 'The heading disappears on Enter');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status');
+    press('KeyF', 'f');
+    expect(await screen.findByRole('heading', { name: 'Request a feature' })).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('');
+  });
+
+  it('switching tabs with a hotkey clears the half-written form', async () => {
+    render(<ReportButton areas={areas} submit={ok()} hotkeys={keys} />);
+    press('KeyB', 'b');
+    await userEvent.type(await screen.findByRole('textbox'), 'half a bug report');
+    press('KeyJ', 'j');
+    expect(await screen.findByRole('heading', { name: 'New agent task' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('');
+  });
+});

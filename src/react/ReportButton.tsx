@@ -175,10 +175,19 @@ export function ReportButton({
       return null;
     }
   };
-  const openOn = (t?: ReportType) => {
+  // A hotkey or openReport() always starts a fresh, empty form on its tab (outliner report 20:55),
+  // even right after a send or with another tab half written. A click on the button keeps the draft.
+  const openOn = (t?: ReportType, fresh = false) => {
     if (t && tabs.some((x) => x.value === t)) setType(t);
     const picked = pickContext();
-    if (picked) setContext(picked);
+    if (fresh) {
+      setText('');
+      setFiles([]);
+      setVideo(null);
+      setError(null);
+      setWarning(null);
+      setContext(picked || null);
+    } else if (picked) setContext(picked);
     setDone(false);
     if (!open) show();
     else textareaRef.current?.focus();
@@ -192,9 +201,9 @@ export function ReportButton({
       const t = hotkeyType(e, keys);
       if (!t) return;
       e.preventDefault();
-      openOnRef.current(t);
+      openOnRef.current(t, true);
     };
-    const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: ReportType }>).detail?.type);
+    const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: ReportType }>).detail?.type, true);
     window.addEventListener('keydown', onKey);
     window.addEventListener(OPEN_EVENT, onOpen);
     return () => {
