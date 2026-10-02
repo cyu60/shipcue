@@ -1,11 +1,11 @@
--- shipcue: one table holds every bug report and feature request.
+-- shipcue: one table holds every bug report, feature request and agent task.
 -- Plain Postgres; works on Supabase, InsForge, Neon, RDS or a local server.
 -- Row-level security for apps that let browsers read the table directly is
 -- in supabase-rls.sql. The server handler only needs this file.
 
 CREATE TABLE IF NOT EXISTS shipcue_reports (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  type          text NOT NULL CHECK (type IN ('bug', 'feature')),
+  type          text NOT NULL CHECK (type IN ('bug', 'feature', 'task')),
   priority      text NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'blocking')),
   -- Sorts the queue: blocking first. Kept in step with priority by the database.
   priority_rank smallint GENERATED ALWAYS AS (
@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS shipcue_reports (
 
 -- Upgrading from 0.1: add the video column to an existing table.
 ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS video text;
+
+-- Upgrading from 0.2: allow agent tasks.
+ALTER TABLE shipcue_reports DROP CONSTRAINT IF EXISTS shipcue_reports_type_check;
+ALTER TABLE shipcue_reports ADD CONSTRAINT shipcue_reports_type_check CHECK (type IN ('bug', 'feature', 'task'));
 
 CREATE INDEX IF NOT EXISTS shipcue_reports_queue
   ON shipcue_reports (status, priority_rank DESC, created_at)

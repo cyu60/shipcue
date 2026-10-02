@@ -220,3 +220,31 @@ describe('ReportButton: watermark', () => {
     expect(screen.queryByRole('link', { name: /star shipcue on github/i })).toBeNull();
   });
 });
+
+describe('ReportButton: three tabs', () => {
+  it('offers Bug, Feature request and Agent task', async () => {
+    await openPanel();
+    const tabs = screen.getAllByRole('radio').map((r) => r.textContent);
+    expect(tabs).toEqual(['Bug', 'Feature request', 'Agent task']);
+  });
+
+  it('files an agent task with type task', async () => {
+    const submit = await openPanel();
+    await userEvent.click(screen.getByRole('radio', { name: 'Agent task' }));
+    expect(screen.getByRole('heading', { name: 'New agent task' })).toBeInTheDocument();
+    await userEvent.type(screen.getByRole('textbox'), 'Add a CSV export to the reports page');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status');
+    expect((submit.mock.calls[0]![0] as FormData).get('type')).toBe('task');
+  });
+
+  it('can limit the tabs with types', async () => {
+    await openPanel({ types: ['bug', 'feature'] });
+    expect(screen.getAllByRole('radio').map((r) => r.textContent)).toEqual(['Bug', 'Feature request']);
+  });
+
+  it('shows a ship on the button', () => {
+    render(<ReportButton areas={areas} submit={ok()} />);
+    expect(screen.getByRole('button', { name: 'Report a bug or request a feature' }).querySelector('svg[data-icon="ship"]')).not.toBeNull();
+  });
+});

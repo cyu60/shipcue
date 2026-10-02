@@ -37,12 +37,21 @@ export interface ReportButtonProps {
   pastReportsHref?: string;
   /** A small "Powered by shipcue" line asking people to star it on GitHub. On by default. */
   watermark?: boolean;
+  /** Which tabs to show, in order. All three by default; on a public page you may want to leave out 'task'. */
+  types?: ReportType[];
 }
 
 const TYPES: { value: ReportType; label: string; placeholder: string }[] = [
   { value: 'bug', label: 'Bug', placeholder: 'I pressed Enter at the end of a heading and the heading disappeared.' },
   { value: 'feature', label: 'Feature request', placeholder: 'It would help to nest pages under other pages.' },
+  { value: 'task', label: 'Agent task', placeholder: 'Add a CSV export to the reports page, with the same columns as the table.' },
 ];
+
+const HEADING: Record<ReportType, [string, string]> = {
+  bug: ['Report a bug', 'Say what you did and what happened.'],
+  feature: ['Request a feature', 'Say what you want and why it helps.'],
+  task: ['New agent task', 'Say what you want done. A coding agent picks it up from the queue.'],
+};
 
 const ACCEPT = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
@@ -87,11 +96,13 @@ export function ReportButton({
   captureErrors = true,
   pastReportsHref,
   watermark = true,
+  types,
 }: ReportButtonProps) {
+  const tabs = useMemo(() => (types?.length ? TYPES.filter((t) => types.includes(t.value)) : TYPES), [types]);
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
-  const [type, setType] = useState<ReportType>('bug');
+  const [type, setType] = useState<ReportType>(() => tabs[0]?.value ?? 'bug');
   const [priority, setPriority] = useState<Priority>('medium');
   const [area, setArea] = useState('other');
   const [files, setFiles] = useState<File[]>([]);
@@ -246,9 +257,9 @@ export function ReportButton({
         <div role="dialog" aria-label="Report a bug" style={variant === 'floating' ? s.panel : s.inlinePanel}>
           <div style={s.row}>
             <div>
-              <h3 style={s.h3}>{type === 'bug' ? 'Report a bug' : 'Request a feature'}</h3>
+              <h3 style={s.h3}>{HEADING[type][0]}</h3>
               <p style={s.sub}>
-                {type === 'bug' ? 'Say what you did and what happened.' : 'Say what you want and why it helps.'}
+                {HEADING[type][1]}
               </p>
             </div>
             <button type="button" onClick={close} aria-label="Close" style={s.iconBtn}>
@@ -272,7 +283,7 @@ export function ReportButton({
           ) : (
             <>
               <div role="radiogroup" aria-label="Report type" style={s.segment}>
-                {TYPES.map((t) => (
+                {tabs.map((t) => (
                   <button
                     key={t.value}
                     type="button"
@@ -459,15 +470,11 @@ export function ReportButton({
         title="Report a bug or request a feature"
         style={variant === 'floating' ? s.fab : s.inlineBtn}
       >
-        <svg width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M8 8V7a4 4 0 0 1 8 0v1M6 12H3M21 12h-3M6 16l-2.5 1.5M18 16l2.5 1.5M6.5 8.5 4 7M17.5 8.5 20 7"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-          <rect x="7" y="8" width="10" height="12" rx="5" stroke="currentColor" strokeWidth="1.6" />
-          <path d="M12 10v8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <svg data-icon="ship" width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3v12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M12 4.5 18 13h-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          <path d="M12 7.5 7 13h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          <path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
         </svg>
       </button>
     </div>

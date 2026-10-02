@@ -163,3 +163,23 @@ describe('video (from the report button in the founders dashboard and the outlin
     expect(resolveConfig().maxVideoSeconds).toBe(60);
   });
 });
+
+describe('agent tasks', () => {
+  const good = { type: 'task', priority: 'medium', area: 'editor', description: 'Add a CSV export to the reports page' };
+
+  it('accepts task as a third type', () => {
+    const r = validateReport(good, config);
+    expect(r.ok && r.value.type).toBe('task');
+  });
+
+  it('titles it as a Task', () => {
+    expect(buildTitle({ ...report, type: 'task' }, config)).toMatch(/^Task \[/);
+  });
+
+  it('asks the agent to do the task, and says the text came from the reporter', () => {
+    const p = toAgentPrompt({ ...report, type: 'task' }, config);
+    expect(p).toContain('Do what it asks');
+    expect(p).toContain('came from the person who filed it');
+    expect(p).not.toContain('Reproduce it');
+  });
+});
