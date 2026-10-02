@@ -17,7 +17,7 @@
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 4.5 18 13h-6z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 7.5 7 13h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/changelog/">Changelog</a><a href="/contact/">Contact</a></nav></header>
+<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 4.5 18 13h-6z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 7.5 7 13h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>shipcue</a><nav class="nav" aria-label="Main"><a href="/">Home</a><a href="/use-cases/">Use cases</a><a href="/docs/" aria-current="page">Docs</a><a href="/cloud/">Cloud</a><a href="/blog/">Blog</a><a href="/cue/">Cue</a><a href="/contact/">Contact</a></nav></header>
 <main>
 
 <div class="prose">
@@ -78,7 +78,7 @@ export { handler as GET, handler as POST };</code></pre>
   <li>The panel shows the page it will attach, with a "don't attach" link.</li>
 </ul>
 
-<p><img src="/assets/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, paste or drop screenshots, files or a video, screen recording, Past reports &amp; changelog and Shortcuts links, and a Powered by shipcue line" width="408" style="max-width:100%;height:auto;border-radius:16px;margin-top:8px"></p>
+<p><img src="/assets/report-button.png" alt="The shipcue panel: Bug, Feature request and Agent task tabs, priority, where, paste or drop screenshots, files or a video, screen recording, Your cue and Shortcuts links, and a Powered by shipcue line" width="408" style="max-width:100%;height:auto;border-radius:16px;margin-top:8px"></p>
 
 <h2>Keyboard shortcuts</h2>
 <p>The panel opens from the keyboard on any page, on the tab you ask for. Whatever is highlighted on the page comes along in an editable <b>Context</b> box (remove it with one click), so you can select a paragraph and turn it into an agent task in one go. When nothing is highlighted, <code>getContext={() =&gt; selectedRowsAsText()}</code> lets your app supply what is selected, like rows or blocks. Agents see it as its own Context section in the task prompt.</p>
@@ -122,7 +122,7 @@ export { handler as GET, handler as POST };</code></pre>
 
 import { ShipcueBoard } from 'shipcue/react';
 &lt;ShipcueBoard endpoint="/api/shipcue" /&gt;        // or &lt;ShipcueQueue /&gt;, &lt;ShipcueChangelog /&gt;</code></pre>
-<p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. See it on <a href="/changelog/">shipcue's own changelog</a>.</p>
+<p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. See it on <a href="/cue/">shipcue's own cue</a>.</p>
 
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>

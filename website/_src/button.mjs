@@ -42,9 +42,9 @@ createRoot(el).render(
     accentColor: '#16203A',
     captureErrors: true,
     uploadVideo,
-    // Past reports, the queue and the changelog all live on one page (report e29431fc).
-    pastReportsHref: '/changelog/',
-    pastReportsLabel: 'Past reports & changelog',
+    // Past reports, the queue and the changelog all live on the Cue page (reports e29431fc, 90a3435e).
+    pastReportsHref: '/cue/',
+    pastReportsLabel: 'Your cue',
     diagnostics: () => ({ path: location.pathname, section: areaFor(location.pathname), width: innerWidth }),
   }),
 );

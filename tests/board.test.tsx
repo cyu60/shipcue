@@ -35,4 +35,31 @@ describe('ShipcueBoard', () => {
     expect(screen.getByText('Shipped c1')).toBeTruthy();
     expect(screen.queryByAltText('Screenshot 1')).toBeNull();
   });
+
+  it("lets each viewer pick tabs or pills and cards or a list, and keeps the pick", async () => {
+    localStorage.clear();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ queue: [item('q1', { screenshots: ['/x/0'] })], changelog: [] })),
+    );
+    const { unmount } = render(<ShipcueBoard refreshMs={0} />);
+    await screen.findByRole('tab', { name: 'Open 1' });
+    expect(screen.getByRole('radio', { name: 'Pills' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('radio', { name: 'Tabs' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'List' }));
+    expect(screen.queryByAltText('Screenshot 1')).toBeNull(); // the list is one line per report
+    expect(JSON.parse(localStorage.getItem('shipcue:board-view')!)).toEqual({ tabStyle: 'tabs', layout: 'list' });
+    unmount();
+    render(<ShipcueBoard refreshMs={0} />);
+    await screen.findByRole('tab', { name: 'Open 1' });
+    expect(screen.getByRole('radio', { name: 'Tabs' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('radio', { name: 'List' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('takes the app default and can hide the picker', async () => {
+    localStorage.clear();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ queue: [item('q1')], changelog: [] })));
+    render(<ShipcueBoard refreshMs={0} tabStyle="tabs" viewPicker={false} />);
+    await screen.findByRole('tab', { name: 'Open 1' });
+    expect(screen.queryByRole('radio', { name: 'Pills' })).toBeNull();
+  });
 });

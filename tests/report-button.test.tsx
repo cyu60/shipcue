@@ -565,7 +565,7 @@ describe('ReportButton: after a send you carry on', () => {
     const note = await screen.findByRole('status');
     expect(note).toHaveTextContent('Thanks. It is in the queue.');
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByRole('link', { name: 'See your reports' })).toHaveAttribute('href', '/reports');
+    expect(screen.getByRole('link', { name: 'See your cue' })).toHaveAttribute('href', '/reports');
   });
 
   it('opens on an empty form next time', async () => {

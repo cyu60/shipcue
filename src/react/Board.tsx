@@ -2,6 +2,21 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { TYPE_LABEL, type Board, type BoardItem } from '../core';
 
 type View = 'open' | 'fixed' | 'all' | 'changelog';
+export type BoardTabStyle = 'pills' | 'tabs';
+export type BoardLayout = 'cards' | 'list';
+
+const VIEW_KEY = 'shipcue:board-view';
+function loadView(): { tabStyle?: BoardTabStyle; layout?: BoardLayout } {
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as Record<string, unknown>;
+    return {
+      ...(v.tabStyle === 'pills' || v.tabStyle === 'tabs' ? { tabStyle: v.tabStyle } : {}),
+      ...(v.layout === 'cards' || v.layout === 'list' ? { layout: v.layout } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
 
 export interface ShipcueBoardProps {
   /** Where the handler is mounted, e.g. "/api/shipcue" (it must be created with `board`). */
@@ -10,6 +25,12 @@ export interface ShipcueBoardProps {
   show?: 'both' | 'queue' | 'changelog';
   /** With show="both", the tab it starts on. 'queue' is the same as 'open'. */
   initialView?: View | 'queue';
+  /** Pills (default) or an underlined tab row; each viewer can switch, kept in their browser. */
+  tabStyle?: BoardTabStyle;
+  /** Cards (default) or a compact one-line list; each viewer can switch too. */
+  layout?: BoardLayout;
+  /** The small View control that lets each viewer pick. On by default. */
+  viewPicker?: boolean;
   /** Heading color and the small accents. */
   accentColor?: string;
   /** Re-read the board this often while the page is open (ms). 0 turns it off. */
@@ -26,6 +47,9 @@ export function ShipcueBoard({
   endpoint = '/api/shipcue',
   show = 'both',
   initialView = 'open',
+  tabStyle: tabStyleProp = 'pills',
+  layout: layoutProp = 'cards',
+  viewPicker = true,
   accentColor = '#16203A',
   refreshMs = 60_000,
   className,
@@ -34,6 +58,23 @@ export function ShipcueBoard({
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>(initialView === 'queue' ? 'open' : initialView);
+  // Each viewer's own pick (shipcue report bf463120), over the app's default.
+  const [picked, setPicked] = useState<{ tabStyle?: BoardTabStyle; layout?: BoardLayout }>({});
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only there in the browser
+    if (viewPicker) setPicked(loadView());
+  }, [viewPicker]);
+  const tabStyle = picked.tabStyle ?? tabStyleProp;
+  const layout = picked.layout ?? layoutProp;
+  const pick = (next: { tabStyle?: BoardTabStyle; layout?: BoardLayout }) => {
+    const merged = { ...picked, ...next };
+    setPicked(merged);
+    try {
+      localStorage.setItem(VIEW_KEY, JSON.stringify(merged));
+    } catch {
+      // Storage blocked: the pick lasts until the page reloads.
+    }
+  };
 
   useEffect(() => {
     let live = true;
@@ -71,16 +112,18 @@ export function ShipcueBoard({
   ];
   const current: View | 'queue' = show === 'both' ? view : show;
   const list = (items: BoardItem[], done = false) => (
-    <ul style={s.list}>
+    <ul style={layout === 'list' ? s.listCompact : s.list}>
       {items.map((r) => (
-        <Item key={r.id} r={r} accent={accentColor} done={done} />
+        <Item key={r.id} r={r} accent={accentColor} done={done} compact={layout === 'list'} />
       ))}
     </ul>
   );
   return (
     <div className={className} style={{ ...s.wrap, ...style }}>
-      {show === 'both' && (
-        <div role="tablist" aria-label="Reports" style={s.tabs}>
+      {(show === 'both' || viewPicker) && (
+        <div style={tabStyle === 'tabs' ? { ...s.bar, ...s.barTabs } : s.bar}>
+      {show === 'both' ? (
+        <div role="tablist" aria-label="Reports" style={tabStyle === 'tabs' ? s.underTabs : s.tabs}>
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -89,12 +132,31 @@ export function ShipcueBoard({
               aria-selected={view === t.id}
               aria-label={t.count !== undefined ? `${t.label} ${t.count}` : t.label}
               onClick={() => setView(t.id)}
-              style={view === t.id ? { ...s.tab, background: accentColor, color: '#fff' } : s.tab}
+              style={
+                tabStyle === 'tabs'
+                  ? view === t.id
+                    ? { ...s.underTab, ...s.underTabOn, borderBottomColor: accentColor, color: accentColor }
+                    : s.underTab
+                  : view === t.id
+                    ? { ...s.tab, background: accentColor, color: '#fff' }
+                    : s.tab
+              }
             >
               {t.label}
               {t.count !== undefined && <span style={s.count}>{t.count}</span>}
             </button>
           ))}
+        </div>
+      ) : (
+        <span />
+      )}
+      {viewPicker && (
+        <span style={s.picker} aria-label="View">
+          <Toggle label="Tab style" value={tabStyle} options={[['pills', 'Pills'], ['tabs', 'Tabs']]} onPick={(v) => pick({ tabStyle: v })} />
+          <span aria-hidden="true"> · </span>
+          <Toggle label="Layout" value={layout} options={[['cards', 'Cards'], ['list', 'List']]} onPick={(v) => pick({ layout: v })} />
+        </span>
+      )}
         </div>
       )}
       {current === 'open' && (
@@ -118,13 +180,13 @@ export function ShipcueBoard({
             {board.queue.length === 0 ? 'Nothing waiting.' : `${board.queue.length} open, most urgent first.`}
             {board.changelog.length > 0 ? ' Done ones stay below, greyed out.' : ''}
           </p>
-          <ul style={s.list}>
+          <ul style={layout === 'list' ? s.listCompact : s.list}>
             {board.queue.map((r) => (
-              <Item key={r.id} r={r} accent={accentColor} />
+              <Item key={r.id} r={r} accent={accentColor} compact={layout === 'list'} />
             ))}
             {/* Finished ones stay in the queue, greyed out, so nothing seems to vanish. */}
             {board.changelog.map((r) => (
-              <Item key={r.id} r={r} accent={accentColor} done />
+              <Item key={r.id} r={r} accent={accentColor} done compact={layout === 'list'} />
             ))}
           </ul>
         </section>
@@ -133,9 +195,9 @@ export function ShipcueBoard({
         <section>
           {show !== 'both' && <h2 style={{ ...s.h2, color: accentColor }}>Changelog</h2>}
           <p style={s.muted}>{board.changelog.length === 0 ? 'Nothing shipped yet.' : 'What was fixed, latest first.'}</p>
-          <ul style={s.list}>
+          <ul style={layout === 'list' ? s.listCompact : s.list}>
             {board.changelog.map((r) => (
-              <Item key={r.id} r={r} accent={accentColor} changelog />
+              <Item key={r.id} r={r} accent={accentColor} changelog compact={layout === 'list'} />
             ))}
           </ul>
         </section>
@@ -153,7 +215,36 @@ function day(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function Item({ r, accent, changelog = false, done = false }: { r: BoardItem; accent: string; changelog?: boolean; done?: boolean }) {
+/** Two small text options, the chosen one darker, for the View control. */
+function Toggle<T extends string>({ label, value, options, onPick }: { label: string; value: T; options: [T, string][]; onPick: (v: T) => void }) {
+  return (
+    <span role="radiogroup" aria-label={label}>
+      {options.map(([v, text], i) => (
+        <span key={v}>
+          {i > 0 && <span aria-hidden="true">/</span>}
+          <button type="button" role="radio" aria-checked={value === v} onClick={() => onPick(v)} style={value === v ? { ...s.pickBtn, ...s.pickOn } : s.pickBtn}>
+            {text}
+          </button>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function Item({ r, accent, changelog = false, done = false, compact = false }: { r: BoardItem; accent: string; changelog?: boolean; done?: boolean; compact?: boolean }) {
+  if (compact) {
+    // One line: type, the fix (or the ask), date. No screenshots.
+    const text = changelog && r.resolution ? r.resolution : r.description;
+    return (
+      <li style={done ? { ...s.row, ...s.done } : s.row}>
+        <span style={{ ...s.tag, borderColor: accent, color: accent, flex: 'none' }}>{TYPE_LABEL[r.type]}</span>
+        <span style={s.rowText} title={text}>
+          {text}
+        </span>
+        <span style={s.rowDate}>{day(changelog ? r.updatedAt : r.createdAt)}</span>
+      </li>
+    );
+  }
   return (
     <li style={done ? { ...s.item, ...s.done } : s.item}>
       <div style={s.meta}>
@@ -189,6 +280,18 @@ const s: Record<string, CSSProperties> = {
   wrap: { display: 'grid', gap: '2.5em', font: 'inherit', lineHeight: 1.5 },
   h2: { margin: '0 0 0.15em', fontSize: '1.5em', lineHeight: 1.2 },
   muted: { margin: '0 0 0.8em', fontSize: '0.9em', opacity: 0.65 },
+  bar: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.6em', marginBottom: '-1.2em' },
+  barTabs: { borderBottom: '1px solid rgba(128,128,128,0.25)' },
+  underTabs: { display: 'flex', flexWrap: 'wrap', gap: '1.4em' },
+  underTab: { font: 'inherit', fontSize: '0.9em', padding: '0.4em 0', margin: '0 0 -1px', border: 0, borderBottom: '2px solid transparent', background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },
+  underTabOn: { opacity: 1, fontWeight: 600 },
+  picker: { fontSize: '0.75em', opacity: 0.7, whiteSpace: 'nowrap' },
+  pickBtn: { font: 'inherit', padding: '0 0.3em', border: 0, background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },
+  pickOn: { opacity: 1, fontWeight: 600 },
+  row: { display: 'flex', alignItems: 'center', gap: '0.6em', padding: '0.4em 0.2em', borderBottom: '1px solid rgba(128,128,128,0.18)', fontSize: '0.92em' },
+  rowText: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  rowDate: { flex: 'none', fontSize: '0.85em', opacity: 0.6 },
+  listCompact: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 0 },
   list: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '0.75em' },
   item: { padding: '0.8em 1em', border: '1px solid rgba(128,128,128,0.25)', borderRadius: 10 },
   meta: { display: 'flex', flexWrap: 'wrap', gap: '0.5em', alignItems: 'center', fontSize: '0.8em', opacity: 0.8, marginBottom: '0.35em' },
@@ -196,7 +299,7 @@ const s: Record<string, CSSProperties> = {
   main: { margin: 0, whiteSpace: 'pre-wrap' },
   done: { opacity: 0.5 },
   // Pills, as Chinat prefers them to an underlined tab row.
-  tabs: { display: 'inline-flex', flexWrap: 'wrap', gap: 4, padding: 3, border: '1px solid rgba(128,128,128,0.3)', borderRadius: 999, justifySelf: 'start', marginBottom: '-1.2em' },
+  tabs: { display: 'inline-flex', flexWrap: 'wrap', gap: 4, padding: 3, border: '1px solid rgba(128,128,128,0.3)', borderRadius: 999 },
   tab: { font: 'inherit', fontSize: '0.85em', padding: '0.25em 0.9em', border: 0, borderRadius: 999, background: 'none', color: 'inherit', cursor: 'pointer' },
   count: { marginLeft: '0.45em', fontWeight: 400, opacity: 0.7, fontSize: '0.9em' },
   shots: { display: 'flex', flexWrap: 'wrap', gap: '0.5em', marginTop: '0.6em' },

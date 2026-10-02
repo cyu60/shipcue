@@ -49,6 +49,8 @@ export interface ReportButtonProps {
   pastReportsHref?: string;
   /** The text of that link. "Past reports" by default. */
   pastReportsLabel?: string;
+  /** The link on the thanks note after sending, to the same place. "See your cue" by default. */
+  seeReportsLabel?: string;
   /** A small "Powered by shipcue" line asking people to star it on GitHub. On by default. */
   watermark?: boolean;
   /** Which tabs to show, in order. All three by default; on a public page you may want to leave out 'task'. */
@@ -183,6 +185,7 @@ function ReportPanel({
   captureErrors = true,
   pastReportsHref,
   pastReportsLabel = 'Past reports',
+  seeReportsLabel = 'See your cue',
   limits,
   onEditShortcuts,
   watermark = true,
@@ -890,7 +893,7 @@ function ReportPanel({
             <>
               {' '}
               <a href={pastReportsHref} style={{ color: 'inherit', fontWeight: 600 }}>
-                See your reports
+                {seeReportsLabel}
               </a>
             </>
           )}

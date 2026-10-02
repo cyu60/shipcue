@@ -1,3 +1,20 @@
 {
-  "rewrites": [{ "source": "/api/shipcue/:rest(.*)", "destination": "/api/shipcue?__p=:rest" }]
+  "rewrites": [
+    {
+      "source": "/api/shipcue/:rest(.*)",
+      "destination": "/api/shipcue?__p=:rest"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/changelog",
+      "destination": "/cue/",
+      "permanent": true
+    },
+    {
+      "source": "/changelog/",
+      "destination": "/cue/",
+      "permanent": true
+    }
+  ]
 }
