@@ -1,4 +1,4 @@
-import type { Priority, Report, ReportEvent, ReportType, Status } from '../core';
+import type { ClaimConflict, ConflictReport, Priority, Report, ReportEvent, ReportType, Status, WorkScope } from '../core';
 
 export interface AgentClientOptions {
   /** Where createShipcueHandler is mounted, e.g. https://app.example.com/api/shipcue */
@@ -8,6 +8,8 @@ export interface AgentClientOptions {
   /** Name stored as claimed_by, e.g. "claude-code@laptop". */
   agent?: string;
   fetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /** The work area claims declare when the call gives none (e.g. from SHIPCUE_SCOPE; docs/swarm.md). */
+  scope?: WorkScope | null;
 }
 
 /** A report an agent files for a person (shipcue report 9f533ece), the same fields the panel sends. */
@@ -27,6 +29,17 @@ export interface NewReport {
 export interface Claimed {
   report: Report;
   prompt: string;
+  /** Other active claims this one overlaps, when it declared a scope (shipcue report 83f5d976). */
+  conflicts?: ClaimConflict[];
+  /** The same in a sentence. Never a refusal: the claim went through. */
+  warning?: string;
+}
+
+export interface ScopeSet {
+  event: ReportEvent;
+  scope: WorkScope | null;
+  conflicts: ClaimConflict[];
+  warning?: string;
 }
 
 /** Thin HTTP client for the agent API. The MCP tools are built on it. */
@@ -48,6 +61,10 @@ export function createAgentClient(opts: AgentClientOptions) {
     return body as T;
   }
   const post = <T>(path: string, body: unknown = {}) => call<T>(path, { method: 'POST', body });
+  const withScope = (scope: WorkScope | null | undefined) => {
+    const s = scope === undefined ? opts.scope : scope;
+    return s ? { scope: s } : {};
+  };
 
   return {
     /**
@@ -84,9 +101,18 @@ export function createAgentClient(opts: AgentClientOptions) {
     async get(id: string): Promise<Claimed> {
       return (await call<Claimed>(`/${encodeURIComponent(id)}`))!;
     },
-    claimNext: (): Promise<Claimed | null> => post<Claimed>('/next/claim', { agent }),
-    async claim(id: string): Promise<Claimed> {
-      return (await post<Claimed>(`/${encodeURIComponent(id)}/claim`, { agent }))!;
+    /** Takes the next report; a scope (or the client's default) says what the work will touch. */
+    claimNext: (scope?: WorkScope | null): Promise<Claimed | null> => post<Claimed>('/next/claim', { agent, ...withScope(scope) }),
+    async claim(id: string, scope?: WorkScope | null): Promise<Claimed> {
+      return (await post<Claimed>(`/${encodeURIComponent(id)}/claim`, { agent, ...withScope(scope) }))!;
+    },
+    /** Changes what a report this agent holds touches; null clears it. */
+    async setScope(id: string, scope: WorkScope | null): Promise<ScopeSet> {
+      return (await post<ScopeSet>(`/${encodeURIComponent(id)}/scope`, { agent, scope }))!;
+    },
+    /** Active claims whose work areas overlap, and whether the queue is free (nothing claimed or in review). */
+    async conflicts(): Promise<ConflictReport> {
+      return (await call<ConflictReport>('/conflicts'))!;
     },
     async release(id: string): Promise<Report> {
       return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/release`))!.report;

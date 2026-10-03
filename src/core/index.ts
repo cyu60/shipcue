@@ -470,3 +470,4 @@ export function toAgentPrompt(r: Report, config: ShipcueConfig): string {
     ask,
   ].join('\n');
 }
+export * from './scope';

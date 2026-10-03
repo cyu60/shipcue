@@ -7,7 +7,7 @@ import { hostname } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { PRIORITIES } from '../core';
+import { describeOverlaps, otherSide, PRIORITIES, validateScope } from '../core';
 import { createAgentClient } from './client';
 
 const url = process.env.SHIPCUE_URL;
@@ -17,8 +17,28 @@ if (!url) {
   process.exit(1);
 }
 
-const client = createAgentClient({ url, token, agent: process.env.SHIPCUE_AGENT ?? `mcp@${hostname()}` });
+// SHIPCUE_SCOPE (JSON, e.g. from shipcue-listen --scope) is the work area claims declare by default.
+const envScope = validateScope(process.env.SHIPCUE_SCOPE ? (JSON.parse(process.env.SHIPCUE_SCOPE) as unknown) : null);
+if (!envScope.ok) {
+  console.error(`shipcue-mcp: SHIPCUE_SCOPE: ${envScope.error}`);
+  process.exit(1);
+}
+const client = createAgentClient({ url, token, agent: process.env.SHIPCUE_AGENT ?? `mcp@${hostname()}`, scope: envScope.value });
 const server = new McpServer({ name: 'shipcue', version: '0.13.0' });
+
+// What a claim says it touches (shipcue report 83f5d976, docs/swarm.md).
+const scopeArg = z
+  .object({
+    areas: z.array(z.string()).optional().describe('Areas this work touches, e.g. ["sync"].'),
+    paths: z.array(z.string()).optional().describe('File globs it will edit, e.g. ["src/server/**"].'),
+    migration: z.string().optional().describe('The migration slot (timestamp) it takes, if any.'),
+    branch: z.string().optional().describe('Its git branch.'),
+  })
+  .optional()
+  .describe('What this work touches, so shipcue can warn when another active claim overlaps. Never blocks.');
+
+/** The prompt, with the overlap warning on top when there is one. */
+const claimedText = (c: { prompt: string; warning?: string }) => (c.warning ? `⚠ ${c.warning}\n\n${c.prompt}` : c.prompt);
 
 const text = (value: unknown) => ({
   content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
@@ -68,11 +88,12 @@ server.registerTool(
   'claim_next_report',
   {
     description:
-      'Take the next report: one assigned to you first, then the most urgent open one. Returns a task prompt with the page, screenshots and app snapshot. If the queue gives claims a lease, call heartbeat_report while you work.',
+      'Take the next report: one assigned to you first, then the most urgent open one. Returns a task prompt with the page, screenshots and app snapshot. If the queue gives claims a lease, call heartbeat_report while you work. Pass scope to say what you will touch.',
+    inputSchema: { scope: scopeArg },
   },
-  async () => {
-    const claimed = await client.claimNext();
-    return text(claimed ? claimed.prompt : 'Nothing open. The queue is empty.');
+  async ({ scope }) => {
+    const claimed = await client.claimNext(scope);
+    return text(claimed ? claimedText(claimed) : 'Nothing open. The queue is empty.');
   },
 );
 
@@ -84,8 +105,31 @@ server.registerTool(
 
 server.registerTool(
   'claim_report',
-  { description: 'Take a specific open report.', inputSchema: { id: z.string() } },
-  async ({ id }) => text((await client.claim(id)).prompt),
+  { description: 'Take a specific open report. Pass scope to say what you will touch.', inputSchema: { id: z.string(), scope: scopeArg } },
+  async ({ id, scope }) => text(claimedText(await client.claim(id, scope))),
+);
+
+server.registerTool(
+  'set_report_scope',
+  {
+    description: 'Change what a report you hold touches (areas, file globs, migration slot, branch), or clear it with an empty scope. Warns about overlapping claims.',
+    inputSchema: { id: z.string(), scope: scopeArg },
+  },
+  async ({ id, scope }) => {
+    const r = await client.setScope(id, scope && Object.keys(scope).length ? scope : null);
+    return text(r.warning ?? 'Scope saved. No other active claim overlaps it.');
+  },
+);
+
+server.registerTool(
+  'list_conflicts',
+  { description: 'Active claims whose work areas overlap, and whether the queue is free (nothing claimed or in review), e.g. before merging or migrating.' },
+  async () => {
+    const c = await client.conflicts();
+    const lines = c.conflicts.map((x) => `#${x.a.id.slice(0, 8)} (${x.a.claimedBy ?? '?'}) ↔ #${otherSide(x, x.a.id).id.slice(0, 8)} (${x.b.claimedBy ?? '?'}): ${describeOverlaps(x.overlaps)}`);
+    const head = c.free ? 'The queue is free: nothing is claimed or in review.' : `${c.active} active claim${c.active === 1 ? '' : 's'}.`;
+    return text([head, ...(lines.length ? lines : c.free ? [] : ['No overlaps.'])].join('\n'));
+  },
 );
 
 server.registerTool(

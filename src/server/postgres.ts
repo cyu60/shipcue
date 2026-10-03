@@ -1,4 +1,4 @@
-import { toClaimant, type Claimant, type ClaimantKind, type Report, type ReportEvent, type ReportEventAction } from '../core';
+import { describeScope, SCOPE_RESETS, toClaimant, type Claimant, type WorkScope, type ClaimantKind, type Report, type ReportEvent, type ReportEventAction } from '../core';
 import { editedFields, type ReportStore } from './store';
 
 /** Anything with a pg-style query: node-postgres Pool/Client, PGlite, Neon, Vercel Postgres. */
@@ -214,14 +214,14 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
       // Queued for this claimant first, then queue order. SKIP LOCKED: two agents asking at once get two different reports.
       const next = `SELECT id FROM ${table} WHERE status = 'open' AND ${mine}${types} AND NOT is_deleted${scope(params)}
         ORDER BY (claimant_id IS NOT NULL) DESC, priority_rank DESC, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`;
-      return mutate(params, set, `id = (${next})`, { action: 'claimed', actor: c });
+      return mutate(params, set, `id = (${next})`, { action: 'claimed', actor: c, detail: o.scope ? { scope: o.scope } : {} });
     },
     async claim(id, who, o = {}) {
       if (!isUuid(id)) return null;
       const c = toClaimant(who);
       const params: unknown[] = [];
       const set = claimSet(params, c, o.leaseSeconds);
-      return mutate(params, set, `id = ${p(params, id)} AND status = 'open' AND (claimant_id IS NULL OR claimant_id = ${p(params, c.id)})`, { action: 'claimed', actor: c });
+      return mutate(params, set, `id = ${p(params, id)} AND status = 'open' AND (claimant_id IS NULL OR claimant_id = ${p(params, c.id)})`, { action: 'claimed', actor: c, detail: o.scope ? { scope: o.scope } : {} });
     },
     async release(id, o = {}) {
       if (!isUuid(id)) return null;
@@ -324,6 +324,48 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
       if (fields.length === 0) return one(`SELECT ${COLUMNS} FROM ${table} WHERE id = ${p(params, id)} AND NOT is_deleted${scope(params)}`, params);
       const set = fields.map((f) => `${f} = ${p(params, patch[f])}`).join(', ');
       return mutate(params, set, `id = ${p(params, id)}`, { action: 'edited', actor: by, detail: { fields } });
+    },
+    async setScope(id, newScope, o = {}) {
+      if (!isUuid(id)) return null;
+      // A note on the history with the scope in its detail (shipcue report 83f5d976); no column.
+      const params: unknown[] = [id];
+      const proj = project == null ? 'NULL::uuid' : `${p(params, project)}::uuid`;
+      const a = o.by ?? null;
+      const where = `id = $1 AND status IN ('claimed', 'in_review') AND NOT is_deleted${holds(params, o.holder)}${scope(params)}`;
+      const detail = JSON.stringify({ text: describeScope(newScope), scope: newScope });
+      const values = [proj, `'note'`, p(params, a?.kind ?? null), p(params, a?.id ?? null), p(params, a?.name ?? null), `${p(params, detail)}::jsonb`].join(', ');
+      const { rows } = await db.query(
+        `WITH r AS (UPDATE ${table} SET updated_at = now() WHERE ${where} RETURNING id),
+              e AS (INSERT INTO ${events} (report_id, project_id, action, actor_kind, actor_id, actor_name, detail) SELECT id, ${values} FROM r
+                    RETURNING id, report_id, action, actor_kind, actor_id, actor_name, detail, at)
+         SELECT * FROM e`,
+        params,
+      );
+      return rows[0] ? toEvent(rows[0] as EventRow) : null;
+    },
+    async scopes() {
+      // Each active claim with the newest history event that sets a scope or starts a new holder.
+      const params: unknown[] = [];
+      const reportScope = scope(params);
+      const eventScope = project === undefined ? '' : project === null ? ' AND e.project_id IS NULL' : ` AND e.project_id = ${p(params, project)}`;
+      const resets = p(params, SCOPE_RESETS);
+      const { rows } = await db.query(
+        `SELECT r.*, s.detail AS scope_detail FROM (
+           SELECT ${COLUMNS}, priority_rank FROM ${table} WHERE status IN ('claimed', 'in_review') AND NOT is_deleted${reportScope}
+         ) r
+         LEFT JOIN LATERAL (
+           SELECT e.detail FROM ${events} e
+            WHERE e.report_id = r.id${eventScope} AND (e.action = ANY(${resets}::text[]) OR e.detail ? 'scope')
+            ORDER BY e.at DESC, e.seq DESC LIMIT 1
+         ) s ON true
+         ORDER BY r.priority_rank DESC, r.created_at, r.id`,
+        params,
+      );
+      return rows.map((row) => {
+        const raw = (row as { scope_detail: Record<string, unknown> | string | null }).scope_detail;
+        const detail = typeof raw === 'string' ? (JSON.parse(raw) as Record<string, unknown>) : raw;
+        return { report: toReport(row as Row), scope: ((detail?.scope as WorkScope | null | undefined) ?? null) };
+      });
     },
     async events(id) {
       if (!isUuid(id)) return [];

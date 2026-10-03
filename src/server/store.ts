@@ -1,4 +1,4 @@
-import { EDIT_FIELDS, sortQueue, toClaimant, type Claimant, type ReportEdit, type Priority, type Report, type ReportEvent, type ReportEventAction, type ReportInput, type ReportType, type Status } from '../core';
+import { ACTIVE_STATUSES, currentScope, describeScope, EDIT_FIELDS, sortQueue, toClaimant, type ActiveScope, type Claimant, type WorkScope, type ReportEdit, type Priority, type Report, type ReportEvent, type ReportEventAction, type ReportInput, type ReportType, type Status } from '../core';
 
 export type NewReport = ReportInput & {
   reporter: string | null;
@@ -19,6 +19,8 @@ export interface ListFilter {
 export interface ClaimOptions {
   /** Seconds until the claim runs out unless renewed with heartbeat. Leave out for no lease. */
   leaseSeconds?: number;
+  /** What the work touches (shipcue report 83f5d976): kept on the claim's history event. */
+  scope?: WorkScope | null;
 }
 
 export interface ClaimNextOptions extends ClaimOptions {
@@ -91,6 +93,14 @@ export interface ReportStore {
    * report 5c54da74). The history gets an 'edited' event naming the fields. Null for an unknown id.
    */
   edit?(id: string, patch: ReportEdit, by?: Claimant | null): Promise<Report | null>;
+  /**
+   * Changes the work area of a claimed or in-review report (shipcue report 83f5d976): a 'note' in
+   * the history with the scope in its detail; null clears it. Null when the report is not held (by
+   * opts.holder, when given).
+   */
+  setScope?(id: string, scope: WorkScope | null, opts?: HolderOptions): Promise<ReportEvent | null>;
+  /** Every active claim (claimed or in review) with the scope it declared, in queue order. */
+  scopes?(): Promise<ActiveScope[]>;
 }
 
 /** The fields an edit sets, in a fixed order, for the history. */
@@ -126,7 +136,7 @@ export function memoryStore(): ReportStore {
       (r) => r.status === 'open' && (r.claimantId == null || r.claimantId === c.id),
       () => ({ status: 'claimed', claimedBy: c.name, claimedAt: now(), claimantKind: c.kind, claimantId: c.id, leaseExpiresAt: leaseUntil(opts?.leaseSeconds) }),
     );
-    if (r) record(id, 'claimed', c);
+    if (r) record(id, 'claimed', c, opts?.scope ? { scope: opts.scope } : {});
     return r;
   };
 
@@ -243,6 +253,14 @@ export function memoryStore(): ReportStore {
       const r = update(id, () => true, () => set);
       if (r) record(id, 'edited', by, { fields });
       return r;
+    },
+    async setScope(id, scope, opts = {}) {
+      if (!update(id, (r) => ACTIVE_STATUSES.includes(r.status) && holds(r, opts.holder), () => ({}))) return null;
+      return { ...record(id, 'note', opts.by, { text: describeScope(scope), scope }) };
+    },
+    async scopes() {
+      const active = sortQueue([...rows.values()].filter((r) => ACTIVE_STATUSES.includes(r.status)));
+      return active.map((r) => ({ report: { ...r }, scope: currentScope(log.filter((e) => e.reportId === r.id)) }));
     },
     async countFromClient(clientKey) {
       return [...clients.entries()].filter(([id, k]) => k === clientKey && rows.has(id)).length;
