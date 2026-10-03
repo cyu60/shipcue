@@ -1,6 +1,6 @@
 // The site's own shipcue queue: reports from the button on shipcue.ibuildathing.com.
 import pg from 'pg';
-import { createShipcueHandler, postgresStore } from '../../src/server';
+import { createShipcueHandler, emailReporter, postgresStore } from '../../src/server';
 import { resolveConfig } from '../../src/core';
 import { AREAS } from './areas.mjs';
 import { cloudUserFrom, insforgeAuth } from './cloud.mjs';
@@ -10,12 +10,25 @@ const auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 
+// Email whoever filed a report when it is fixed (InsForge emails on shipcue's project). Reporters
+// here are signed-in shipcue Cloud accounts (getReporter below), so their addresses are real.
+const EMAIL_KEY = process.env.SHIPCUE_EMAIL_API_KEY;
+const sendEmail = async (m) => {
+  const res = await fetch(`${process.env.SHIPCUE_CLOUD_AUTH_URL}/api/email/send-raw`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${EMAIL_KEY}` },
+    body: JSON.stringify({ to: m.to, subject: m.subject, html: m.html, from: 'shipcue' }),
+  });
+  if (!res.ok) throw new Error(`email: ${res.status} ${(await res.text()).slice(0, 200)}`);
+};
+
 const handler = createShipcueHandler({
   // Only shipcue's own reports: the same table holds every Cloud project's, which must never show here.
   store: postgresStore(pool, 'shipcue_reports', { project: null }),
   // Any file can come along with a report here, not just screenshots (report e8b2dedd).
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: '/api/shipcue',
+  broadcasters: EMAIL_KEY ? [emailReporter({ appName: 'shipcue', link: 'https://shipcue.ibuildathing.com/cuelog/', send: sendEmail })] : [],
   getReporter: async (req) => (await cloudUserFrom(req, auth))?.email ?? null,
   // Three reports without an account, then sign in (report dce33fd0); signed in, they can still send anonymously.
   anonymousLimit: Number(process.env.SHIPCUE_ANONYMOUS_LIMIT ?? 3),

@@ -3,7 +3,7 @@
 // {base}/p/<public key>/... with the same routes as a self-hosted handler (button, agent API, team API).
 // Sign-in is InsForge auth on shipcue's project, kept server-side in httpOnly cookies.
 import { createHash, randomBytes } from 'node:crypto';
-import { createShipcueHandler, postgresStore } from '../../src/server';
+import { EVENT_TYPES, createShipcueHandler, postgresStore, slack, webhook } from '../../src/server';
 import { resolveConfig } from '../../src/core';
 
 const ROLES = ['owner', 'member', 'viewer'];
@@ -195,6 +195,10 @@ export function createCloudHandler(opts) {
     agentPull: p.agent_pull,
     areas: p.areas,
     publicBoard: p.public_board,
+    // Forwarding: Slack's URL is a secret, so only whether it is set; the webhook's URL shows.
+    slackConnected: !!p.slack_webhook_url,
+    webhookUrl: p.webhook_url ?? null,
+    notifyEvents: p.notify_events ?? ['report.filed', 'report.closed'],
     createdAt: new Date(p.created_at).toISOString(),
   });
 
@@ -408,9 +412,28 @@ export function createCloudHandler(opts) {
         if (!ok) return fail('Areas are { value: "editor", label: "Editor" } (up to 50).');
         set('areas', JSON.stringify(areas.map((a) => ({ value: String(a.value), label: String(a.label).trim() }))));
       }
+      // Forwarding (Slack, a signed webhook). A new webhook URL gets a new secret, shown once.
+      let webhookSecret = null;
+      if (b.slackWebhookUrl !== undefined) {
+        const v = b.slackWebhookUrl === null || b.slackWebhookUrl === '' ? null : String(b.slackWebhookUrl).trim();
+        if (v !== null && !/^https:\/\/hooks\.slack\.com\/[\w/-]+$/.test(v)) return fail('Use a Slack incoming webhook URL (https://hooks.slack.com/...).');
+        set('slack_webhook_url', v);
+      }
+      if (b.webhookUrl !== undefined) {
+        const v = b.webhookUrl === null || b.webhookUrl === '' ? null : String(b.webhookUrl).trim();
+        if (v !== null && !(/^https:\/\/[^\s]+$/.test(v) && v.length <= 500)) return fail('Webhooks need an https:// URL.');
+        set('webhook_url', v);
+        webhookSecret = v ? `whsec_${randomBytes(24).toString('hex')}` : null;
+        set('webhook_secret', webhookSecret);
+      }
+      if (b.notifyEvents !== undefined) {
+        const events = Array.isArray(b.notifyEvents) ? b.notifyEvents : null;
+        if (!events || !events.every((e) => EVENT_TYPES.includes(e))) return fail(`Events are ${EVENT_TYPES.join(', ')}.`);
+        set('notify_events', [...new Set(events)]);
+      }
       if (!sets.length) return fail('Nothing to change.');
       const [row] = await q(`UPDATE cloud_projects SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, params);
-      return json({ project: publicProject(row) });
+      return json({ project: publicProject(row), ...(webhookSecret ? { webhookSecret } : {}) });
     }
 
     if (section === 'invites') {
@@ -507,6 +530,11 @@ export function createCloudHandler(opts) {
         return !!(sess && (await memberOf(p.id, sess.user.id)));
       },
       leaseSeconds: p.lease_seconds ?? undefined,
+      // Each project's own forwarding: a Slack channel and/or a signed webhook.
+      broadcasters: [
+        ...(p.slack_webhook_url ? [slack({ webhookUrl: p.slack_webhook_url, events: p.notify_events })] : []),
+        ...(p.webhook_url ? [webhook({ url: p.webhook_url, secret: p.webhook_secret ?? undefined, events: p.notify_events })] : []),
+      ],
       agents: async (token) => {
         const a = (
           await q(

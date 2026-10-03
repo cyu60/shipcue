@@ -184,6 +184,9 @@ function Setup({ detail, reload, onProjects }) {
   const [name, setName] = useState(p.name);
   const [areas, setAreas] = useState(p.areas.map((a) => `${a.value}: ${a.label}`).join('\n'));
   const [saved, setSaved] = useState(false);
+  const [slackUrl, setSlackUrl] = useState('');
+  const [hookUrl, setHookUrl] = useState(p.webhookUrl ?? '');
+  const [hookSecret, setHookSecret] = useState(null);
   const run = async (fn) => {
     setError(null);
     try {
@@ -261,6 +264,51 @@ function Setup({ detail, reload, onProjects }) {
           </table>
         )}
       </section>
+
+      {owner && (
+        <section style={s.card}>
+          <h3 style={{ margin: 0 }}>3. Forward reports</h3>
+          <p style={s.small}>Announce this project's reports in a Slack channel, or send them to your own endpoint as signed JSON. Neither ever includes who filed it or the app snapshot in Slack.</p>
+          <div style={s.row}>
+            <input style={{ ...s.input, flex: 1 }} placeholder={p.slackConnected ? 'Slack is connected. Paste a new URL to change it' : 'https://hooks.slack.com/services/…'} value={slackUrl} onChange={(e) => setSlackUrl(e.target.value)} />
+            <Button onClick={() => save({ slackWebhookUrl: slackUrl.trim() }).then(() => setSlackUrl(''))} disabled={!slackUrl.trim()}>
+              {p.slackConnected ? 'Change' : 'Connect Slack'}
+            </Button>
+            {p.slackConnected && <Button onClick={() => save({ slackWebhookUrl: null })}>Disconnect</Button>}
+          </div>
+          <div style={s.row}>
+            <input style={{ ...s.input, flex: 1 }} placeholder="https://your.app/hooks/shipcue" value={hookUrl} onChange={(e) => setHookUrl(e.target.value)} />
+            <Button
+              onClick={() =>
+                run(async () => {
+                  const r = await api(`/projects/${p.id}/settings`, { webhookUrl: hookUrl.trim() || null });
+                  setHookSecret(r.webhookSecret ?? null);
+                })
+              }
+            >
+              {hookUrl.trim() ? 'Save webhook' : 'Remove webhook'}
+            </Button>
+          </div>
+          {hookSecret && (
+            <>
+              <p style={s.small}>Signing secret, shown once. Check each request's x-shipcue-signature with it (signBody in shipcue/server).</p>
+              <Copy text={hookSecret} />
+            </>
+          )}
+          <div style={s.row} role="group" aria-label="Events to forward">
+            {[['report.filed', 'Filed'],['report.claimed', 'Claimed'],['report.assigned', 'Assigned'],['report.review', 'In review'],['report.closed', 'Closed'],['report.reopened', 'Reopened']].map(([ev, label]) => (
+              <label key={ev} style={{ ...s.small, display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={p.notifyEvents.includes(ev)}
+                  onChange={(e) => save({ notifyEvents: e.target.checked ? [...p.notifyEvents, ev] : p.notifyEvents.filter((x) => x !== ev) })}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
 
       {owner && (
         <section style={s.card}>
