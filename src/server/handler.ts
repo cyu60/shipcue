@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { altFragment, BLOCKED_FILE_TYPES, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, toMineItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
+import { ACTIVE_STATUSES, altFragment, BLOCKED_FILE_TYPES, conflictWarning, conflictsOf, findConflicts, validateScope, type ConflictReport, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, toMineItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 import { findGitHubLink, publicGitHubLinks } from './links';
@@ -219,6 +219,8 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
  *   GET  {base}/reports/:id             agent: one report plus a ready-made prompt
  *   POST {base}/reports/next/claim      agent: take the most urgent open report
  *   POST {base}/reports/:id/claim       agent: take a specific report
+ *   POST|PUT {base}/reports/:id/scope   agent: what its claim touches ({ scope }, docs/swarm.md)
+ *   GET  {base}/reports/conflicts       agent: active claims whose work areas overlap
  *   POST {base}/reports/:id/release     agent: give it back
  *   POST {base}/reports/:id/close       agent: { status: fixed|wontfix, resolution, prUrl? }
  *   POST {base}/reports/:id/heartbeat   agent: renew its lease
@@ -392,6 +394,19 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
 
   const withPrompt = (r: Report) => ({ report: r, prompt: toAgentPrompt(r, config) });
 
+  /** Active claims whose work areas overlap (shipcue report 83f5d976, docs/swarm.md). */
+  async function conflictReport(): Promise<ConflictReport> {
+    await expireLeases();
+    if (store.scopes) return findConflicts(await store.scopes());
+    const active = (await store.list()).filter((r) => ACTIVE_STATUSES.includes(r.status));
+    return findConflicts(active.map((report) => ({ report, scope: null })));
+  }
+  /** What a claim's response adds when it overlaps another active claim: a warning, never a refusal. */
+  async function overlapWarning(id: string) {
+    const mine = conflictsOf((await conflictReport()).conflicts, id);
+    return mine.length ? { conflicts: mine, warning: conflictWarning(mine, id) } : {};
+  }
+
   /** Releases claims whose lease ran out, and tells the broadcasters. */
   async function expireLeases() {
     if (!store.expire) return;
@@ -480,7 +495,7 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
     const identity = who === 'shared' ? null : who;
 
     const [id, action] = parts;
-    const body = req.method === 'POST' ? await readJson(req) : {};
+    const body = req.method === 'POST' || req.method === 'PUT' ? await readJson(req) : {};
     // A shared-token agent says who it is; an agent with its own token is who its token says.
     const said = String(body.agent ?? new URL(req.url).searchParams.get('agent') ?? 'agent').slice(0, 100);
     const me: Claimant = identity ? { kind: 'agent', id: identity.id, name: identity.name } : { kind: 'agent', id: said, name: said };
@@ -496,6 +511,7 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
       const mine = params.get('mine') === '1' ? me.id : undefined;
       return json({ reports: await store.list({ ...(filter ? { status: filter } : {}), ...(mine ? { claimant: mine } : {}) }) });
     }
+    if (req.method === 'GET' && id === 'conflicts' && !action) return json(await conflictReport());
     if (req.method === 'GET' && id && !action) {
       const r = await store.get(id);
       return r ? json(withPrompt(r)) : fail('No such report', 404);
@@ -504,13 +520,27 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
       if (!(await store.get(id))) return fail('No such report', 404);
       return json({ events: store.events ? await store.events(id) : [] });
     }
+    if ((req.method === 'POST' || req.method === 'PUT') && id && action === 'scope') {
+      // Change what a held claim touches; null clears it.
+      if (!store.setScope) return fail('Not found', 404);
+      if (!('scope' in body)) return fail('Send { scope: { areas?, paths?, migration?, branch? } } or { scope: null }.');
+      const sc = validateScope(body.scope);
+      if (!sc.ok) return fail(sc.error);
+      const event = await store.setScope(id, sc.value, { holder, by: me });
+      if (!event) return lost(id, 'Not claimed');
+      const mine = conflictsOf((await conflictReport()).conflicts, id);
+      return json({ event, scope: sc.value, conflicts: mine, ...(mine.length ? { warning: conflictWarning(mine, id) } : {}) });
+    }
     if (req.method !== 'POST' || !id || !action) return fail('Not found', 404);
+    const claimScope = action === 'claim' ? validateScope(body.scope) : null;
+    if (claimScope && !claimScope.ok) return fail(claimScope.error);
+    const scope = claimScope?.ok ? claimScope.value : null;
 
     if (id === 'next' && action === 'claim') {
       await expireLeases();
-      const r = await store.claimNext(me, { leaseSeconds, pull: identity?.pull, types: identity?.types });
+      const r = await store.claimNext(me, { leaseSeconds, pull: identity?.pull, types: identity?.types, scope });
       await emit('report.claimed', r);
-      return r ? json(withPrompt(r)) : new Response(null, { status: 204 });
+      return r ? json({ ...withPrompt(r), ...(scope ? await overlapWarning(r.id) : {}) }) : new Response(null, { status: 204 });
     }
     if (action === 'claim') {
       await expireLeases();
@@ -518,9 +548,9 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
         const r = await store.get(id);
         if (r && !identity.types.includes(r.type)) return fail(`This agent does not take ${r.type} reports.`, 403);
       }
-      const r = await store.claim(id, me, { leaseSeconds });
+      const r = await store.claim(id, me, { leaseSeconds, scope });
       await emit('report.claimed', r);
-      return r ? json(withPrompt(r)) : lost(id);
+      return r ? json({ ...withPrompt(r), ...(scope ? await overlapWarning(r.id) : {}) }) : lost(id);
     }
     if (action === 'release') {
       const r = await store.release(id, { holder, by });
@@ -584,6 +614,7 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
 
     // The areas come along so the CueLog's Edit can offer them without the app passing them again.
     if (req.method === 'GET' && section === 'me') return json({ member, claimants: await claimants(), areas: config.areas });
+    if (req.method === 'GET' && section === 'conflicts') return json(await conflictReport());
     if (req.method === 'GET' && section === 'version') {
       await checkLiveLazily();
       const version = store.version ? await store.version() : String((await store.list()).length);

@@ -4,7 +4,7 @@ import { PinIcon } from './PinIcon';
 import { starredFirst, useStars } from './stars';
 import { fixLabel } from './fixLink';
 import { OutlinePreview, isOutlineText } from './outline';
-import { PRIORITIES, REPORT_TYPES, shotAlt, PRIORITY_LABEL, TYPE_LABEL, sortQueue, type Area, type Claimant, type Priority, type Report, type ReportEvent, type ReportType, type Status } from '../core';
+import { conflictsOf, describeOverlaps, otherSide, PRIORITIES, REPORT_TYPES, shotAlt, type ClaimConflict, PRIORITY_LABEL, TYPE_LABEL, sortQueue, type Area, type Claimant, type Priority, type Report, type ReportEvent, type ReportType, type Status } from '../core';
 
 // The CueLog: the team's table of every report, worked by people and agents together.
 // Reads and writes the handler's team API ({endpoint}/team/...), so it needs the `team` option.
@@ -76,6 +76,8 @@ export const CUELOG_TEXT = {
   raw: 'Raw',
   search: 'Search',
   keysHint: '/ search · j k move · ↵ open · p pin · Esc close',
+  // Two active claims whose work areas overlap (shipcue report 83f5d976).
+  overlaps: 'overlaps',
 };
 export type CueLogText = typeof CUELOG_TEXT;
 
@@ -165,6 +167,7 @@ export function CueLogTable({
   const [member, setMember] = useState<CueLogMember | null>(null);
   const [claimants, setClaimants] = useState<Claimant[]>([]);
   const [reports, setReports] = useState<Report[] | null>(null);
+  const [conflicts, setConflicts] = useState<ClaimConflict[]>([]);
   const [error, setError] = useState<string | null>(null);
   const fromUrl = useState(() => (syncUrl ? readUrl() : {}))[0];
   const [filter, setFilter] = useState<CueLogFilter>({ tab: fromUrl.tab ?? initialTab, type: '', priority: '', claimant: '', search: '' });
@@ -191,6 +194,13 @@ export function CueLogTable({
     if (Array.isArray(me.areas)) setMeAreas(me.areas);
     setReports(((await listRes.json()) as { reports: Report[] }).reports);
     setError(null);
+    // Overlapping work areas; an older handler without team/conflicts just shows none.
+    try {
+      const res = await fetch(`${api}/conflicts`, { credentials });
+      setConflicts(res.ok ? ((await res.json()) as { conflicts?: ClaimConflict[] }).conflicts ?? [] : []);
+    } catch {
+      setConflicts([]);
+    }
   }, [api, credentials, t.signIn]);
 
   useEffect(() => {
@@ -467,6 +477,14 @@ export function CueLogTable({
                           {fixLabel(r.prUrl)} ↗
                         </a>
                       )}
+                      {conflictsOf(conflicts, r.id).map((c) => {
+                        const o = otherSide(c, r.id);
+                        return (
+                          <span key={o.id} style={{ ...s.badge, ...s.nobody, marginLeft: '0.4em' }} title={`${o.claimedBy ?? ''}: ${describeOverlaps(c.overlaps)}`}>
+                            {t.overlaps} #{o.id.slice(0, 8)}
+                          </span>
+                        );
+                      })}
                     </td>
                     <td style={s.td}>
                       <select

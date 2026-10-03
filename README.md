@@ -150,7 +150,7 @@ claude mcp add shipcue \
   -- npx shipcue-mcp
 ```
 
-Tools: `file_report`, `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`, `submit_for_review`, `heartbeat_report`, `add_note`, `merge_report`, `list_my_reports`.
+Tools: `file_report`, `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`, `submit_for_review`, `heartbeat_report`, `add_note`, `merge_report`, `list_my_reports`, `set_report_scope`, `list_conflicts`.
 
 **Filing for a person.** `file_report` files a bug, feature request or agent task with the same fields the panel sends (type, description, priority, area, page URL, context, diagnostics), as a multipart POST from the agent's machine to `{SHIPCUE_URL}/reports`, so your browser CORS rules do not get in the way (sign-in and anonymous limits still apply). It needs no token: `SHIPCUE_URL` alone is enough for it. The panel's **Copy prompt for my agent** link hands the agent everything it needs to call it.
 
@@ -178,6 +178,8 @@ Reproduce it, write a failing test, fix it, and close the report with the PR lin
 ````
 
 Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the queue at once.
+
+**Work areas.** When several agents (or sessions) work one repo, a claim can say what it touches: `{ areas?, paths?, migration?, branch? }` as `scope` on `claim_report` / `claim_next_report` (or `POST reports/:id/claim { scope }`), changed later with `set_report_scope` (`POST reports/:id/scope`). `paths` are globs (`src/server/**`; a folder covers what is under it). Two active claims (claimed or in review) that share an area, a file, a migration slot or a branch get a warning in the claim's response, a small "overlaps #id8" badge in the CueLog, and a line in `list_conflicts` (`GET reports/conflicts`, or `team/conflicts` for members), which also says `free: true` when nothing is claimed or in review. It never blocks, and the scope lives in the report's history, so there is no schema change. Design and what comes next: [docs/swarm.md](docs/swarm.md).
 
 ## Check your setup
 
@@ -214,8 +216,10 @@ One ✓ or ✗ line per check, with the exact fix under each ✗ (exit code 1 if
 | `GET` | `/reports?mine=1` | agent: what it holds or has queued |
 | `POST` | `/reports/:id/note` | agent, `{ text }`: a note on the report's history |
 | `POST` | `/reports/:id/merge` | agent, `{ into }`: close it as a duplicate of another report, with a note on both |
+| `POST`/`PUT` | `/reports/:id/scope` | agent holding it, `{ scope }` (null clears): what its claim touches |
+| `GET` | `/reports/conflicts` | agent: active claims whose work areas overlap, and `free` |
 | `POST` | `/digest` | agent, `{ since?, until?, every? }`: the last period's digest, sent or returned (with the `digest` option) |
-| `GET` | `/team/me`, `/team/reports`, `/team/reports/:id` | signed-in members, with the `team` option |
+| `GET` | `/team/me`, `/team/reports`, `/team/reports/:id`, `/team/conflicts` | signed-in members, with the `team` option |
 | `POST` | `/team/reports/:id/{claim,assign,release,close,reopen,review,priority,note,edit,merge}` | members (not viewers) |
 | `GET` | `/board` | anyone, only with `board` on: the queue and the changelog |
 | `GET` | `/board/version` | anyone, only with `board` on: a short string that changes when any report does |
@@ -262,6 +266,7 @@ An agent that would rather not open a port listens instead: `shipcue-listen` pol
 SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=... \
   npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"
 # --on filed,assigned,claimed,released,closed,video   --every 15 (seconds)   --backlog   --once
+# --scope '{"paths":["src/server/**"]}'   the work area this agent's claims declare (SHIPCUE_SCOPE for shipcue-mcp)
 # No command: prints one JSON line per event.
 ```
 
@@ -328,6 +333,7 @@ Release tarballs for GitHub: `npm run pack:release` (builds, then `npm pack`).
 
 ## Changelog
 
+- **next**: work-area claims, the first part of swarm mode (shipcue report 83f5d976; design in [docs/swarm.md](docs/swarm.md)). A claim can carry a `scope` (`areas`, `paths` globs, `migration` slot, `branch`) on `POST reports/:id/claim` and `reports/next/claim`, and `POST|PUT reports/:id/scope` changes it (holder only; null clears). `GET reports/conflicts` (agent) and `GET team/conflicts` (members) list pairs of active claims whose scopes overlap (same area, glob paths that can match one file, same migration slot or branch) plus `free` when nothing is claimed or in review; a claim's response carries its conflicts as a `warning`, never a refusal. The CueLog shows "overlaps #id8" on those rows. MCP: `scope` on `claim_report` / `claim_next_report`, new `set_report_scope` and `list_conflicts`, and a default from `SHIPCUE_SCOPE`; `shipcue-listen --scope '<json>'` sets it for its command. Stores: `ClaimOptions.scope`, `store.setScope`, `store.scopes`; the scope is kept in the history (the claim's event, then a note), so **no schema change**. "Work this queue" (N reports to N listeners on one board) is design only.
 - **next**: reporter portal (shipcue report 3d0d7995): your reports and their status on any device. The handler's opt-in `reporterPortal` adds `GET {base}/mine`, the signed-in reporter's own reports (status, type, first line, fix line, PR, dates; never anyone else's, never diagnostics), and `/capabilities` says `mine: true`, so the panel's Yours list merges them with this browser's (one per id; pins stay local; new text keys `wontFix`, `noReportsYetAnywhere`). Turn it on only when `getReporter` reads a verified session: not for the button's `reporter` prop, so shipcue Cloud projects skip it. `emailReporter({ mineLink })` links it from the it-is-fixed email; `ListFilter.reporter` filters a store by reporter; board items carry `id="shipcue-<id>"` and a `#shipcue-<id>` link scrolls to one. shipcue's own site: **My reports** at `/app/mine/` for signed-in Cloud accounts. No schema change.
 - **0.25.0**: the Send button keeps one size and shape while sending (shipcue report fa76b7ff): the label stays "Send" and only the ⌘↵ hint turns into "…" (screen readers hear "Sending…"), replacing 0.24.1's wider reserved label, which looked lopsided. A send that is still pending can't be started again.
 - **0.25.0**: one-click suggestions and duplicate detection (shipcue report 1c0bf5be). Merge a duplicate: `POST /team/reports/:id/merge { into }` (members, not viewers) and `POST /reports/:id/merge` for agents (MCP `merge_report`) close it as won't fix with "Duplicate of #<id8>", note both reports, count the duplicate's reporters on the original (never emails) and refuse a report the store can't see (another Cloud project), a closed duplicate or a target that is itself a duplicate. `store.note(id, text, by, extra?)` keeps `extra` beside the text in the event's detail. The CueLog drawer shows a note's `detail.suggest` as Apply chips (priority, area via Edit, Merge into #id8); `readSuggestion` drops values that don't fit. shipcue Cloud: the hosted agent's triage also gets the project's open reports (first 8 characters of the id and the headline, newest first, `SHIPCUE_HOSTED_DUPLICATE_CANDIDATES`, 50 by default, 0 turns it off) in the same OpenAI call, may answer "looks like #id8", and stores its priority, area and duplicate suggestions with its note. No schema change: merges are a `closed` event and notes.
@@ -399,7 +405,7 @@ The backlog lives on [shipcue's own CueLog](https://shipcue.ibuildathing.com/cue
 - One view of every queue, with waiting time and installed versions
 - Publish to npm (the package is ready; `shipcue doctor` shipped in 0.25.0)
 - Reporter portal: your reports on any device
-- Swarm mode with work-area claims (needs a design first)
+- Swarm mode: work-area claims are in ([docs/swarm.md](docs/swarm.md)); "Work this queue" is next
 
 ## License
 

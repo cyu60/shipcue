@@ -8,13 +8,15 @@
 // Options: --on filed,assigned,claimed,released,closed,video (default filed; assigned: queued
 // for this agent in the CueLog), --every <seconds>
 // (default 15), --backlog (treat reports already open as just filed), --once (one look, then
-// exit; with --backlog, act on what is open now).
+// exit; with --backlog, act on what is open now), --scope '<json>' (the work area this agent's
+// claims declare, e.g. '{"paths":["src/server/**"]}': handed to the command as SHIPCUE_SCOPE, which
+// shipcue-mcp claims with by default; docs/swarm.md).
 
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import type { Report } from '../core';
 import { createAgentClient } from './client';
-import { diffReports, LISTEN_EVENTS, type Change, type ListenEvent } from './events';
+import { diffReports, LISTEN_EVENTS, parseScopeFlag, type Change, type ListenEvent } from './events';
 
 const url = process.env.SHIPCUE_URL;
 const token = process.env.SHIPCUE_TOKEN;
@@ -41,6 +43,13 @@ for (const e of on) {
 const everyMs = Math.max(5, Number(flag('--every') ?? 15)) * 1000;
 const once = flags.includes('--once');
 const backlog = flags.includes('--backlog');
+const parsedScope = parseScopeFlag(flag('--scope'));
+if (!parsedScope.ok) {
+  console.error(`shipcue-listen: --scope: ${parsedScope.error}`);
+  process.exit(1);
+}
+const scope = parsedScope.value;
+
 
 const client = createAgentClient({ url, token, agent: process.env.SHIPCUE_AGENT ?? `listen@${hostname()}` });
 
@@ -61,7 +70,7 @@ function run(change: Change): Promise<void> {
   return new Promise((resolve) => {
     const child = spawn(command[0]!, command.slice(1), {
       stdio: ['pipe', 'inherit', 'inherit'],
-      env: { ...process.env, SHIPCUE_EVENT: change.type, SHIPCUE_REPORT_ID: change.report.id },
+      env: { ...process.env, SHIPCUE_EVENT: change.type, SHIPCUE_REPORT_ID: change.report.id, ...(scope ? { SHIPCUE_SCOPE: scope } : {}) },
     });
     child.on('error', (err) => {
       console.error(`shipcue-listen: could not run ${command[0]}: ${err.message}`);
