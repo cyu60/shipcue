@@ -40,7 +40,7 @@ export function saveAppearance(a: Appearance): void {
 // forgets it.
 
 /** The resize grip's hit area (px; bigger on touch) and the arrow-key steps (CSS px). */
-export const RESIZE = { grip: 14, gripTouch: 28, step: 8, bigStep: 48 } as const;
+export const RESIZE = { grip: 22, gripTouch: 32, step: 8, bigStep: 48 } as const;
 
 export interface PanelSize {
   width: number;

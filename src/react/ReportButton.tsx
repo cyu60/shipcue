@@ -1434,6 +1434,7 @@ function ReportPanel({
                       {keys.resetPosition?.[0] && <kbd style={s.keysKbd}>{display(keys.resetPosition[0])}</kbd>}
                     </div>
                   )}
+                  {canResize && <p style={{ ...s.hint, marginTop: 6 }}>{fill(t.resizeHint, { corner: drag.corner.bottom ? (drag.corner.right ? t.cornerTopLeft : t.cornerTopRight) : drag.corner.right ? t.cornerBottomLeft : t.cornerBottomRight })}</p>}
                   <p style={{ ...s.hint, marginTop: 6 }}>Saved in this browser.</p>
                 </div>
               )}
@@ -1989,8 +1990,10 @@ function usePanelResize(enabled: boolean, panelRef: React.RefObject<HTMLDivEleme
           border: 0,
           borderRadius: 4,
           background: 'transparent',
-          color: '#a1a1aa',
-          opacity: 0.7,
+          // Easy to find (Chinat could not, report "can't change the size of the popup"): darker and
+          // bigger than the first quiet grip, still small.
+          color: '#71717a',
+          opacity: 1,
           display: 'flex',
           alignItems: top ? 'flex-start' : 'flex-end',
           justifyContent: left ? 'flex-start' : 'flex-end',
@@ -1998,8 +2001,8 @@ function usePanelResize(enabled: boolean, panelRef: React.RefObject<HTMLDivEleme
           touchAction: 'none',
         }}
       >
-        <svg data-icon="resize" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true" style={{ margin: 4, transform: turn }}>
-          <path d="M9 3 3 9M9 6.5 6.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <svg data-icon="resize" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true" style={{ margin: 3, transform: turn }}>
+          <path d="M9 2 2 9M9 5.5 5.5 9M9 8.5 8.5 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
       </button>
     );

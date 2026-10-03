@@ -293,3 +293,15 @@ describe('one report per send while a submit is pending', () => {
     expect(submit).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('the resize grip is easy to find', () => {
+  it('is a 22px corner target with a visible glyph, and Display says which corner to drag', async () => {
+    render(<ReportButton endpoint="/api/shipcue" />);
+    fireEvent.click(fab());
+    const grip = await screen.findByRole('button', { name: /Drag to resize/ });
+    expect(grip).toHaveStyle({ width: '22px', height: '22px', opacity: '1' });
+    expect(grip.querySelector('[data-icon="resize"]')).toHaveAttribute('width', '12');
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    expect(screen.getByText(/Resize the panel by dragging its top-left corner/)).toBeInTheDocument();
+  });
+});
