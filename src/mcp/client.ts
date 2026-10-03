@@ -1,12 +1,27 @@
-import type { Report, ReportEvent, Status } from '../core';
+import type { Priority, Report, ReportEvent, ReportType, Status } from '../core';
 
 export interface AgentClientOptions {
   /** Where createShipcueHandler is mounted, e.g. https://app.example.com/api/shipcue */
   url: string;
-  token: string;
+  /** The agent token. Filing a report (file) works without one; the queue tools need it. */
+  token?: string;
   /** Name stored as claimed_by, e.g. "claude-code@laptop". */
   agent?: string;
   fetch?: (url: string, init?: RequestInit) => Promise<Response>;
+}
+
+/** A report an agent files for a person (shipcue report 9f533ece), the same fields the panel sends. */
+export interface NewReport {
+  type: ReportType;
+  description: string;
+  priority?: Priority;
+  area?: string;
+  pageUrl?: string;
+  context?: string;
+  /** The app snapshot as JSON text, as the panel would attach it. */
+  diagnostics?: string;
+  /** Who it is from, sent as x-shipcue-user (the handler's getReporter decides whether to use it). */
+  reporter?: string;
 }
 
 export interface Claimed {
@@ -19,11 +34,12 @@ export function createAgentClient(opts: AgentClientOptions) {
   const base = opts.url.replace(/\/$/, '');
   const doFetch = opts.fetch ?? ((u: string, i?: RequestInit) => fetch(u, i));
   const agent = opts.agent ?? 'agent';
+  const auth: Record<string, string> = opts.token ? { authorization: `Bearer ${opts.token}` } : {};
 
   async function call<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T | null> {
     const res = await doFetch(`${base}/reports${path}`, {
       method: init.method ?? 'GET',
-      headers: { authorization: `Bearer ${opts.token}`, 'content-type': 'application/json' },
+      headers: { ...auth, 'content-type': 'application/json' },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
     if (res.status === 204) return null;
@@ -34,6 +50,26 @@ export function createAgentClient(opts: AgentClientOptions) {
   const post = <T>(path: string, body: unknown = {}) => call<T>(path, { method: 'POST', body });
 
   return {
+    /**
+     * File a report the way the panel does: a multipart POST to {url}/reports. Run from the
+     * agent's machine, so the handler's browser CORS rules do not apply; its sign-in and
+     * anonymous limits still do. Needs no token, but sends it when there is one.
+     */
+    async file(r: NewReport): Promise<{ id: string }> {
+      const form = new FormData();
+      form.set('type', r.type);
+      form.set('description', r.description);
+      form.set('priority', r.priority ?? 'medium');
+      form.set('area', r.area ?? 'other');
+      form.set('pageUrl', r.pageUrl ?? '');
+      form.set('context', r.context ?? '');
+      form.set('userAgent', `shipcue-mcp (${agent})`);
+      if (r.diagnostics) form.set('diagnostics', r.diagnostics);
+      const res = await doFetch(`${base}/reports`, { method: 'POST', body: form, headers: { ...auth, ...(r.reporter ? { 'x-shipcue-user': r.reporter } : {}) } });
+      const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+      if (!res.ok || !body.id) throw new Error(body.error ?? `shipcue responded ${res.status}`);
+      return { id: body.id };
+    },
     async list(status?: Status): Promise<Report[]> {
       const q = status ? `?status=${encodeURIComponent(status)}` : '';
       return (await call<{ reports: Report[] }>(q))!.reports;

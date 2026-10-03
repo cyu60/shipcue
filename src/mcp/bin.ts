@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 // MCP server so Claude Code, Codex or any MCP client can work the queue.
 //   claude mcp add shipcue -e SHIPCUE_URL=https://app.example.com/api/shipcue -e SHIPCUE_TOKEN=... -- npx shipcue-mcp
+// Without SHIPCUE_TOKEN only file_report works (filing needs no token; the queue tools do).
 
 import { hostname } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { PRIORITIES } from '../core';
 import { createAgentClient } from './client';
 
 const url = process.env.SHIPCUE_URL;
 const token = process.env.SHIPCUE_TOKEN;
-if (!url || !token) {
-  console.error('shipcue-mcp: set SHIPCUE_URL and SHIPCUE_TOKEN');
+if (!url) {
+  console.error('shipcue-mcp: set SHIPCUE_URL (and SHIPCUE_TOKEN to work the queue)');
   process.exit(1);
 }
 
@@ -21,6 +23,30 @@ const server = new McpServer({ name: 'shipcue', version: '0.13.0' });
 const text = (value: unknown) => ({
   content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
 });
+
+// A person's report, filled out by their agent (shipcue report 9f533ece): the panel's
+// "Copy prompt for my agent" hands over the page, the snapshot and what they typed so far.
+server.registerTool(
+  'file_report',
+  {
+    description:
+      'File a bug report, feature request or agent task for a person, with the same fields the shipcue panel sends. Ask them for anything missing first (what happened and what they expected, or what they want and why). Returns the new report id.',
+    inputSchema: {
+      type: z.enum(['bug', 'feature', 'task']),
+      description: z.string().describe("The report in the person's words: for a bug, steps, what happened, what was expected."),
+      priority: z.enum(PRIORITIES).optional(),
+      area: z.string().optional().describe('One of the app areas the prompt lists; other when unsure.'),
+      page_url: z.string().optional(),
+      context: z.string().optional().describe('What the report is about, e.g. text picked out on the page.'),
+      diagnostics: z.string().optional().describe('The app snapshot from the prompt, as JSON text, unchanged.'),
+      reporter: z.string().optional().describe('Who it is from, if the person says.'),
+    },
+  },
+  async ({ type, description, priority, area, page_url, context, diagnostics, reporter }) => {
+    const { id } = await client.file({ type, description, priority, area, pageUrl: page_url, context, diagnostics, reporter });
+    return text(`Filed ${id}.`);
+  },
+);
 
 server.registerTool(
   'list_reports',

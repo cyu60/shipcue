@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-296%20passing-2E5BFF?style=flat-square" alt="296 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-303%20passing-2E5BFF?style=flat-square" alt="303 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -106,7 +106,8 @@ What else the panel does:
 - **Record screen or attach a video.** Recordings stop at 60 seconds. The video uploads after the report is filed; if it fails, the report is still filed and the panel says so. Pass `uploadVideo={(reportId, blob) => …}` to upload it yourself; otherwise it goes to the handler. With `submit` and no `uploadVideo`, video is hidden.
 - **Recent errors.** Page errors, unhandled rejections and `console.error` calls from before the report are added to the snapshot as `recentErrors`. Turn off with `captureErrors={false}`.
 - **The page.** The panel shows which page it will attach, with a "don't attach" link.
-- **Move it.** People can drag the floating button anywhere; `movable={false}` keeps it bottom-right.
+- **Move it.** People can drag the floating button anywhere, by the button or by the panel's title; the two move together, the panel stays on screen (it opens above or below the button, whichever has room, settled when you let go), and the spot is kept in their browser. Reset position (⌃⇧H / Alt+Shift+H, or Display) puts it back; `movable={false}` keeps it bottom-right.
+- **Copy prompt for my agent.** A small link in the panel's footer copies a prompt for Claude Code or Codex with the app, the page, the form's choices (type, priority, your areas), what the person typed, any picked-out context and the snapshot shipcue would attach. The agent asks for anything missing, then files it with the MCP tool `file_report` or a ready `curl` to your endpoint. Hidden when you send reports with `submit` and no `endpoint`.
 - **Your own mark.** The button shows shipcue's hard hat; `icon="ship"` brings back the sailboat, and `launcherIcon={<YourLogo />}` draws your own logo.
 - **Your own fields.** `formExtras={<label><input type="checkbox" /> Pin it</label>}` draws a small control under the text box in the Bug and Feature request forms, and `fields={() => ({ pinned: on ? '1' : '0' })}` adds them to the report when it is sent (never over shipcue's own fields). With `submit`, read them from the FormData; with an endpoint, they arrive as form fields.
 - **Dictate.** A small mic beside the text box (and ⌃M / Alt+Shift+M) types what you say, using the browser's speech recognition; it is listed in Shortcuts and hidden in browsers without it.
@@ -143,7 +144,9 @@ claude mcp add shipcue \
   -- npx shipcue-mcp
 ```
 
-Tools: `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`, `submit_for_review`, `heartbeat_report`, `list_my_reports`.
+Tools: `file_report`, `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`, `submit_for_review`, `heartbeat_report`, `list_my_reports`.
+
+**Filing for a person.** `file_report` files a bug, feature request or agent task with the same fields the panel sends (type, description, priority, area, page URL, context, diagnostics), as a multipart POST from the agent's machine to `{SHIPCUE_URL}/reports`, so your browser CORS rules do not get in the way (sign-in and anonymous limits still apply). It needs no token: `SHIPCUE_URL` alone is enough for it. The panel's **Copy prompt for my agent** link hands the agent everything it needs to call it.
 
 **One token per agent.** Pass `agents: async (token) => ({ id, name, pull?, types?, leaseSeconds? }) | null` to the handler and each agent claims under its own name, can only release or close what it holds, and (with `pull: false`) only takes what someone assigned to it. `leaseSeconds` gives agent claims a lease: an agent that stops calling `heartbeat_report` loses the report back to the queue. `submit_for_review` puts the report in review with the PR link, with no lease, until it is closed.
 
@@ -251,6 +254,7 @@ pnpm build
 
 ## Changelog
 
+- **0.19.0**: dragging the panel by its title moves the whole widget, button and panel together, with one saved position (the button's); the panel stays on screen and flips above or below the button when you let go (shipcue report 30beb674; the 0.17 `shipcue:panel-offset` key is cleared). New **Copy prompt for my agent** link: a prompt for Claude Code or Codex that fills the report out and files it, and a new MCP tool `file_report` (`createAgentClient().file()`) that needs no token (shipcue report 9f533ece). New text keys: `copyAgentPrompt`, `copyAgentPromptHint`, `copied`, `copyFailed`.
 - **0.18.0**: Select area (⌃⇧A / Alt+Shift+A): tint the page, drag out part of it, and it is captured from the tab and opened in a CleanShot-style annotator (draw, arrow, box, highlight, text, blur, crop, colours, line widths, undo/redo, clear) with alt text that travels with the screenshot (`screenshotAlt`, `maxAltText`) and shows on the board, the CueLog and the preview. Pasted screenshots can be marked up too (the pencil on each). `dimOnOpen` tints the page while the panel is open. New exports: `Annotator`, `AreaSelect`, `captureArea`, and `shotAlt` / `withShotAlt` from `shipcue`.
 - **0.17.1**: drag the panel by its title, as well as the button: it moves on its own, stays on screen, and is remembered in this browser. Reset position (⌃⇧H / Alt+Shift+H, or Display) puts both back; `movable={false}` keeps them still.
 - **0.17.0**: `emailReporter({ send, appName, link, trust })` tells whoever filed a report when it is fixed, with the fix in one line and the PR (bring your own provider; only email reporters you have verified). shipcue Cloud projects can forward their reports to a Slack channel and/or a signed webhook, per event (Setup → Forward reports; `sql/cloud.sql` adds the columns).

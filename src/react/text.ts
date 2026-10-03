@@ -73,6 +73,11 @@ export interface ShipcueText {
   unpinIt: string;
   pinHint: string;
   dragPanel: string;
+  // Copy a prompt that has an agent fill the form out and file it (shipcue report 9f533ece).
+  copyAgentPrompt: string;
+  copyAgentPromptHint: string;
+  copied: string;
+  copyFailed: string;
   seeTheFix: string;
   signIn: string;
   sendAnonymously: string;
@@ -182,6 +187,10 @@ export const DEFAULT_TEXT: ShipcueText = {
   unpinIt: 'Unpin this report',
   pinHint: 'Pin it: once sent, it stays at the top of Yours and the CueLog',
   dragPanel: 'Drag to move',
+  copyAgentPrompt: 'Copy prompt for my agent',
+  copyAgentPromptHint: 'For Claude Code or Codex: it asks you what is missing, then files this report for you',
+  copied: 'Copied',
+  copyFailed: 'Could not copy. Allow clipboard access for this page, then try again.',
   seeTheFix: 'See the fix on GitHub',
   signIn: 'Sign in',
   sendAnonymously: 'Send anonymously (leave my name off it)',
