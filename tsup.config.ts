@@ -8,6 +8,7 @@ export default defineConfig({
     'server/index': 'src/server/index.ts',
     'mcp/bin': 'src/mcp/bin.ts',
     'mcp/listen': 'src/mcp/listen.ts',
+    'cli/bin': 'src/cli/bin.ts',
   },
   format: ['esm'],
   clean: true,

@@ -158,9 +158,10 @@ DOCS = """
 
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
-<p>Until the first npm release is out, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
+<p>Until it's on npm, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
 <pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v{VERSION}/shipcue-{VERSION}.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
+<p>Stuck at any step? <code>npx shipcue doctor</code> says what is missing and how to fix it (see <a href="#doctor">Check your setup</a>). On shipcue Cloud, with no database of your own, <code>npx shipcue init --cloud pk_…</code> gives you the button for your project.</p>
 
 <h2>1. Create the table</h2>
 <p>Run <code>sql/schema.sql</code> on your database. It creates one table, <code>shipcue_reports</code>, and an index that keeps the queue fast. It works on Supabase, InsForge, Neon, RDS and plain Postgres.</p>
@@ -246,6 +247,19 @@ export { handler as GET, handler as POST };</code></pre>
 <p><code>closeReport()</code> closes the panel from anywhere. Already have a help or support button? Pass <code>trigger={false}</code> so shipcue draws no button of its own, and call <code>openReport('bug')</code> from your menu.</p>
 <p>Only for testers? Pass <code>showParam="shipcue"</code> and shipcue stays off (no button, no hotkeys) until someone opens the page with <code>?shipcue=true</code>. It is remembered for that tab; <code>?shipcue=false</code> turns it off again.</p>
 
+<h2 id="doctor">Check your setup</h2>
+<p>Run this in your app's repo. It prints one ✓ or ✗ line per check, with the exact fix under each ✗, and exits non-zero if any fail:</p>
+<pre><code>npx shipcue doctor
+npx shipcue doctor --url https://your.app/api/shipcue</code></pre>
+<ul>
+  <li>shipcue is installed, and which version (and whether a newer release is out).</li>
+  <li>No signed <code>release-assets.githubusercontent.com</code> URL in <code>pnpm-lock.yaml</code> or <code>package-lock.json</code>. It expires in about an hour and breaks every later deploy; the doctor prints the swap to the stable URL.</li>
+  <li>The handler route exists (<code>app/api/shipcue/[...path]/route.ts</code>, or <code>--route &lt;file&gt;</code>).</li>
+  <li>The env vars it reads (<code>DATABASE_URL</code>, <code>SHIPCUE_TOKEN</code>) are in <code>.env*</code> and, when the project is linked, on Vercel. Values are never printed.</li>
+  <li>With <code>--url</code>: <code>/capabilities</code> answers, the agent API takes your token, and the tables exist with RLS on and every column. A missing column prints the "Upgrading from …" lines to run.</li>
+</ul>
+<p>On shipcue Cloud: <code>npx shipcue init --cloud pk_…</code> prints the env line and a small <code>ShipcueButton</code> component for Next.js; <code>--write</code> adds them.</p>
+
 <h2>4. Connect an agent</h2>
 <pre><code>claude mcp add shipcue \\
   -e SHIPCUE_URL=https://your.app/api/shipcue \\
@@ -324,7 +338,7 @@ CLOUD = """
 <h2>Set up</h2>
 <ol>
   <li><a href="/app/">Sign in</a> and create a project.</li>
-  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app, and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report.</li>
+  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app (or run <code>npx shipcue init --cloud &lt;key&gt; --write</code> in a Next.js app), and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report.</li>
   <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
 </ol>
 <h2>Run a listener</h2>

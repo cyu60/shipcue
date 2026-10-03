@@ -9,6 +9,7 @@
     "dist",
     "sql"
   ],
+  "types": "./dist/core/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/core/index.d.ts",
@@ -21,9 +22,11 @@
     "./server": {
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "bin": {
+    "shipcue": "./dist/cli/bin.js",
     "shipcue-mcp": "./dist/mcp/bin.js",
     "shipcue-listen": "./dist/mcp/listen.js"
   },
@@ -32,7 +35,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "prepare": "npm run build"
+    "prepublishOnly": "npm run build",
+    "pack:release": "npm run build && npm pack"
   },
   "peerDependencies": {
     "react": ">=18",
@@ -88,5 +92,8 @@
     "queue",
     "postgres",
     "react"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
