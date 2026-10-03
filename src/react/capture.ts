@@ -2,8 +2,9 @@
 
 // Select an area of the page and capture it as a screenshot (shipcue report 58b727d9).
 // The pixels come from the browser's own tab capture (getDisplayMedia, as video.ts uses for
-// recordings): one frame, tracks stopped at once, cropped to the selection. Exact, unlike
-// re-drawing the DOM, and with no new dependency.
+// recordings): a frame cropped to the selection. The share is kept while the panel is open, so
+// the browser asks once (shipcue report 03de1f12). Exact, unlike re-drawing the DOM, and with
+// no new dependency.
 
 export interface Point {
   x: number;
@@ -70,44 +71,127 @@ export async function afterPaint(frames = 2): Promise<void> {
 }
 
 /**
+ * How long (ms) a granted tab share is kept for the next capture while the panel stays open
+ * (shipcue report 03de1f12), so the browser asks once per session, not per capture. The one
+ * default; ReportButton's `captureKeepAlive` overrides it, and 0 stops sharing after each capture.
+ */
+export const CAPTURE_KEEP_ALIVE_MS = 120_000;
+
+/** Move a selection by (dx, dy), kept whole inside the viewport. */
+export function moveRect(r: Rect, dx: number, dy: number, viewport: { width: number; height: number }): Rect {
+  const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), Math.max(0, max));
+  return { ...r, x: clamp(r.x + dx, viewport.width - r.width), y: clamp(r.y + dy, viewport.height - r.height) };
+}
+
+/** A resize handle: corners and edge midpoints, by compass point. */
+export type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+export const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+/** Drag one handle of a selection by (dx, dy): the opposite side stays put, never under `min`, inside the viewport. */
+export function resizeRect(r: Rect, handle: Handle, dx: number, dy: number, viewport: { width: number; height: number }, min: number): Rect {
+  let left = r.x;
+  let top = r.y;
+  let right = r.x + r.width;
+  let bottom = r.y + r.height;
+  if (handle.includes('w')) left = Math.max(0, Math.min(left + dx, right - min));
+  if (handle.includes('e')) right = Math.min(viewport.width, Math.max(right + dx, left + min));
+  if (handle.includes('n')) top = Math.max(0, Math.min(top + dy, bottom - min));
+  if (handle.includes('s')) bottom = Math.min(viewport.height, Math.max(bottom + dy, top + min));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+const SHARE_OPTIONS = {
+  video: { displaySurface: 'browser' },
+  audio: false,
+  preferCurrentTab: true,
+  selfBrowserSurface: 'include',
+} as DisplayMediaStreamOptions;
+
+type FrameVideo = HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
+
+/** The next frame the live track delivers, or a few paints, whichever comes first. */
+const nextVideoFrame = (video: FrameVideo) =>
+  Promise.race([new Promise<void>((resolve) => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => resolve()) : resolve())), afterPaint(4)]);
+
+export interface TabCapture {
+  /** Crop the tab to `sel` (CSS px in the viewport) as a PNG; asks to share only when no live share is held. */
+  grab(sel: Rect): Promise<Blob>;
+  /** Stop sharing now (the panel closed, the page hid). */
+  stop(): void;
+}
+
+/**
+ * Tab capture that keeps a granted share for later captures (shipcue report 03de1f12): Chrome's
+ * "Allow ... to see this tab?" comes up once, not on every capture. Each grab draws the latest
+ * frame of the live track; a share that ended ("Stop sharing") is noticed and asked for again.
+ * Sharing stops `keepAliveMs` after the last grab (0: at once), or on stop().
+ */
+export function tabCapture({ keepAliveMs = CAPTURE_KEEP_ALIVE_MS }: { keepAliveMs?: number } = {}): TabCapture {
+  let stream: MediaStream | null = null;
+  let video: FrameVideo | null = null;
+  let idle: ReturnType<typeof setTimeout> | undefined;
+  const stop = () => {
+    clearTimeout(idle);
+    stream?.getTracks().forEach((t) => t.stop());
+    if (video) video.srcObject = null;
+    stream = null;
+    video = null;
+  };
+  const live = () => !!stream && stream.getVideoTracks().some((t) => t.readyState !== 'ended');
+  const grab = async (sel: Rect): Promise<Blob> => {
+    if (!canCaptureTab()) throw Object.assign(new Error('Unsupported'), { name: 'Unsupported' });
+    clearTimeout(idle);
+    try {
+      if (!live()) {
+        stop();
+        stream = await navigator.mediaDevices.getDisplayMedia(SHARE_OPTIONS);
+        video = document.createElement('video');
+        video.muted = true;
+        video.playsInline = true;
+        video.srcObject = stream;
+        await video.play();
+        // The first frame can be blank in some browsers: wait for one with a size, then one more.
+        for (let i = 0; i < 30 && !video.videoWidth; i++) await nextFrame();
+        await nextFrame();
+      } else {
+        // A held share: the page has just repainted without the tint and the panel, so take a
+        // frame from after that.
+        await video!.play();
+        await nextVideoFrame(video!);
+        await nextVideoFrame(video!);
+      }
+      const v = video!;
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const frame = { width: v.videoWidth, height: v.videoHeight };
+      if (!frame.width || !frame.height) throw new Error('No frame');
+      const crop = cropRect(sel, frame, viewport, window.devicePixelRatio || 1);
+      const canvas = document.createElement('canvas');
+      canvas.width = crop.width;
+      canvas.height = crop.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('No canvas');
+      ctx.drawImage(v, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('No image');
+      return blob;
+    } catch (e) {
+      stop();
+      throw e;
+    } finally {
+      if (stream) {
+        if (keepAliveMs > 0) idle = setTimeout(stop, keepAliveMs);
+        else stop();
+      }
+    }
+  };
+  return { grab, stop };
+}
+
+/**
  * Capture this tab once and crop it to `sel` (CSS px in the viewport). Resolves to a PNG blob.
  * Rejects with the browser's error (NotAllowedError when declined) or { name: 'Unsupported' }.
+ * Sharing stops at once; tabCapture() keeps it for the next capture.
  */
-export async function captureArea(sel: Rect): Promise<Blob> {
-  if (!canCaptureTab()) throw Object.assign(new Error('Unsupported'), { name: 'Unsupported' });
-  const options = {
-    video: { displaySurface: 'browser' },
-    audio: false,
-    preferCurrentTab: true,
-    selfBrowserSurface: 'include',
-  } as DisplayMediaStreamOptions;
-  const viewport = { width: window.innerWidth, height: window.innerHeight };
-  const stream = await navigator.mediaDevices.getDisplayMedia(options);
-  const stop = () => stream.getTracks().forEach((t) => t.stop());
-  try {
-    const video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
-    video.srcObject = stream;
-    await video.play();
-    // The first frame can be blank in some browsers: wait for one with a size, then one more.
-    for (let i = 0; i < 30 && !video.videoWidth; i++) await nextFrame();
-    await nextFrame();
-    const frame = { width: video.videoWidth, height: video.videoHeight };
-    stop();
-    if (!frame.width || !frame.height) throw new Error('No frame');
-    const crop = cropRect(sel, frame, viewport, window.devicePixelRatio || 1);
-    const canvas = document.createElement('canvas');
-    canvas.width = crop.width;
-    canvas.height = crop.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('No canvas');
-    ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
-    video.srcObject = null;
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('No image');
-    return blob;
-  } finally {
-    stop();
-  }
+export function captureArea(sel: Rect): Promise<Blob> {
+  return tabCapture({ keepAliveMs: 0 }).grab(sel);
 }
