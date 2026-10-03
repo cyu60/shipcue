@@ -45,14 +45,16 @@ More on the [use cases page](https://shipcue.ibuildathing.com/use-cases/).
 ## Install
 
 ```bash
-pnpm add shipcue
+npm i shipcue   # or pnpm add shipcue
 ```
 
-Until the first npm release is out, install the prebuilt release (nothing builds on install, so it works with pnpm on Vercel):
+Until it's on npm, install the prebuilt release (nothing builds on install, so it works with pnpm on Vercel; pick the newest from [releases](https://github.com/cyu60/shipcue/releases)):
 
 ```bash
-pnpm add https://github.com/cyu60/shipcue/releases/download/v0.5.2/shipcue-0.5.2.tgz
+pnpm add https://github.com/cyu60/shipcue/releases/download/v<version>/shipcue-<version>.tgz
 ```
+
+Then run `npx shipcue doctor` in your app's repo; it says what is missing and how to fix it (see [Check your setup](#check-your-setup)). On shipcue Cloud, with no database of your own: `npx shipcue init --cloud <pk_…>`.
 
 ## 1. Create the table
 
@@ -175,6 +177,23 @@ Reproduce it, write a failing test, fix it, and close the report with the PR lin
 
 Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the queue at once.
 
+## Check your setup
+
+```bash
+npx shipcue doctor                                         # files, env, lockfile
+npx shipcue doctor --url https://your-app.com/api/shipcue  # plus the live endpoint, token and tables
+```
+
+One ✓ or ✗ line per check, with the exact fix under each ✗ (exit code 1 if any fail):
+
+- shipcue is installed, and which version (and the newest release, unless `--offline`)
+- no signed `release-assets.githubusercontent.com` URL in `pnpm-lock.yaml`, `package-lock.json` or `package.json` (it expires in an hour and breaks later deploys); prints the swap to the stable URL
+- the handler route exists (`app/api/shipcue/[...path]/route.ts`, or `--route <file>`)
+- the env vars the route reads (default `DATABASE_URL`, `SHIPCUE_TOKEN`) are in `.env*`, your shell, and on Vercel when the project is linked (`vercel env ls`); values are never printed
+- with `--url`: `GET /capabilities` answers 200, the agent API answers 200 with `SHIPCUE_TOKEN`, and (with `DATABASE_URL` and the app's `pg`) `shipcue_reports` and `shipcue_report_events` exist with RLS on, every column in `sql/schema.sql` and the current history actions; a gap prints the "Upgrading from …" block to run
+
+**shipcue Cloud.** `npx shipcue init --cloud pk_…` prints the env line (`NEXT_PUBLIC_SHIPCUE_ENDPOINT`) and a small `ShipcueButton` client component for a Next.js app; `--write` adds both, never overwriting.
+
 ## HTTP API
 
 | Method | Path | Who |
@@ -257,9 +276,21 @@ pnpm typecheck
 pnpm build
 ```
 
+## Publishing
+
+Maintainers publish from a clean `main` (the build runs on `prepublishOnly`, so installing shipcue never builds anything):
+
+```bash
+npm login
+npm publish --access public
+```
+
+Release tarballs for GitHub: `npm run pack:release` (builds, then `npm pack`).
+
 ## Changelog
 
 - **next**: isolation regression suite for Cloud (shipcue report 407a5d6d). `tests/isolation.test.ts` runs every read and write path (store methods, the public board, its version and screenshots, the team API, the agent API, the button's video route, and Cloud's per-project queue at `/api/cloud/p/<key>/`) with two Cloud projects and an own-rows store (`project: null`) on one database, and checks nothing crosses over in any direction, so the 0.16.1 leak (the site's own queue reading every Cloud project's reports) cannot come back unnoticed. No leak found; tests only.
+- **next**: setup without the traps (shipcue report 5fdbd60f). `npx shipcue doctor` checks the install and version, the signed-URL lockfile trap, the handler route and the env vars it reads (Vercel's too), and with `--url` the live endpoint, the agent token and the tables (RLS, columns, history actions), printing the fix or the "Upgrading from" block for each ✗. `npx shipcue init --cloud <pk_…>` wires the button to a Cloud project. Ready for npm: `prepare` became `prepublishOnly` (nothing builds on install), plus `publishConfig` and a `./package.json` export; see Publishing.
 - **0.24.2**: when key presses on the resize grip come quicker than the panel redraws, each one now counts (shipcue report ee970b18).
 - **0.24.1**: the Send button keeps its size while sending: "Sending…" no longer wraps it onto two lines or makes it taller.
 - **0.24.0**: resize the panel (shipcue report ee970b18). A small grip on the floating panel's free corner (the one away from the button, so it follows the quadrant) resizes it by drag, or by the arrow keys once focused (Shift for bigger steps); the text box takes the extra height. At least the default size, at most 8px inside the window, scaled with the text size, kept in this browser (`shipcue:panel-size`); Reset position (⌃⇧H or Display) also resets the size, and is now offered with `movable={false}` too. New: prop `resizable` (on by default for the floating panel); text key `resizePanel`.
