@@ -17,7 +17,7 @@ export async function POST(req) {
       onBeforeGenerateToken: async (pathname) => {
         const m = PATH.exec(pathname);
         if (!m) throw new Error('Not a report video.');
-        const { rows } = await pool.query('SELECT created_at, video FROM shipcue_reports WHERE id = $1 AND NOT is_deleted', [m[1]]);
+        const { rows } = await pool.query('SELECT created_at, video FROM shipcue_reports WHERE id = $1 AND project_id IS NULL AND NOT is_deleted', [m[1]]);
         const r = rows[0];
         if (!r || r.video || Date.now() - new Date(r.created_at).getTime() > WINDOW_MS) throw new Error('This report cannot take a video.');
         return {
