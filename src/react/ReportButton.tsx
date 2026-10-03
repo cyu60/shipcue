@@ -5,9 +5,10 @@ import { createPortal } from 'react-dom';
 import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, SELECT_AREA_EVENT, type Hotkeys } from './hotkeys';
 import { useLightbox } from './Lightbox';
 import { PinIcon } from './PinIcon';
-import { loadStars, rememberMine, starredFirst, toggleStar, useStars } from './stars';
+import { loadStars, mergeMine, rememberMine, starredFirst, toggleStar, useStars } from './stars';
+import { fixLabel } from './fixLink';
 import { BUTTON_PX, RESIZE, SIZES, TEXT_ZOOM, loadAppearance, loadPanelSize, saveAppearance, savePanelSize, type Appearance, type PanelSize, type Size } from './appearance';
-import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type Priority, type ReportType } from '../core';
+import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type MineItem, type Status, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
 import { isOutlineText, OutlinePreview } from './outline';
@@ -471,6 +472,24 @@ function ReportPanel({
   const lightbox = useLightbox();
   const starState = useStars();
   const [showMine, setShowMine] = useState(false);
+  // Yours on any device (shipcue report 3d0d7995): when the handler offers GET /mine (the
+  // reporterPortal option, signed in), its list joins this browser's each time Yours opens.
+  const [serverMine, setServerMine] = useState<MineItem[]>([]);
+  const mineOn = !submit && !!known?.mine;
+  useEffect(() => {
+    if (!mineOn || !showMine) return;
+    let live = true;
+    // Same-origin, with the session cookie; never the reporter header, which proves nothing.
+    fetch(`${endpoint.replace(/\/$/, '')}/mine`, { cache: 'no-store', credentials: 'same-origin' })
+      .then(async (res) => (res.ok ? (((await res.json()) as { reports?: MineItem[] }).reports ?? []) : null))
+      .catch(() => null)
+      .then((list) => live && list && setServerMine(list));
+    return () => {
+      live = false;
+    };
+  }, [mineOn, showMine, endpoint]);
+  const yours = mineOn ? mergeMine(starState.mine, serverMine) : starState.mine;
+  const statusWord: Record<Status, string> = { open: t.open, claimed: t.inProgress, in_review: t.inReview, fixed: t.fixed, wontfix: t.wontFix };
   const resetPositionRef = useRef<() => void>(() => undefined);
   const [editingKeys, setEditingKeys] = useState(false);
   const [keyFor, setKeyFor] = useState<string | null>(null);
@@ -1350,10 +1369,10 @@ function ReportPanel({
               )}
               {showMine && (
                 <div style={s.keysBox} aria-label={t.yourReports}>
-                  {starState.mine.length === 0 ? (
-                    <p style={{ ...s.hint, marginTop: 0 }}>{t.noReportsYet}</p>
+                  {yours.length === 0 ? (
+                    <p style={{ ...s.hint, marginTop: 0 }}>{mineOn ? t.noReportsYetAnywhere : t.noReportsYet}</p>
                   ) : (
-                    starredFirst(starState.mine, starState.stars).map((m) => (
+                    starredFirst(yours, starState.stars).map((m) => (
                       <div key={m.id} style={{ ...s.keysRow, gap: 8 }}>
                         <button
                           type="button"
@@ -1364,9 +1383,15 @@ function ReportPanel({
                         >
                           <PinIcon on={starState.isStarred(m.id)} size={12} />
                         </button>
-                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.title}>
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.resolution ? `${m.title}\n${m.resolution}` : m.title}>
                           {m.title}
                         </span>
+                        {m.status && <span style={{ color: m.status === 'fixed' ? '#18181b' : '#a1a1aa', flex: 'none' }}>{statusWord[m.status]}</span>}
+                        {m.prUrl && /^https:\/\//.test(m.prUrl) && (
+                          <a href={m.prUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#71717a', flex: 'none' }}>
+                            {fixLabel(m.prUrl)}
+                          </a>
+                        )}
                         <span style={{ color: '#a1a1aa', flex: 'none' }}>{new Date(m.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
                       </div>
                     ))
@@ -1455,7 +1480,7 @@ function ReportPanel({
                     style={{ ...s.linkBtn, fontSize: 10, textDecoration: 'none', color: '#71717a' }}
                   >
                     {t.yours}
-                    {starState.mine.length > 0 ? ` (${starState.mine.length})` : ''}
+                    {yours.length > 0 ? ` (${yours.length})` : ''}
                   </button>
                   {' · '}
                   <button

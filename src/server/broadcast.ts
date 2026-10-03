@@ -136,6 +136,8 @@ export interface EmailReporterOptions {
   appName: string;
   /** Where people can see the changelog, linked in the email. */
   link?: string;
+  /** Where reporters see all their own reports (the reporter portal, shipcue report 3d0d7995), linked in the email. */
+  mineLink?: string;
   /**
    * Only email reporters you know are real: true when getReporter returns a signed-in user's
    * own email. Never pass reporter text a browser could make up, or anyone could send mail
@@ -159,13 +161,14 @@ export function emailReporter(opts: EmailReporterOptions): Broadcaster {
       const asked = (r.description.trim().split('\n')[0] ?? '').slice(0, 140);
       const fix = r.resolution?.trim() || 'It is fixed.';
       const subject = `Fixed: ${asked.length > 70 ? `${asked.slice(0, 67)}...` : asked}`;
-      const text = [`What you reported to ${opts.appName} is fixed.`, '', `You asked: ${asked}`, `What changed: ${fix}`, ...(r.prUrl ? [`The change: ${r.prUrl}`] : []), ...(opts.link ? ['', `See everything that changed: ${opts.link}`] : [])].join('\n');
+      const text = [`What you reported to ${opts.appName} is fixed.`, '', `You asked: ${asked}`, `What changed: ${fix}`, ...(r.prUrl ? [`The change: ${r.prUrl}`] : []), ...(opts.link || opts.mineLink ? [''] : []), ...(opts.link ? [`See everything that changed: ${opts.link}`] : []), ...(opts.mineLink ? [`See all your reports: ${opts.mineLink}`] : [])].join('\n');
       const html = [
         `<p>What you reported to ${esc(opts.appName)} is fixed.</p>`,
         `<p style="color:#52525b">You asked: ${esc(asked)}</p>`,
         `<p><strong>What changed:</strong> ${esc(fix)}</p>`,
         ...(r.prUrl && /^https:\/\//.test(r.prUrl) ? [`<p><a href="${esc(r.prUrl)}">See the change</a></p>`] : []),
         ...(opts.link ? [`<p><a href="${esc(opts.link)}">Everything that changed</a></p>`] : []),
+        ...(opts.mineLink ? [`<p><a href="${esc(opts.mineLink)}">All your reports</a></p>`] : []),
         '<p style="color:#a1a1aa;font-size:12px">Sent because you filed this report. Thanks for telling us.</p>',
       ].join('\n');
       await opts.send({ to: r.reporter, subject, html, text });

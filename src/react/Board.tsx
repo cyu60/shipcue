@@ -159,6 +159,13 @@ export function ShipcueBoard({
     };
   }, [endpoint, refreshMs, liveMs]);
 
+  // A link to one report (#shipcue-<id>, e.g. from a reporter's "My reports") lands on it once the board is in.
+  const loaded = !!board;
+  useEffect(() => {
+    if (!loaded || typeof window === 'undefined' || !window.location.hash.startsWith('#shipcue-')) return;
+    document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView?.({ block: 'center' });
+  }, [loaded]);
+
   if (error && !board) return <p className={className} style={{ ...s.muted, ...style }}>{error}</p>;
   if (!board) return <p className={className} style={{ ...s.muted, ...style }}>{t.loading}</p>;
 
@@ -441,7 +448,7 @@ function Item({
     // One line: type, the fix (or the ask), date. No screenshots.
     const text = changelog && r.resolution ? r.resolution : r.description;
     return (
-      <li style={done ? { ...s.row, ...s.done } : s.row}>
+      <li id={`shipcue-${r.id}`} style={done ? { ...s.row, ...s.done } : s.row}>
         {star && <StarButton star={star} label={text.slice(0, 60)} />}
         <span style={{ ...s.tag, borderColor: accent, color: accent, flex: 'none' }}>{typeLabel(t, r.type)}</span>
         {star?.mine && <span style={{ ...s.tag, flex: 'none' }}>{t.yours}</span>}
@@ -454,7 +461,7 @@ function Item({
     );
   }
   return (
-    <li style={done ? { ...s.item, ...s.done } : s.item}>
+    <li id={`shipcue-${r.id}`} style={done ? { ...s.item, ...s.done } : s.item}>
       <div style={s.meta}>
         {star && <StarButton star={star} label={r.description.slice(0, 60)} />}
         <span style={{ ...s.tag, borderColor: accent, color: accent }}>{typeLabel(t, r.type)}</span>

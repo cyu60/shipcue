@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { altFragment, BLOCKED_FILE_TYPES, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
+import { altFragment, BLOCKED_FILE_TYPES, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, toMineItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 import { findGitHubLink, publicGitHubLinks } from './links';
@@ -131,6 +131,15 @@ export interface HandlerOptions {
    * a cron (Vercel Cron, GitHub Actions, launchd) every hour or day. Off unless given.
    */
   digest?: DigestHandlerOptions;
+  /**
+   * The reporter portal (shipcue report 3d0d7995): GET {base}/mine returns the signed-in
+   * reporter's own reports (status, fix line, PR, dates; never anyone else's, never diagnostics),
+   * and the panel's Yours list adds them, so it works on any device. Turn it on only when
+   * getReporter reads a verified session (your auth cookie). Never with a reporter the browser
+   * says itself (the button's `reporter` prop, x-shipcue-user): anyone could read anyone's
+   * reports. Off by default.
+   */
+  reporterPortal?: boolean;
 }
 
 export interface DigestHandlerOptions {
@@ -218,6 +227,7 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
  *   POST {base}/reports/:id/note        agent: { text }: a note on the report's history
  *   POST {base}/reports/:id/merge       agent: { into }: close it as a duplicate of another report
  *   GET  {base}/reports?mine=1          agent: what it holds or has queued
+ *   GET  {base}/mine                    the signed-in reporter's own reports (the reporterPortal option)
  *   GET|POST {base}/team/...            the CueLog table for signed-in members (see the team option)
  *   POST {base}/github                  a GitHub pull_request webhook (see the github option)
  *
@@ -687,6 +697,22 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
     return fail('Not found', 404);
   }
 
+  const MINE_LIMIT = 100;
+
+  /** GET {base}/mine: the signed-in reporter's own reports, newest first (shipcue report 3d0d7995). */
+  async function mineRoute(req: Request): Promise<Response> {
+    if (!opts.reporterPortal || !opts.getReporter) return fail('Not found', 404);
+    const reporter = await opts.getReporter(req);
+    if (!reporter) return fail('Sign in to see your reports.', 401);
+    // Filtered again here, so a custom store that ignores the reporter filter still shows only theirs.
+    const reports = (await store.list({ reporter }))
+      .filter((r) => r.reporter === reporter)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, MINE_LIMIT)
+      .map(toMineItem);
+    return new Response(JSON.stringify({ reports }), { headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' } });
+  }
+
   const BOARD_LIMIT = 200;
   const defaultLinks = publicGitHubLinks();
 
@@ -770,6 +796,8 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
       }
     }
     if (req.method === 'GET' && path === `${base}/capabilities`) {
+      let asked: Promise<string | null> | undefined;
+      const reporterOf = () => (asked ??= opts.getReporter ? opts.getReporter(req) : Promise.resolve(null));
       const caps: Capabilities = {
         video: opts.saveVideo ? 'form' : opts.acceptVideoUrl ? 'url' : null,
         files: config.allowFiles,
@@ -780,7 +808,8 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
         maxScreenshotBytes: config.maxScreenshotBytes,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
         maxAltText: config.maxAltText,
-        ...(opts.anonymousLimit !== undefined ? { signedIn: !!(opts.getReporter && (await opts.getReporter(req))), anonymous: true } : {}),
+        ...(opts.anonymousLimit !== undefined ? { signedIn: !!(await reporterOf()), anonymous: true } : {}),
+        ...(opts.reporterPortal && (await reporterOf()) ? { mine: true } : {}),
       };
       return new Response(JSON.stringify(caps), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
@@ -824,6 +853,14 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
         return await teamApi(req, path.slice(`${base}/team`.length).split('/').filter(Boolean));
       } catch (err) {
         console.error('shipcue: team api failed', err);
+        return fail('Something went wrong. Please try again.', 500);
+      }
+    }
+    if (req.method === 'GET' && path === `${base}/mine`) {
+      try {
+        return await mineRoute(req);
+      } catch (err) {
+        console.error('shipcue: mine failed', err);
         return fail('Something went wrong. Please try again.', 500);
       }
     }

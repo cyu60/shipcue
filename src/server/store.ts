@@ -12,6 +12,8 @@ export interface ListFilter {
   status?: Status;
   /** Only reports this claimant holds or has queued (a claimant id). */
   claimant?: string;
+  /** Only reports filed by this reporter (the reporter portal, shipcue report 3d0d7995). */
+  reporter?: string;
 }
 
 export interface ClaimOptions {
@@ -154,7 +156,7 @@ export function memoryStore(): ReportStore {
     },
     async list(filter = {}) {
       return sortQueue(
-        [...rows.values()].filter((r) => (!filter.status || r.status === filter.status) && (!filter.claimant || r.claimantId === filter.claimant)),
+        [...rows.values()].filter((r) => (!filter.status || r.status === filter.status) && (!filter.claimant || r.claimantId === filter.claimant) && (!filter.reporter || r.reporter === filter.reporter)),
       );
     },
     async claimNext(who, opts = {}) {

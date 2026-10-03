@@ -34,6 +34,12 @@ await build({
   define: { 'process.env.NODE_ENV': '"production"', __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 await build({
+  entryPoints: ['website/_src/mine.jsx'],
+  outfile: 'website/assets/shipcue-mine.js',
+  bundle: true, minify: true, format: 'iife', target: 'es2020', jsx: 'automatic',
+  define: { 'process.env.NODE_ENV': '"production"' },
+});
+await build({
   entryPoints: ['website/_src/cloud-api.mjs'],
   outfile: 'website/api/cloud.mjs',
   // @vercel/functions stays a real dependency (website/package.json) so waitUntil finds Vercel's request context.

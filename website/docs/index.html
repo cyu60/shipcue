@@ -55,6 +55,7 @@ const handler = createShipcueHandler({
 export { handler as GET, handler as POST };</code></pre>
 <p>Screenshots are stored as small data URLs unless you pass <code>saveScreenshot(file, key)</code> to upload them to S3 or Supabase Storage. A failure inside <code>onReport</code> never fails the report.</p>
 <p>Pass <code>saveVideo(file, key)</code> to let reporters attach a screen recording or video (WebM, MP4 or MOV, up to 40 MB) through <code>POST /reports/:id/video</code>. On hosts that cap request bodies, upload from the browser with the button's <code>uploadVideo</code> prop instead.</p>
+<p><strong>Reporter portal.</strong> When <code>getReporter</code> reads a verified session (your auth cookie), add <code>reporterPortal: true</code>: <code>GET /mine</code> returns the signed-in reporter's own reports (status, fix line, PR, dates; never anyone else's, never diagnostics), and the panel's Yours list adds them, so it works on any device. Pins stay in each browser. Pair it with <code>emailReporter({ mineLink })</code>, and see <a href="/app/mine/">My reports</a> on shipcue's own site. Never turn it on when the reporter comes from the browser (the button's <code>reporter</code> prop): anyone could read anyone's reports. That is why shipcue Cloud projects do not offer it.</p>
 
 <h2>3. Add the button</h2>
 <pre><code>import { ReportButton } from 'shipcue/react';

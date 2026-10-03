@@ -750,7 +750,8 @@ function App() {
       const who = await api('/me');
       // Sent here to sign in from a page's report button: go back there.
       const next = new URLSearchParams(window.location.search).get('next');
-      if (next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/app')) {
+      // /app/mine/ (My reports) is the one /app page that sends people here to sign in.
+      if (next && next.startsWith('/') && !next.startsWith('//') && (!next.startsWith('/app') || next.startsWith('/app/mine/'))) {
         window.location.assign(next);
         return;
       }
@@ -792,6 +793,7 @@ function App() {
         </div>
         <div style={s.row}>
           <span style={s.small}>{me.user.email}</span>
+          <a href="/app/mine/" style={s.small}>My reports</a>
           <Button onClick={() => api('/auth/sign-out', {}).then(() => setMe(null))}>Sign out</Button>
         </div>
       </div>
