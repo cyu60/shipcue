@@ -252,21 +252,44 @@ describe('resizing the panel by its free corner (report ee970b18)', () => {
   });
 });
 
-describe('the Send button keeps its size while sending (report 81ff37de)', () => {
-  it('never wraps, and holds the width of the longer label in both states', async () => {
+describe('the Send button keeps its size and shape while sending (reports 81ff37de, fa76b7ff)', () => {
+  it('always reads Send, only the shortcut hint turns into …, and it never wraps', async () => {
     let finish: (v: { id: string }) => void = () => {};
     render(<ReportButton areas={[]} submit={() => new Promise((r) => (finish = r))} />);
     fireEvent.click(fab());
     fireEvent.change(await screen.findByRole('textbox', { name: 'Description' }), { target: { value: 'The heading vanished on Enter' } });
     const button = screen.getByRole('button', { name: /^Send/ });
     expect(button).toHaveStyle({ whiteSpace: 'nowrap', flex: 'none' });
-    // Both labels are always there, stacked in one cell; only the visible one is named.
-    expect(button).toHaveTextContent('Send');
-    expect(button).toHaveTextContent('Sending…');
+    // No reserved room for a longer label: the visible text is just Send and its hint.
+    expect(button).not.toHaveTextContent('Sending');
     fireEvent.click(button);
-    const busy = await screen.findByRole('button', { name: /^Sending…/ });
+    // Screen readers hear Sending…; the visible label is still Send.
+    const busy = await screen.findByRole('button', { name: 'Sending…' });
     expect(busy).toBe(button);
-    expect(busy).toHaveStyle({ whiteSpace: 'nowrap' });
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+    expect(busy.textContent?.startsWith('Send')).toBe(true);
+    expect(busy).not.toHaveTextContent('Sending');
     finish({ id: 'r-1' });
+  });
+});
+
+
+// Behaviour spec, not a reproduction: React already re-renders between separate events, so this
+// holds with or without the in-flight ref; the ref guards same-render calls (e.g. an app calling
+// the submit path twice).
+describe('one report per send while a submit is pending', () => {
+  it('ignores ⌘↵ and clicks while a slow submit is still pending', async () => {
+    let finish: (v: { id: string }) => void = () => {};
+    const submit = vi.fn(() => new Promise<{ id: string }>((r) => (finish = r)));
+    render(<ReportButton areas={[]} submit={submit} />);
+    fireEvent.click(fab());
+    const box = await screen.findByRole('textbox', { name: 'Description' });
+    fireEvent.change(box, { target: { value: 'The heading vanished on Enter' } });
+    // Several presses inside one render: all of them see busy=false.
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(box, { key: 'Enter', metaKey: true, ctrlKey: true });
+    fireEvent.click(screen.getByRole('button', { name: /^Send/ }));
+    expect(submit).toHaveBeenCalledTimes(1);
+    await act(async () => finish({ id: 'r-1' }));
+    expect(submit).toHaveBeenCalledTimes(1);
   });
 });

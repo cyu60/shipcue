@@ -847,8 +847,11 @@ function ReportPanel({
     void addFiles([new File([blob], name, { type: 'image/png' })], { alt, ...(a.index !== null ? { replace: a.index } : {}) });
   };
 
+  // A ref as well as the busy state, so two calls inside one render can never both start a send.
+  const sendingRef = useRef(false);
   const send = async () => {
-    if (busy) return;
+    if (busy || sendingRef.current) return;
+    sendingRef.current = true;
     setBusy(true);
     setError(null);
     setSignInHref(null);
@@ -897,6 +900,7 @@ function ReportPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send the report. Please try again.');
     } finally {
+      sendingRef.current = false;
       setBusy(false);
     }
   };
@@ -1493,18 +1497,21 @@ function ReportPanel({
                     </button>
                   )}
                 </span>
-                <button type="button" onClick={send} disabled={!canSend} style={canSend ? s.send : { ...s.send, opacity: 0.5, cursor: 'not-allowed' }}>
-                  {/* Both labels share one grid cell, the other one invisible, so the button keeps the width
-                      of the longer one and never wraps or grows while sending (shipcue report 81ff37de). */}
-                  <span style={s.sendLabels}>
-                    <span style={busy ? s.sendLabelHidden : s.sendLabel} aria-hidden={busy || undefined}>
-                      {t.send}
-                    </span>
-                    <span style={busy ? s.sendLabel : s.sendLabelHidden} aria-hidden={!busy || undefined}>
-                      {t.sending}
-                    </span>
+                <button
+                  type="button"
+                  onClick={send}
+                  disabled={!canSend}
+                  aria-busy={busy || undefined}
+                  aria-label={busy ? t.sending : undefined}
+                  style={canSend ? s.send : { ...s.send, opacity: 0.5, cursor: 'not-allowed' }}
+                >
+                  {/* The label stays "Send"; while sending only the shortcut hint turns into "…", in the same
+                      cell, so the button never changes size or shape (shipcue reports 81ff37de, fa76b7ff). */}
+                  {t.send}
+                  <span style={{ ...s.kbd, ...s.sendHint }} aria-hidden="true">
+                    <span style={busy ? s.sendHintHidden : s.sendHintShown}>{isMac() ? '⌘↵' : 'Ctrl+↵'}</span>
+                    <span style={busy ? s.sendHintShown : s.sendHintHidden}>…</span>
                   </span>
-                  <span style={s.kbd} aria-hidden="true">{isMac() ? '⌘↵' : 'Ctrl+↵'}</span>
                 </button>
               </div>
               </>
@@ -2109,9 +2116,9 @@ function styles(accent: string) {
     recording: { border: 0, borderRadius: 999, background: '#e11d48', color: '#fff', padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' } as CSSProperties,
     extras: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#71717a', margin: '6px 0 0' } as CSSProperties,
     send: { display: 'inline-flex', alignItems: 'center', flex: 'none', whiteSpace: 'nowrap', border: 0, borderRadius: 8, background: accent, color: '#fff', padding: '6px 12px', fontSize: 14, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,
-    sendLabels: { display: 'inline-grid' } as CSSProperties,
-    sendLabel: { gridArea: '1 / 1' } as CSSProperties,
-    sendLabelHidden: { gridArea: '1 / 1', visibility: 'hidden' } as CSSProperties,
+    sendHint: { display: 'inline-grid', justifyItems: 'center' } as CSSProperties,
+    sendHintShown: { gridArea: '1 / 1' } as CSSProperties,
+    sendHintHidden: { gridArea: '1 / 1', visibility: 'hidden' } as CSSProperties,
     fab: {
       width: 48,
       height: 48,
