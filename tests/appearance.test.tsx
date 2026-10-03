@@ -240,3 +240,22 @@ describe('resizing the panel by its free corner (report ee970b18)', () => {
     expect(screen.queryByRole('button', { name: /resize/i })).toBeNull();
   });
 });
+
+describe('the Send button keeps its size while sending (report 81ff37de)', () => {
+  it('never wraps, and holds the width of the longer label in both states', async () => {
+    let finish: (v: { id: string }) => void = () => {};
+    render(<ReportButton areas={[]} submit={() => new Promise((r) => (finish = r))} />);
+    fireEvent.click(fab());
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Description' }), { target: { value: 'The heading vanished on Enter' } });
+    const button = screen.getByRole('button', { name: /^Send/ });
+    expect(button).toHaveStyle({ whiteSpace: 'nowrap', flex: 'none' });
+    // Both labels are always there, stacked in one cell; only the visible one is named.
+    expect(button).toHaveTextContent('Send');
+    expect(button).toHaveTextContent('Sending…');
+    fireEvent.click(button);
+    const busy = await screen.findByRole('button', { name: /^Sending…/ });
+    expect(busy).toBe(button);
+    expect(busy).toHaveStyle({ whiteSpace: 'nowrap' });
+    finish({ id: 'r-1' });
+  });
+});
