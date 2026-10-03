@@ -4,7 +4,7 @@
 // Sign-in is InsForge auth on shipcue's project, kept server-side in httpOnly cookies.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { DIGEST_PERIOD_MS, EVENT_TYPES, broadcast, createShipcueHandler, digest, emailDigest, postgresStore, slack, slackDigest, webhook } from '../../src/server';
-import { resolveConfig } from '../../src/core';
+import { SHIPCUE_VERSION, compareVersions, parseVersion, resolveConfig } from '../../src/core';
 import { triageReport } from './hosted.mjs';
 
 const ROLES = ['owner', 'member', 'viewer'];
@@ -134,6 +134,56 @@ export function insforgeEmail(baseUrl, apiKey, fetchImpl = fetch) {
   };
 }
 
+/**
+ * An app's shipcue endpoint for the All projects view (shipcue report e4e1a85e): https, no credentials,
+ * no trailing slash. Null when empty; undefined when it is not one.
+ */
+export function cleanAppUrl(v) {
+  if (v === null || v === undefined || String(v).trim() === '') return null;
+  let url;
+  try {
+    url = new URL(String(v).trim());
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return undefined;
+  const out = url.toString().replace(/\/+$/, '');
+  return out.length <= 500 ? out : undefined;
+}
+
+/**
+ * The version an app's shipcue runs, from its /capabilities: fetched with a short timeout and cached
+ * briefly, so the All projects view never waits long or asks every app on every load. Null when the app
+ * is slow, down, older than the version field, or says something that is not a version.
+ */
+export function appVersions({ fetchImpl = fetch, timeoutMs = 2500, cacheMs = 5 * 60_000 } = {}) {
+  const cache = new Map();
+  async function fetchOne(appUrl) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const res = await Promise.race([
+        fetchImpl(`${appUrl}/capabilities`, { signal: ctl.signal, redirect: 'error', headers: { accept: 'application/json', 'user-agent': 'shipcue-cloud' } }),
+        new Promise((_, reject) => ctl.signal.addEventListener('abort', () => reject(new Error('timeout')))),
+      ]);
+      if (!res.ok) return null;
+      const caps = await res.json();
+      return parseVersion(caps?.version) ? String(caps.version).trim().replace(/^v/, '') : null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return async function versionOf(appUrl) {
+    const hit = cache.get(appUrl);
+    if (hit && Date.now() - hit.at < cacheMs) return hit.version;
+    const version = await fetchOne(appUrl);
+    if (cacheMs > 0) cache.set(appUrl, { at: Date.now(), version });
+    return version;
+  };
+}
+
 const DIGEST_EVERY = ['off', 'hour', 'day'];
 const DIGEST_TO = ['slack', 'email'];
 // A cron's runs wander (Vercel's daily cron anywhere in its hour), so a period counts as done this close to its end.
@@ -162,6 +212,8 @@ export function digestDue(p, now = new Date()) {
  *   background: keeps work running after the response (Vercel: waitUntil); by default it just runs.
  *   cronSecret: turns on GET|POST {base}/digest for a cron (Authorization: Bearer <cronSecret>), which sends due digests.
  *   sendEmail: sends one email ({ to, subject, html, text }), for digests to the owner's email; null leaves email off.
+ *   latestVersion: the newest shipcue, which apps are compared to in All projects (default: this build's SHIPCUE_VERSION).
+ *   fetch, versionTimeoutMs, versionCacheMs: how All projects reads each app's /capabilities (defaults: fetch, 2500, 5 minutes).
  */
 export function createCloudHandler(opts) {
   const { db, auth } = opts;
@@ -177,6 +229,8 @@ export function createCloudHandler(opts) {
   const refreshDays = opts.refreshDays ?? 30;
   const q = async (text, params = []) => (await db.query(text, params)).rows;
   const sendEmail = opts.sendEmail ?? null;
+  const latestVersion = opts.latestVersion ?? SHIPCUE_VERSION;
+  const versionOf = appVersions({ fetchImpl: opts.fetch, timeoutMs: opts.versionTimeoutMs, cacheMs: opts.versionCacheMs });
 
   // Path /api: the site's own report button (/api/shipcue) knows who is signed in too.
   const cookiePath = opts.cookiePath ?? '/api';
@@ -252,6 +306,7 @@ export function createCloudHandler(opts) {
     digestSentAt: p.digest_sent_at ? new Date(p.digest_sent_at).toISOString() : null,
     // The GitHub webhook (shipcue report 919f5ca2): only whether it is on; its secret is shown once.
     githubConnected: !!p.github_secret,
+    appUrl: p.app_url ?? null,
     createdAt: new Date(p.created_at).toISOString(),
   });
 
@@ -369,6 +424,81 @@ export function createCloudHandler(opts) {
       canCreate: await canCreate(user),
       projects: projects.map((p) => ({ id: p.id, name: p.name, publicKey: p.public_key, role: p.role })),
     });
+  }
+
+  /**
+   * All projects (shipcue report e4e1a85e): every project the user is a member of, with what is open,
+   * claimed and in review, how long the oldest open report has waited, claims stuck past their lease,
+   * and open reports nobody has looked at (never claimed, assigned or noted). Only the user's own
+   * memberships are read, so no other project ever shows.
+   */
+  async function overview(user) {
+    await acceptInvites(user);
+    const rows = await q(
+      `WITH mine AS (
+         SELECT p.id, p.name, p.public_key, p.app_url, p.created_at, m.role FROM cloud_members m
+           JOIN cloud_projects p ON p.id = m.project_id AND NOT p.is_deleted
+          WHERE m.user_id = $1 AND NOT m.is_deleted),
+       r AS (
+         SELECT r.*, (r.status = 'open' AND r.claimant_id IS NULL AND NOT EXISTS (
+                  SELECT 1 FROM shipcue_report_events e WHERE e.report_id = r.id AND e.action IN ('claimed', 'assigned', 'note'))) AS unlooked
+           FROM shipcue_reports r JOIN mine ON mine.id = r.project_id
+          WHERE NOT r.is_deleted AND r.status IN ('open', 'claimed', 'in_review'))
+       SELECT mine.id, mine.name, mine.public_key, mine.app_url, mine.role,
+              count(r.id) FILTER (WHERE r.status = 'open')::int AS open,
+              count(r.id) FILTER (WHERE r.status = 'claimed')::int AS claimed,
+              count(r.id) FILTER (WHERE r.status = 'in_review')::int AS in_review,
+              count(r.id) FILTER (WHERE r.status = 'claimed' AND r.lease_expires_at < now())::int AS stuck,
+              count(r.id) FILTER (WHERE r.unlooked)::int AS unlooked,
+              min(r.created_at) FILTER (WHERE r.status = 'open') AS oldest_open_at,
+              coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'type', r.type, 'description', left(r.description, 400), 'createdAt', r.created_at)
+                         ORDER BY r.created_at) FILTER (WHERE r.unlooked), '[]'::jsonb) AS unlooked_reports
+         FROM mine LEFT JOIN r ON r.project_id = mine.id
+        GROUP BY mine.id, mine.name, mine.public_key, mine.app_url, mine.role, mine.created_at
+        ORDER BY mine.created_at`,
+      [user.id],
+    );
+    const headlineOf = (text) => (String(text).trim().split('\n')[0] ?? '').slice(0, 120);
+    return json({
+      latest: latestVersion,
+      projects: rows.map((p) => ({
+        id: p.id,
+        name: p.name,
+        publicKey: p.public_key,
+        role: p.role,
+        appUrl: p.app_url ?? null,
+        open: p.open,
+        claimed: p.claimed,
+        inReview: p.in_review,
+        stuck: p.stuck,
+        unlooked: p.unlooked,
+        oldestOpenAt: p.oldest_open_at ? new Date(p.oldest_open_at).toISOString() : null,
+        // The oldest few, so the view can list them; the count above is the whole number.
+        unlookedReports: (typeof p.unlooked_reports === 'string' ? JSON.parse(p.unlooked_reports) : p.unlooked_reports).slice(0, 20).map((x) => ({
+          id: x.id,
+          type: x.type,
+          headline: headlineOf(x.description),
+          createdAt: new Date(x.createdAt).toISOString(),
+        })),
+      })),
+    });
+  }
+
+  /** The version each of the user's apps runs, for projects with an app URL; asked separately so the overview never waits on it. */
+  async function overviewVersions(user) {
+    const rows = await q(
+      `SELECT p.id, p.app_url FROM cloud_members m JOIN cloud_projects p ON p.id = m.project_id AND NOT p.is_deleted
+        WHERE m.user_id = $1 AND NOT m.is_deleted AND p.app_url IS NOT NULL`,
+      [user.id],
+    );
+    const entries = await Promise.all(
+      rows.map(async (p) => {
+        const version = await versionOf(p.app_url);
+        const cmp = version ? compareVersions(version, latestVersion) : null;
+        return [p.id, { version, behind: cmp === null ? null : cmp < 0 }];
+      }),
+    );
+    return json({ latest: latestVersion, versions: Object.fromEntries(entries) });
   }
 
   async function projectRoutes(req, user, parts) {
@@ -514,6 +644,11 @@ export function createCloudHandler(opts) {
         if (!DIGEST_TO.includes(b.digestTo)) return fail('A digest goes to Slack or email.');
         if (b.digestTo === 'email' && !sendEmail) return fail('Email digests are not available on this server.', 409);
         set('digest_to', b.digestTo);
+      }
+      if (b.appUrl !== undefined) {
+        const v = cleanAppUrl(b.appUrl);
+        if (v === undefined) return fail("The app's shipcue endpoint is an https:// URL, like https://app.example.com/api/shipcue.");
+        set('app_url', v);
       }
       if (!sets.length) return fail('Nothing to change.');
       const [row] = await q(`UPDATE cloud_projects SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, params);
@@ -770,6 +905,8 @@ export function createCloudHandler(opts) {
     const s = await session(req);
     if (!s) return fail('Sign in first.', 401);
     if (head === 'me' && req.method === 'GET') return withCookies(await me(s.user), s.set);
+    if (head === 'overview' && req.method === 'GET' && !rest.length) return withCookies(await overview(s.user), s.set);
+    if (head === 'overview' && req.method === 'GET' && rest[0] === 'versions' && rest.length === 1) return withCookies(await overviewVersions(s.user), s.set);
     if (head === 'projects') return withCookies(await projectRoutes(req, s.user, rest), s.set);
     return fail('Not found', 404);
   }

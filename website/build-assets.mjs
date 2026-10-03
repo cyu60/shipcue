@@ -9,23 +9,25 @@ await build({
   entryPoints: ['website/_src/button.mjs'],
   outfile: 'website/assets/shipcue-button.js',
   bundle: true, minify: true, format: 'iife', target: 'es2020',
-  define: { 'process.env.NODE_ENV': '"production"' },
+  define: { 'process.env.NODE_ENV': '"production"', __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 await build({
   entryPoints: ['website/_src/board.mjs'],
   outfile: 'website/assets/shipcue-board.js',
   bundle: true, minify: true, format: 'iife', target: 'es2020',
-  define: { 'process.env.NODE_ENV': '"production"' },
+  define: { 'process.env.NODE_ENV': '"production"', __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 await build({
   entryPoints: ['website/_src/api.mjs'],
   outfile: 'website/api/shipcue.mjs',
   bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg'],
+  define: { __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 await build({
   entryPoints: ['website/_src/upload.mjs'],
   outfile: 'website/api/shipcue-upload.mjs',
   bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg', '@vercel/blob'],
+  define: { __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 await build({
   entryPoints: ['website/_src/app.jsx'],
@@ -44,5 +46,6 @@ await build({
   outfile: 'website/api/cloud.mjs',
   // @vercel/functions stays a real dependency (website/package.json) so waitUntil finds Vercel's request context.
   bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg', '@vercel/functions'],
+  define: { __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 console.log('assets built');

@@ -5,6 +5,154 @@ import { waitUntil } from "@vercel/functions";
 // website/_src/cloud.mjs
 import { createHash, randomBytes, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 
+// src/core/version.ts
+var SHIPCUE_VERSION = true ? "0.25.0" : "0.0.0";
+var SEMVER = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/;
+function parseVersion(v) {
+  const m = typeof v === "string" ? SEMVER.exec(v.trim()) : null;
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function compareVersions(a, b) {
+  const x = parseVersion(a);
+  const y = parseVersion(b);
+  if (!x || !y) return null;
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  return 0;
+}
+
+// src/core/scope.ts
+var SCOPE_LIMITS = { areas: 20, paths: 50, item: 200 };
+var ACTIVE_STATUSES = ["claimed", "in_review"];
+var SCOPE_RESETS = ["claimed", "assigned", "released", "expired", "reopened", "closed"];
+function list(v, max, name) {
+  if (v === void 0 || v === null) return { ok: true, value: void 0 };
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) return { ok: false, error: `scope.${name} must be a list of strings.` };
+  const out = v.map((x) => x.trim()).filter(Boolean);
+  if (out.length > max) return { ok: false, error: `scope.${name} takes at most ${max}.` };
+  if (out.some((x) => x.length > SCOPE_LIMITS.item)) return { ok: false, error: `Each scope.${name} entry is at most ${SCOPE_LIMITS.item} characters.` };
+  return { ok: true, value: out.length ? out : void 0 };
+}
+function one(v, name) {
+  if (v === void 0 || v === null) return { ok: true, value: void 0 };
+  if (typeof v !== "string") return { ok: false, error: `scope.${name} must be a string.` };
+  const s = v.trim();
+  if (s.length > SCOPE_LIMITS.item) return { ok: false, error: `scope.${name} is at most ${SCOPE_LIMITS.item} characters.` };
+  return { ok: true, value: s || void 0 };
+}
+function validateScope(raw) {
+  if (raw === void 0 || raw === null) return { ok: true, value: null };
+  if (typeof raw !== "object" || Array.isArray(raw)) return { ok: false, error: "scope must be an object: { areas?, paths?, migration?, branch? }." };
+  const r = raw;
+  const areas = list(r.areas, SCOPE_LIMITS.areas, "areas");
+  if (!areas.ok) return areas;
+  const paths = list(r.paths, SCOPE_LIMITS.paths, "paths");
+  if (!paths.ok) return paths;
+  const migration = one(r.migration, "migration");
+  if (!migration.ok) return migration;
+  const branch = one(r.branch, "branch");
+  if (!branch.ok) return branch;
+  const scope = {
+    ...areas.value ? { areas: areas.value } : {},
+    ...paths.value ? { paths: paths.value } : {},
+    ...migration.value ? { migration: migration.value } : {},
+    ...branch.value ? { branch: branch.value } : {}
+  };
+  return { ok: true, value: Object.keys(scope).length ? scope : null };
+}
+function segmentsOverlap(a, b) {
+  const memo = /* @__PURE__ */ new Map();
+  const go = (i, j) => {
+    const key = i * (b.length + 1) + j;
+    const hit = memo.get(key);
+    if (hit !== void 0) return hit;
+    let out;
+    if (i === a.length && j === b.length) out = true;
+    else if (a[i] === "*") out = go(i + 1, j) || j < b.length && go(i, j + 1);
+    else if (b[j] === "*") out = go(i, j + 1) || i < a.length && go(i + 1, j);
+    else if (i === a.length || j === b.length) out = false;
+    else out = (a[i] === b[j] || a[i] === "?" || b[j] === "?") && go(i + 1, j + 1);
+    memo.set(key, out);
+    return out;
+  };
+  return go(0, 0);
+}
+function segments(glob) {
+  const g = glob.trim().replace(/^\.\//, "");
+  const parts = g.split("/").filter(Boolean);
+  const last = parts.at(-1) ?? "";
+  const folder = g.endsWith("/") || !/[.*?]/.test(last);
+  return folder && last !== "**" ? [...parts, "**"] : parts;
+}
+function globsOverlap(a, b) {
+  const x = segments(a);
+  const y = segments(b);
+  const memo = /* @__PURE__ */ new Map();
+  const go = (i, j) => {
+    const key = i * (y.length + 1) + j;
+    const hit = memo.get(key);
+    if (hit !== void 0) return hit;
+    let out;
+    if (i === x.length && j === y.length) out = true;
+    else if (x[i] === "**") out = go(i + 1, j) || j < y.length && go(i, j + 1);
+    else if (y[j] === "**") out = go(i, j + 1) || i < x.length && go(i + 1, j);
+    else if (i === x.length || j === y.length) out = false;
+    else out = segmentsOverlap(x[i], y[j]) && go(i + 1, j + 1);
+    memo.set(key, out);
+    return out;
+  };
+  return go(0, 0);
+}
+function scopeOverlaps(a, b) {
+  const out = [];
+  for (const x of a.areas ?? []) {
+    const y = (b.areas ?? []).find((v) => v.toLowerCase() === x.toLowerCase());
+    if (y !== void 0) out.push({ kind: "area", a: x, b: y });
+  }
+  for (const x of a.paths ?? []) {
+    const y = (b.paths ?? []).find((v) => globsOverlap(x, v));
+    if (y !== void 0) out.push({ kind: "path", a: x, b: y });
+  }
+  if (a.migration && a.migration === b.migration) out.push({ kind: "migration", a: a.migration, b: b.migration });
+  if (a.branch && a.branch === b.branch) out.push({ kind: "branch", a: a.branch, b: b.branch });
+  return out;
+}
+var side = ({ report, scope }) => ({ id: report.id, claimedBy: report.claimedBy, status: report.status, scope: scope ?? {} });
+function findConflicts(claims) {
+  const conflicts = [];
+  const scoped = claims.filter((c) => c.scope);
+  for (let i = 0; i < scoped.length; i++) {
+    for (let j = i + 1; j < scoped.length; j++) {
+      const overlaps = scopeOverlaps(scoped[i].scope, scoped[j].scope);
+      if (overlaps.length) conflicts.push({ a: side(scoped[i]), b: side(scoped[j]), overlaps });
+    }
+  }
+  return { active: claims.length, free: claims.length === 0, conflicts };
+}
+var conflictsOf = (all, id) => all.filter((c) => c.a.id === id || c.b.id === id);
+var otherSide = (c, id) => c.a.id === id ? c.b : c.a;
+function describeOverlaps(overlaps) {
+  return overlaps.map((o) => o.a === o.b ? `${o.kind} ${o.a}` : `${o.kind} ${o.a} ~ ${o.b}`).join(", ");
+}
+function conflictWarning(all, id) {
+  const mine = conflictsOf(all, id);
+  if (!mine.length) return void 0;
+  const lines = mine.map((c) => {
+    const o = otherSide(c, id);
+    return `#${o.id.slice(0, 8)}${o.claimedBy ? ` (${o.claimedBy})` : ""}: ${describeOverlaps(c.overlaps)}`;
+  });
+  return `This claim overlaps ${mine.length === 1 ? "another active claim" : `${mine.length} active claims`}: ${lines.join("; ")}. Nothing was blocked; coordinate before merging.`;
+}
+function describeScope(scope) {
+  if (!scope) return "Work area cleared";
+  const parts = [
+    scope.areas ? `areas ${scope.areas.join(", ")}` : "",
+    scope.paths ? `paths ${scope.paths.join(", ")}` : "",
+    scope.migration ? `migration ${scope.migration}` : "",
+    scope.branch ? `branch ${scope.branch}` : ""
+  ].filter(Boolean);
+  return `Work area: ${parts.join("; ")}`;
+}
+
 // src/core/index.ts
 var REPORT_TYPES = ["bug", "feature", "task"];
 var PRIORITIES = ["low", "medium", "high", "blocking"];
@@ -104,7 +252,7 @@ function toMineItem(r) {
     updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt
   };
 }
-var includes = (list2, v) => typeof v === "string" && list2.includes(v);
+var includes = (list3, v) => typeof v === "string" && list3.includes(v);
 function isPlainObject(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -251,7 +399,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
   if (!NAME.test(events)) throw new Error(`Bad table name: ${events}`);
   const project = opts.project;
   if (project != null && !/^[0-9a-f-]{36}$/i.test(project)) throw new Error("project must be a uuid");
-  const one = async (text, params) => {
+  const one2 = async (text, params) => {
     const { rows } = await db.query(text, params);
     return rows[0] ? toReport(rows[0]) : null;
   };
@@ -267,7 +415,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
   const claimSet = (params, c, seconds) => `status = 'claimed', claimed_by = ${p(params, c.name)}, claimed_at = now(), claimant_kind = ${p(params, c.kind)}, claimant_id = ${p(params, c.id)}, lease_expires_at = ${lease(params, seconds)}`;
   async function mutate(params, set, where, event) {
     const update = `UPDATE ${table} SET ${set}, updated_at = now() WHERE ${where} AND NOT is_deleted${scope(params)} RETURNING *`;
-    if (!event) return one(`WITH r AS (${update}) SELECT ${COLUMNS} FROM r`, params);
+    if (!event) return one2(`WITH r AS (${update}) SELECT ${COLUMNS} FROM r`, params);
     const a = event.actor ?? null;
     const values = [
       "id",
@@ -278,7 +426,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
       p(params, a?.name ?? null),
       `${p(params, JSON.stringify(event.detail ?? {}))}::jsonb`
     ].join(", ");
-    return one(
+    return one2(
       `WITH r AS (${update}),
             e AS (INSERT INTO ${events} (report_id, project_id, action, actor_kind, actor_id, actor_name, detail) SELECT ${values} FROM r)
        SELECT ${COLUMNS} FROM r`,
@@ -309,13 +457,13 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
         cols.push("client_key");
       }
       const values = cols.map((c, i) => c === "diagnostics" ? `$${i + 1}::jsonb` : `$${i + 1}`).join(", ");
-      const r = await one(`INSERT INTO ${table} (${cols.join(", ")}) VALUES (${values}) RETURNING ${COLUMNS}`, params);
+      const r = await one2(`INSERT INTO ${table} (${cols.join(", ")}) VALUES (${values}) RETURNING ${COLUMNS}`, params);
       return r;
     },
     async get(id) {
       if (!isUuid(id)) return null;
       const params = [id];
-      return one(`SELECT ${COLUMNS} FROM ${table} WHERE id = $1 AND NOT is_deleted${scope(params)}`, params);
+      return one2(`SELECT ${COLUMNS} FROM ${table} WHERE id = $1 AND NOT is_deleted${scope(params)}`, params);
     },
     async list(filter = {}) {
       const params = [];
@@ -340,14 +488,14 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
       const types = o.types ? ` AND type = ANY(${p(params, o.types)}::text[])` : "";
       const next = `SELECT id FROM ${table} WHERE status = 'open' AND ${mine}${types} AND NOT is_deleted${scope(params)}
         ORDER BY (claimant_id IS NOT NULL) DESC, priority_rank DESC, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`;
-      return mutate(params, set, `id = (${next})`, { action: "claimed", actor: c });
+      return mutate(params, set, `id = (${next})`, { action: "claimed", actor: c, detail: o.scope ? { scope: o.scope } : {} });
     },
     async claim(id, who, o = {}) {
       if (!isUuid(id)) return null;
       const c = toClaimant(who);
       const params = [];
       const set = claimSet(params, c, o.leaseSeconds);
-      return mutate(params, set, `id = ${p(params, id)} AND status = 'open' AND (claimant_id IS NULL OR claimant_id = ${p(params, c.id)})`, { action: "claimed", actor: c });
+      return mutate(params, set, `id = ${p(params, id)} AND status = 'open' AND (claimant_id IS NULL OR claimant_id = ${p(params, c.id)})`, { action: "claimed", actor: c, detail: o.scope ? { scope: o.scope } : {} });
     },
     async release(id, o = {}) {
       if (!isUuid(id)) return null;
@@ -440,9 +588,49 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
       if (!isUuid(id)) return null;
       const fields = editedFields(patch);
       const params = [];
-      if (fields.length === 0) return one(`SELECT ${COLUMNS} FROM ${table} WHERE id = ${p(params, id)} AND NOT is_deleted${scope(params)}`, params);
+      if (fields.length === 0) return one2(`SELECT ${COLUMNS} FROM ${table} WHERE id = ${p(params, id)} AND NOT is_deleted${scope(params)}`, params);
       const set = fields.map((f) => `${f} = ${p(params, patch[f])}`).join(", ");
       return mutate(params, set, `id = ${p(params, id)}`, { action: "edited", actor: by, detail: { fields } });
+    },
+    async setScope(id, newScope, o = {}) {
+      if (!isUuid(id)) return null;
+      const params = [id];
+      const proj = project == null ? "NULL::uuid" : `${p(params, project)}::uuid`;
+      const a = o.by ?? null;
+      const where = `id = $1 AND status IN ('claimed', 'in_review') AND NOT is_deleted${holds(params, o.holder)}${scope(params)}`;
+      const detail = JSON.stringify({ text: describeScope(newScope), scope: newScope });
+      const values = [proj, `'note'`, p(params, a?.kind ?? null), p(params, a?.id ?? null), p(params, a?.name ?? null), `${p(params, detail)}::jsonb`].join(", ");
+      const { rows } = await db.query(
+        `WITH r AS (UPDATE ${table} SET updated_at = now() WHERE ${where} RETURNING id),
+              e AS (INSERT INTO ${events} (report_id, project_id, action, actor_kind, actor_id, actor_name, detail) SELECT id, ${values} FROM r
+                    RETURNING id, report_id, action, actor_kind, actor_id, actor_name, detail, at)
+         SELECT * FROM e`,
+        params
+      );
+      return rows[0] ? toEvent(rows[0]) : null;
+    },
+    async scopes() {
+      const params = [];
+      const reportScope = scope(params);
+      const eventScope = project === void 0 ? "" : project === null ? " AND e.project_id IS NULL" : ` AND e.project_id = ${p(params, project)}`;
+      const resets = p(params, SCOPE_RESETS);
+      const { rows } = await db.query(
+        `SELECT r.*, s.detail AS scope_detail FROM (
+           SELECT ${COLUMNS}, priority_rank FROM ${table} WHERE status IN ('claimed', 'in_review') AND NOT is_deleted${reportScope}
+         ) r
+         LEFT JOIN LATERAL (
+           SELECT e.detail FROM ${events} e
+            WHERE e.report_id = r.id${eventScope} AND (e.action = ANY(${resets}::text[]) OR e.detail ? 'scope')
+            ORDER BY e.at DESC, e.seq DESC LIMIT 1
+         ) s ON true
+         ORDER BY r.priority_rank DESC, r.created_at, r.id`,
+        params
+      );
+      return rows.map((row) => {
+        const raw = row.scope_detail;
+        const detail = typeof raw === "string" ? JSON.parse(raw) : raw;
+        return { report: toReport(row), scope: detail?.scope ?? null };
+      });
     },
     async events(id) {
       if (!isUuid(id)) return [];
@@ -1042,6 +1230,16 @@ function createShipcueHandler(opts) {
     return saved ? json({ report: saved }) : fail("This report already has a video.", 409);
   }
   const withPrompt = (r) => ({ report: r, prompt: toAgentPrompt(r, config) });
+  async function conflictReport() {
+    await expireLeases();
+    if (store.scopes) return findConflicts(await store.scopes());
+    const active = (await store.list()).filter((r) => ACTIVE_STATUSES.includes(r.status));
+    return findConflicts(active.map((report) => ({ report, scope: null })));
+  }
+  async function overlapWarning(id) {
+    const mine = conflictsOf((await conflictReport()).conflicts, id);
+    return mine.length ? { conflicts: mine, warning: conflictWarning(mine, id) } : {};
+  }
   async function expireLeases() {
     if (!store.expire) return;
     for (const r of await store.expire()) await emit("report.released", r);
@@ -1110,7 +1308,7 @@ function createShipcueHandler(opts) {
     if (!who) return fail("Unauthorized", 401);
     const identity = who === "shared" ? null : who;
     const [id, action] = parts;
-    const body2 = req.method === "POST" ? await readJson(req) : {};
+    const body2 = req.method === "POST" || req.method === "PUT" ? await readJson(req) : {};
     const said = String(body2.agent ?? new URL(req.url).searchParams.get("agent") ?? "agent").slice(0, 100);
     const me = identity ? { kind: "agent", id: identity.id, name: identity.name } : { kind: "agent", id: said, name: said };
     const holder = identity ? identity.id : void 0;
@@ -1124,6 +1322,7 @@ function createShipcueHandler(opts) {
       const mine = params.get("mine") === "1" ? me.id : void 0;
       return json({ reports: await store.list({ ...filter ? { status: filter } : {}, ...mine ? { claimant: mine } : {} }) });
     }
+    if (req.method === "GET" && id === "conflicts" && !action) return json(await conflictReport());
     if (req.method === "GET" && id && !action) {
       const r = await store.get(id);
       return r ? json(withPrompt(r)) : fail("No such report", 404);
@@ -1132,12 +1331,25 @@ function createShipcueHandler(opts) {
       if (!await store.get(id)) return fail("No such report", 404);
       return json({ events: store.events ? await store.events(id) : [] });
     }
+    if ((req.method === "POST" || req.method === "PUT") && id && action === "scope") {
+      if (!store.setScope) return fail("Not found", 404);
+      if (!("scope" in body2)) return fail("Send { scope: { areas?, paths?, migration?, branch? } } or { scope: null }.");
+      const sc = validateScope(body2.scope);
+      if (!sc.ok) return fail(sc.error);
+      const event = await store.setScope(id, sc.value, { holder, by: me });
+      if (!event) return lost(id, "Not claimed");
+      const mine = conflictsOf((await conflictReport()).conflicts, id);
+      return json({ event, scope: sc.value, conflicts: mine, ...mine.length ? { warning: conflictWarning(mine, id) } : {} });
+    }
     if (req.method !== "POST" || !id || !action) return fail("Not found", 404);
+    const claimScope = action === "claim" ? validateScope(body2.scope) : null;
+    if (claimScope && !claimScope.ok) return fail(claimScope.error);
+    const scope = claimScope?.ok ? claimScope.value : null;
     if (id === "next" && action === "claim") {
       await expireLeases();
-      const r = await store.claimNext(me, { leaseSeconds, pull: identity?.pull, types: identity?.types });
+      const r = await store.claimNext(me, { leaseSeconds, pull: identity?.pull, types: identity?.types, scope });
       await emit("report.claimed", r);
-      return r ? json(withPrompt(r)) : new Response(null, { status: 204 });
+      return r ? json({ ...withPrompt(r), ...scope ? await overlapWarning(r.id) : {} }) : new Response(null, { status: 204 });
     }
     if (action === "claim") {
       await expireLeases();
@@ -1145,9 +1357,9 @@ function createShipcueHandler(opts) {
         const r2 = await store.get(id);
         if (r2 && !identity.types.includes(r2.type)) return fail(`This agent does not take ${r2.type} reports.`, 403);
       }
-      const r = await store.claim(id, me, { leaseSeconds });
+      const r = await store.claim(id, me, { leaseSeconds, scope });
       await emit("report.claimed", r);
-      return r ? json(withPrompt(r)) : lost(id);
+      return r ? json({ ...withPrompt(r), ...scope ? await overlapWarning(r.id) : {} }) : lost(id);
     }
     if (action === "release") {
       const r = await store.release(id, { holder, by });
@@ -1204,6 +1416,7 @@ function createShipcueHandler(opts) {
     const claimants = () => opts.team.claimants ? opts.team.claimants(req) : Promise.resolve([me]);
     const [section, id, action] = parts;
     if (req.method === "GET" && section === "me") return json({ member, claimants: await claimants(), areas: config.areas });
+    if (req.method === "GET" && section === "conflicts") return json(await conflictReport());
     if (req.method === "GET" && section === "version") {
       await checkLiveLazily();
       const version = store.version ? await store.version() : String((await store.list()).length);
@@ -1405,6 +1618,7 @@ function createShipcueHandler(opts) {
         maxScreenshotBytes: config.maxScreenshotBytes,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
         maxAltText: config.maxAltText,
+        version: SHIPCUE_VERSION,
         ...opts.anonymousLimit !== void 0 ? { signedIn: !!await reporterOf(), anonymous: true } : {},
         ...opts.reporterPortal && await reporterOf() ? { mine: true } : {}
       };
@@ -1568,7 +1782,7 @@ function triageMessages(input) {
   ];
 }
 var str = (v, max) => typeof v === "string" ? v.trim().slice(0, max) : null;
-var list = (v, maxItems, max) => Array.isArray(v) ? v.map((x) => str(x, max)).filter(Boolean).slice(0, maxItems) : null;
+var list2 = (v, maxItems, max) => Array.isArray(v) ? v.map((x) => str(x, max)).filter(Boolean).slice(0, maxItems) : null;
 function parseTriage(text, areas, candidates = []) {
   let d;
   try {
@@ -1582,9 +1796,9 @@ function parseTriage(text, areas, candidates = []) {
     area: str(d.area, 60),
     priority: PRIORITIES2.includes(d.priority) ? d.priority : null,
     priorityReason: str(d.priorityReason, 300),
-    steps: list(d.steps, 10, 300),
-    missing: list(d.missing, 6, 300),
-    plan: list(d.plan, 8, 300)
+    steps: list2(d.steps, 10, 300),
+    missing: list2(d.missing, 6, 300),
+    plan: list2(d.plan, 8, 300)
   };
   if (!t.summary || !t.area || !t.priority || !t.priorityReason || !t.steps || !t.missing || !t.plan) return null;
   if (t.area !== "other" && !areas.some((a) => a.value === t.area)) t.area = "other";
@@ -1772,6 +1986,45 @@ function insforgeEmail(baseUrl, apiKey, fetchImpl = fetch) {
     if (!res.ok) throw new Error(`email: ${res.status} ${(await res.text()).slice(0, 200)}`);
   };
 }
+function cleanAppUrl(v) {
+  if (v === null || v === void 0 || String(v).trim() === "") return null;
+  let url;
+  try {
+    url = new URL(String(v).trim());
+  } catch {
+    return void 0;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return void 0;
+  const out = url.toString().replace(/\/+$/, "");
+  return out.length <= 500 ? out : void 0;
+}
+function appVersions({ fetchImpl = fetch, timeoutMs = 2500, cacheMs = 5 * 6e4 } = {}) {
+  const cache = /* @__PURE__ */ new Map();
+  async function fetchOne(appUrl) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const res = await Promise.race([
+        fetchImpl(`${appUrl}/capabilities`, { signal: ctl.signal, redirect: "error", headers: { accept: "application/json", "user-agent": "shipcue-cloud" } }),
+        new Promise((_, reject) => ctl.signal.addEventListener("abort", () => reject(new Error("timeout"))))
+      ]);
+      if (!res.ok) return null;
+      const caps = await res.json();
+      return parseVersion(caps?.version) ? String(caps.version).trim().replace(/^v/, "") : null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return async function versionOf(appUrl) {
+    const hit = cache.get(appUrl);
+    if (hit && Date.now() - hit.at < cacheMs) return hit.version;
+    const version = await fetchOne(appUrl);
+    if (cacheMs > 0) cache.set(appUrl, { at: Date.now(), version });
+    return version;
+  };
+}
 var DIGEST_EVERY = ["off", "hour", "day"];
 var DIGEST_TO = ["slack", "email"];
 var DIGEST_EARLY_SHARE = 0.1;
@@ -1795,6 +2048,8 @@ function createCloudHandler(opts) {
   const refreshDays = opts.refreshDays ?? 30;
   const q = async (text, params = []) => (await db.query(text, params)).rows;
   const sendEmail = opts.sendEmail ?? null;
+  const latestVersion = opts.latestVersion ?? SHIPCUE_VERSION;
+  const versionOf = appVersions({ fetchImpl: opts.fetch, timeoutMs: opts.versionTimeoutMs, cacheMs: opts.versionCacheMs });
   const cookiePath = opts.cookiePath ?? "/api";
   const cookie = (name, value, maxAge) => `${name}=${encodeURIComponent(value)}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
   const sessionCookies = (t) => [cookie(ACCESS_COOKIE, t.accessToken, 60 * 60 * 24), cookie(REFRESH_COOKIE, t.refreshToken ?? "", 60 * 60 * 24 * refreshDays)];
@@ -1858,6 +2113,7 @@ function createCloudHandler(opts) {
     digestSentAt: p.digest_sent_at ? new Date(p.digest_sent_at).toISOString() : null,
     // The GitHub webhook (shipcue report 919f5ca2): only whether it is on; its secret is shown once.
     githubConnected: !!p.github_secret,
+    appUrl: p.app_url ?? null,
     createdAt: new Date(p.created_at).toISOString()
   });
   async function acceptInvites(user) {
@@ -1966,6 +2222,72 @@ function createCloudHandler(opts) {
       canCreate: await canCreate(user),
       projects: projects.map((p) => ({ id: p.id, name: p.name, publicKey: p.public_key, role: p.role }))
     });
+  }
+  async function overview(user) {
+    await acceptInvites(user);
+    const rows = await q(
+      `WITH mine AS (
+         SELECT p.id, p.name, p.public_key, p.app_url, p.created_at, m.role FROM cloud_members m
+           JOIN cloud_projects p ON p.id = m.project_id AND NOT p.is_deleted
+          WHERE m.user_id = $1 AND NOT m.is_deleted),
+       r AS (
+         SELECT r.*, (r.status = 'open' AND r.claimant_id IS NULL AND NOT EXISTS (
+                  SELECT 1 FROM shipcue_report_events e WHERE e.report_id = r.id AND e.action IN ('claimed', 'assigned', 'note'))) AS unlooked
+           FROM shipcue_reports r JOIN mine ON mine.id = r.project_id
+          WHERE NOT r.is_deleted AND r.status IN ('open', 'claimed', 'in_review'))
+       SELECT mine.id, mine.name, mine.public_key, mine.app_url, mine.role,
+              count(r.id) FILTER (WHERE r.status = 'open')::int AS open,
+              count(r.id) FILTER (WHERE r.status = 'claimed')::int AS claimed,
+              count(r.id) FILTER (WHERE r.status = 'in_review')::int AS in_review,
+              count(r.id) FILTER (WHERE r.status = 'claimed' AND r.lease_expires_at < now())::int AS stuck,
+              count(r.id) FILTER (WHERE r.unlooked)::int AS unlooked,
+              min(r.created_at) FILTER (WHERE r.status = 'open') AS oldest_open_at,
+              coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'type', r.type, 'description', left(r.description, 400), 'createdAt', r.created_at)
+                         ORDER BY r.created_at) FILTER (WHERE r.unlooked), '[]'::jsonb) AS unlooked_reports
+         FROM mine LEFT JOIN r ON r.project_id = mine.id
+        GROUP BY mine.id, mine.name, mine.public_key, mine.app_url, mine.role, mine.created_at
+        ORDER BY mine.created_at`,
+      [user.id]
+    );
+    const headlineOf = (text) => (String(text).trim().split("\n")[0] ?? "").slice(0, 120);
+    return json2({
+      latest: latestVersion,
+      projects: rows.map((p) => ({
+        id: p.id,
+        name: p.name,
+        publicKey: p.public_key,
+        role: p.role,
+        appUrl: p.app_url ?? null,
+        open: p.open,
+        claimed: p.claimed,
+        inReview: p.in_review,
+        stuck: p.stuck,
+        unlooked: p.unlooked,
+        oldestOpenAt: p.oldest_open_at ? new Date(p.oldest_open_at).toISOString() : null,
+        // The oldest few, so the view can list them; the count above is the whole number.
+        unlookedReports: (typeof p.unlooked_reports === "string" ? JSON.parse(p.unlooked_reports) : p.unlooked_reports).slice(0, 20).map((x) => ({
+          id: x.id,
+          type: x.type,
+          headline: headlineOf(x.description),
+          createdAt: new Date(x.createdAt).toISOString()
+        }))
+      }))
+    });
+  }
+  async function overviewVersions(user) {
+    const rows = await q(
+      `SELECT p.id, p.app_url FROM cloud_members m JOIN cloud_projects p ON p.id = m.project_id AND NOT p.is_deleted
+        WHERE m.user_id = $1 AND NOT m.is_deleted AND p.app_url IS NOT NULL`,
+      [user.id]
+    );
+    const entries = await Promise.all(
+      rows.map(async (p) => {
+        const version = await versionOf(p.app_url);
+        const cmp = version ? compareVersions(version, latestVersion) : null;
+        return [p.id, { version, behind: cmp === null ? null : cmp < 0 }];
+      })
+    );
+    return json2({ latest: latestVersion, versions: Object.fromEntries(entries) });
   }
   async function projectRoutes(req, user, parts) {
     const [id, section, subId, subAction] = parts;
@@ -2100,6 +2422,11 @@ function createCloudHandler(opts) {
         if (!DIGEST_TO.includes(b.digestTo)) return fail2("A digest goes to Slack or email.");
         if (b.digestTo === "email" && !sendEmail) return fail2("Email digests are not available on this server.", 409);
         set("digest_to", b.digestTo);
+      }
+      if (b.appUrl !== void 0) {
+        const v = cleanAppUrl(b.appUrl);
+        if (v === void 0) return fail2("The app's shipcue endpoint is an https:// URL, like https://app.example.com/api/shipcue.");
+        set("app_url", v);
       }
       if (!sets.length) return fail2("Nothing to change.");
       const [row] = await q(`UPDATE cloud_projects SET ${sets.join(", ")}, updated_at = now() WHERE id = $1 RETURNING *`, params);
@@ -2327,6 +2654,8 @@ function createCloudHandler(opts) {
     const s = await session(req);
     if (!s) return fail2("Sign in first.", 401);
     if (head === "me" && req.method === "GET") return withCookies(await me(s.user), s.set);
+    if (head === "overview" && req.method === "GET" && !rest.length) return withCookies(await overview(s.user), s.set);
+    if (head === "overview" && req.method === "GET" && rest[0] === "versions" && rest.length === 1) return withCookies(await overviewVersions(s.user), s.set);
     if (head === "projects") return withCookies(await projectRoutes(req, s.user, rest), s.set);
     return fail2("Not found", 404);
   }

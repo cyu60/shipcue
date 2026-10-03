@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { CueLogTable } from '../../src/react';
+import { ago } from '../../src/react/CueLog';
+import { SHIPCUE_VERSION } from '../../src/core';
 import { LISTEN_EVENTS } from '../../src/mcp/events';
 import { DEFAULT_LISTEN_COMMAND, launchdInstall, listenCommand, releaseTarball, slug, systemdInstall } from './listener.mjs';
 
 const API = '/api/cloud';
 const ORIGIN = window.location.origin;
-// eslint-disable-next-line no-undef
-const VERSION = __SHIPCUE_VERSION__;
+const VERSION = SHIPCUE_VERSION;
 
 async function api(path, body) {
   const res = await fetch(API + path, {
@@ -37,6 +38,10 @@ const s = {
   pre: { margin: 0, fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-all' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 15 },
   td: { padding: '6px 4px', borderBottom: '1px solid var(--line)' },
+  badge: { display: 'inline-block', fontSize: 13, padding: '1px 8px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', whiteSpace: 'nowrap' },
+  warn: { color: '#B45309', borderColor: '#F59E0B' },
+  th: { padding: '6px 4px', borderBottom: '1px solid var(--line)', textAlign: 'left', fontWeight: 500, fontSize: 14, color: 'var(--muted)', whiteSpace: 'nowrap' },
+  num: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
   oauth: { display: 'block', textAlign: 'center', textDecoration: 'none', fontSize: 15, padding: '8px 12px' },
 };
 
@@ -362,6 +367,7 @@ function Setup({ detail, reload, onProjects }) {
   const [hookUrl, setHookUrl] = useState(p.webhookUrl ?? '');
   const [hookSecret, setHookSecret] = useState(null);
   const [ghSecret, setGhSecret] = useState(null);
+  const [appUrl, setAppUrl] = useState(p.appUrl ?? '');
   const run = async (fn) => {
     setError(null);
     try {
@@ -557,6 +563,16 @@ function Setup({ detail, reload, onProjects }) {
             <input type="checkbox" checked={p.publicBoard} onChange={(e) => save({ publicBoard: e.target.checked })} /> Public CueLog (queue and changelog, no reporters or
             attachments) at {endpoint}/board
           </label>
+          <label style={s.small}>
+            Your app's shipcue endpoint (optional), so All projects can show the version it runs{' '}
+            <input
+              style={{ ...s.input, width: '100%', marginTop: 4 }}
+              value={appUrl}
+              onChange={(e) => setAppUrl(e.target.value)}
+              placeholder="https://app.example.com/api/shipcue"
+              aria-label="App shipcue endpoint"
+            />
+          </label>
           <p style={s.small}>Areas of your app, one per line as value: Label</p>
           <textarea style={{ ...s.input, minHeight: 60 }} placeholder="editor: Editor" value={areas} onChange={(e) => setAreas(e.target.value)} />
           <div>
@@ -566,6 +582,7 @@ function Setup({ detail, reload, onProjects }) {
                   name,
                   leaseSeconds: lease.trim() ? Math.round(Number(lease) * 60) : null,
                   staleDays: Number(stale),
+                  appUrl: appUrl.trim() || null,
                   areas: areas
                     .split('\n')
                     .map((l) => l.trim())
@@ -741,6 +758,116 @@ function Project({ id, me, onProjects }) {
   );
 }
 
+/** The shipcue an app runs, from its /capabilities (shipcue report e4e1a85e). */
+function VersionCell({ project, versions }) {
+  if (!project.appUrl) return <span style={s.small} title="Add the app's shipcue endpoint in Setup → Settings">—</span>;
+  if (!versions) return <span style={s.small}>…</span>;
+  const v = versions.versions[project.id];
+  if (!v?.version) return <span style={s.small} title={`${project.appUrl}/capabilities did not say`}>unknown</span>;
+  return v.behind ? (
+    <span style={{ ...s.badge, ...s.warn }}>
+      shipcue {v.version} · behind {versions.latest}
+    </span>
+  ) : (
+    <span style={s.small}>shipcue {v.version}</span>
+  );
+}
+
+/** All projects (shipcue report e4e1a85e): every queue you are on, at a glance, each linking to its CueLog. */
+function AllProjects({ open }) {
+  const [data, setData] = useState(null);
+  const [versions, setVersions] = useState(null);
+  const [error, setError] = useState(null);
+  const [unlookedOnly, setUnlookedOnly] = useState(false);
+  useEffect(() => {
+    api('/overview').then(setData, (e) => setError(e.message));
+    // Versions come from each app and may be slow: asked apart, so the counts never wait on them.
+    api('/overview/versions').then(setVersions, () => setVersions({ latest: VERSION, versions: {} }));
+  }, []);
+  if (error) return <p style={s.error}>{error}</p>;
+  if (!data) return <p style={s.small}>Loading…</p>;
+  const totalUnlooked = data.projects.reduce((n, p) => n + p.unlooked, 0);
+  const rows = unlookedOnly ? data.projects.filter((p) => p.unlooked > 0) : data.projects;
+  const unlooked = data.projects
+    .flatMap((p) => p.unlookedReports.map((r) => ({ ...r, project: p })))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const href = (id, report) => `?p=${encodeURIComponent(id)}${report ? `&report=${encodeURIComponent(report)}` : ''}`;
+  const go = (e, id, report) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    open(id, report);
+  };
+  return (
+    <section style={{ ...s.card, display: 'block' }}>
+      <div style={{ ...s.row, justifyContent: 'space-between', marginBottom: 8 }}>
+        <h2 style={{ margin: 0, fontSize: 18 }}>All projects</h2>
+        <div style={s.pills} role="tablist">
+          <button type="button" role="tab" aria-selected={!unlookedOnly} style={{ ...s.pill, ...(!unlookedOnly ? s.pillOn : {}) }} onClick={() => setUnlookedOnly(false)}>
+            All
+          </button>
+          <button type="button" role="tab" aria-selected={unlookedOnly} style={{ ...s.pill, ...(unlookedOnly ? s.pillOn : {}) }} onClick={() => setUnlookedOnly(true)}>
+            Nobody has looked ({totalUnlooked})
+          </button>
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={s.table}>
+          <thead>
+            <tr>
+              <th style={s.th}>Project</th>
+              <th style={{ ...s.th, ...s.num }}>Open</th>
+              <th style={{ ...s.th, ...s.num }}>Claimed</th>
+              <th style={{ ...s.th, ...s.num }}>In review</th>
+              <th style={s.th}>Oldest waiting</th>
+              <th style={{ ...s.th, ...s.num }} title="Agent claims past their lease">
+                Stuck
+              </th>
+              <th style={{ ...s.th, ...s.num }} title="Open, never claimed, assigned or noted">
+                Nobody looked
+              </th>
+              <th style={s.th}>Version</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p) => (
+              <tr key={p.id}>
+                <td style={s.td}>
+                  <a href={href(p.id)} onClick={(e) => go(e, p.id)} style={{ color: 'inherit' }}>
+                    {p.name}
+                  </a>
+                </td>
+                <td style={{ ...s.td, ...s.num }}>{p.open}</td>
+                <td style={{ ...s.td, ...s.num }}>{p.claimed}</td>
+                <td style={{ ...s.td, ...s.num }}>{p.inReview}</td>
+                <td style={s.td}>{p.oldestOpenAt ? <span style={s.badge}>waiting {ago(p.oldestOpenAt)}</span> : <span style={s.small}>—</span>}</td>
+                <td style={{ ...s.td, ...s.num, ...(p.stuck ? { color: '#B91C1C' } : {}) }}>{p.stuck}</td>
+                <td style={{ ...s.td, ...s.num }}>{p.unlooked}</td>
+                <td style={s.td}>
+                  <VersionCell project={p} versions={versions} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rows.length === 0 && <p style={{ ...s.small, marginTop: 8 }}>Every open report has been looked at.</p>}
+      {unlookedOnly && unlooked.length > 0 && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: '12px 0 0', display: 'grid', gap: 6 }}>
+          {unlooked.map((r) => (
+            <li key={r.id} style={{ ...s.row, flexWrap: 'nowrap' }}>
+              <span style={s.badge}>waiting {ago(r.createdAt)}</span>
+              <span style={s.small}>{r.project.name}</span>
+              <a href={href(r.project.id, r.id)} onClick={(e) => go(e, r.project.id, r.id)} style={{ color: 'inherit', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.headline}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function App() {
   const [me, setMe] = useState(undefined);
   const [current, setCurrent] = useState(() => new URLSearchParams(window.location.search).get('p'));
@@ -764,24 +891,31 @@ function App() {
   useEffect(() => {
     void load();
   }, [load]);
-  const pick = (id) => {
+  // 'all' is the All projects view; a report id opens that report in the project's CueLog.
+  const pick = (id, report) => {
     setCurrent(id);
     setCreating(false);
     const url = new URL(window.location.href);
-    url.searchParams.set('p', id);
+    for (const k of ['p', 'report', 'tab']) url.searchParams.delete(k);
+    if (id !== 'all') url.searchParams.set('p', id);
+    if (report) url.searchParams.set('report', report);
     window.history.replaceState(null, '', url);
   };
 
   if (me === undefined) return <p style={s.small}>Loading…</p>;
   if (me === null) return <Auth onIn={load} />;
-  const project = me.projects.find((p) => p.id === current) ?? me.projects[0];
+  // With two or more projects, the landing view is All projects; with one, its CueLog as before.
+  const many = me.projects.length >= 2;
+  const showAll = many && (current === 'all' || !me.projects.some((p) => p.id === current));
+  const project = showAll ? null : me.projects.find((p) => p.id === current) ?? me.projects[0];
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <div style={{ ...s.row, justifyContent: 'space-between' }}>
         <div style={s.row}>
           {me.projects.length > 0 && (
-            <select style={s.input} aria-label="Project" value={project?.id} onChange={(e) => pick(e.target.value)}>
+            <select style={s.input} aria-label="Project" value={showAll ? 'all' : project?.id} onChange={(e) => pick(e.target.value)}>
+              {many && <option value="all">All projects</option>}
               {me.projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -797,13 +931,15 @@ function App() {
           <Button onClick={() => api('/auth/sign-out', {}).then(() => setMe(null))}>Sign out</Button>
         </div>
       </div>
-      {creating || (!project && me.canCreate) ? (
+      {creating || (!project && !showAll && me.canCreate) ? (
         <NewProject
           onMade={async (id) => {
             await load();
             pick(id);
           }}
         />
+      ) : showAll ? (
+        <AllProjects open={pick} />
       ) : project ? (
         <Project key={project.id} id={project.id} me={me} onProjects={load} />
       ) : (
