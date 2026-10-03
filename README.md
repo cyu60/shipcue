@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-177%20passing-2E5BFF?style=flat-square" alt="177 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-230%20passing-2E5BFF?style=flat-square" alt="230 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -141,7 +141,9 @@ claude mcp add shipcue \
   -- npx shipcue-mcp
 ```
 
-Tools: `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`.
+Tools: `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`, `submit_for_review`, `heartbeat_report`, `list_my_reports`.
+
+**One token per agent.** Pass `agents: async (token) => ({ id, name, pull?, types?, leaseSeconds? }) | null` to the handler and each agent claims under its own name, can only release or close what it holds, and (with `pull: false`) only takes what someone assigned to it. `leaseSeconds` gives agent claims a lease: an agent that stops calling `heartbeat_report` loses the report back to the queue. `submit_for_review` puts the report in review with the PR link, with no lease, until it is closed.
 
 `claim_next_report` hands back a prompt like this:
 
@@ -177,7 +179,13 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 | `POST` | `/reports/next/claim` | agent |
 | `POST` | `/reports/:id/claim` | agent |
 | `POST` | `/reports/:id/release` | agent |
-| `POST` | `/reports/:id/close` | agent, `{ status: "fixed" \| "wontfix", resolution }` |
+| `POST` | `/reports/:id/close` | agent, `{ status: "fixed" \| "wontfix", resolution, prUrl? }` |
+| `POST` | `/reports/:id/heartbeat` | agent: renew its lease |
+| `POST` | `/reports/:id/review` | agent, `{ prUrl }`: a PR is up, the report is in review |
+| `GET` | `/reports/:id/events` | agent: the report's history |
+| `GET` | `/reports?mine=1` | agent: what it holds or has queued |
+| `GET` | `/team/me`, `/team/reports`, `/team/reports/:id` | signed-in members, with the `team` option |
+| `POST` | `/team/reports/:id/{claim,assign,release,close,reopen,review,priority}` | members (not viewers) |
 | `GET` | `/board` | anyone, only with `board` on: the queue and the changelog |
 | `GET` | `/board/version` | anyone, only with `board` on: a short string that changes when any report does |
 | `GET` | `/capabilities` | the button: what this handler takes (video, files, limits) |
@@ -185,6 +193,12 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 ## Queue and changelog pages
 
 Switch on `board` in the handler (`true`, or `(req) => boolean` to limit who sees it), then render `<ShipcueBoard endpoint="/api/shipcue" />` (or `<ShipcueQueue />` / `<ShipcueChangelog />`) from `shipcue/react`. It lists open and in-progress reports, most urgent first, and fixed ones with their resolution, latest first. No reporter, page, diagnostics or attachments ever leave the server. Close reports with a one-line, user-facing `resolution` and the changelog writes itself. With both lists it shows Open / Fixed / All / Changelog pills with counts, and a small View control lets each viewer switch to tabs or a compact list (`tabStyle`, `layout`, `viewPicker`) (`initialView` sets where it starts). Add `boardScreenshots: true` to show each report's screenshots too: off by default, since screenshots can show private things. The board is live: it checks a tiny `/board/version` every 5 seconds while the page is in view and re-reads as soon as a report is filed or changes (`liveMs`, 0 turns it off).
+
+## The CueLog table
+
+For the team: every report in full, claimed and worked by people and agents together. Give the handler a `team` option, `{ getMember: (req) => ({ id, name, role: 'owner' | 'member' | 'viewer' }) | null, claimants: (req) => [{ kind: 'person' | 'agent', id, name }] }`, and render `<CueLogTable endpoint="/api/shipcue" />` from `shipcue/react` on a signed-in page. It has Open / Mine / In review / Fixed / All pills, filters (type, priority, who has it, search), sorting (queue order, longest waiting, recently updated, claimant), a List and a Board view (drag between columns), inline priority and assignee, bulk actions, and a side panel with screenshots, the app snapshot, the agent prompt and the report's history. Unowned work says "Nobody yet" in amber; an agent's lease and a stale claim show as badges. Assigning to an agent queues the report for it: its `claim_next_report` returns that report first. Every change is kept in `shipcue_report_events`.
+
+Or use [shipcue Cloud](https://shipcue.ibuildathing.com/cloud/): the same table, hosted, with projects, invites and agent tokens.
 
 ## Chrome extension
 
@@ -235,6 +249,7 @@ pnpm build
 
 ## Changelog
 
+- **0.13.0**: the CueLog's claim model. A claim names a person or an agent (`claimantKind`, `claimantId`), agents can have their own tokens (`agents`), agent claims can have a lease (`leaseSeconds`, `heartbeat`), a PR puts a report `in_review`, and every change goes to `shipcue_report_events`. New `team` API and `CueLogTable` component; new MCP tools `submit_for_review`, `heartbeat_report`, `list_my_reports`. **Upgrading:** run the "Upgrading from 0.12" lines at the end of `sql/schema.sql` before deploying (new columns, the `in_review` status and the events table). shipcue Cloud's tables are in `sql/cloud.sql`.
 - **0.12.0**: building blocks for a hosted queue (shipcue Cloud): `postgresStore(db, table, { project })` keeps every read and write to one project in a shared table (`sql/cloud.sql` adds `project_id`), and the handler's `cors` option takes reports from listed origins. Both are opt-in; self-hosted apps don't change.
 - **0.11.0**: shipcue's mark is now a builder's hard hat (with its headlamp) on the button, the site and the extension; `icon="ship"` keeps the sailboat, `launcherIcon` takes your own. Dictate: a small mic beside the text box (⌃M on a Mac, Alt+Shift+M elsewhere, even with the panel closed) speaks into the report with the browser's own speech recognition; hidden where the browser has none.
 - **Extension 0.1.1**: the hard-hat icon.

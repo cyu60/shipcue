@@ -45,3 +45,32 @@ ALTER TABLE shipcue_reports ADD CONSTRAINT shipcue_reports_type_check CHECK (typ
 CREATE INDEX IF NOT EXISTS shipcue_reports_queue
   ON shipcue_reports (status, priority_rank DESC, created_at)
   WHERE NOT is_deleted;
+
+-- Upgrading from 0.12: the CueLog's claim model. A claim names a person or an agent,
+-- an agent's claim can run out (lease), a PR puts the report in review, and every
+-- change is kept in shipcue_report_events.
+ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS claimant_kind text CHECK (claimant_kind IN ('person', 'agent'));
+ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS claimant_id text CHECK (length(claimant_id) <= 200);
+ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
+ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS pr_url text CHECK (length(pr_url) <= 500);
+ALTER TABLE shipcue_reports DROP CONSTRAINT IF EXISTS shipcue_reports_status_check;
+ALTER TABLE shipcue_reports ADD CONSTRAINT shipcue_reports_status_check CHECK (status IN ('open', 'claimed', 'in_review', 'fixed', 'wontfix'));
+
+CREATE INDEX IF NOT EXISTS shipcue_reports_claimant
+  ON shipcue_reports (claimant_id, status) WHERE NOT is_deleted AND claimant_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS shipcue_reports_leases
+  ON shipcue_reports (lease_expires_at) WHERE status = 'claimed' AND lease_expires_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS shipcue_report_events (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  report_id   uuid NOT NULL,
+  -- The Cloud project, when the table serves many (see cloud.sql); null for one app.
+  project_id  uuid,
+  action      text NOT NULL CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority')),
+  actor_kind  text CHECK (actor_kind IN ('person', 'agent')),
+  actor_id    text,
+  actor_name  text,
+  detail      jsonb NOT NULL DEFAULT '{}'::jsonb,
+  at          timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS shipcue_report_events_report ON shipcue_report_events (report_id, at);

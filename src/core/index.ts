@@ -7,8 +7,37 @@ export type ReportType = (typeof REPORT_TYPES)[number];
 export const PRIORITIES = ['low', 'medium', 'high', 'blocking'] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
-export const STATUSES = ['open', 'claimed', 'fixed', 'wontfix'] as const;
+export const STATUSES = ['open', 'claimed', 'in_review', 'fixed', 'wontfix'] as const;
 export type Status = (typeof STATUSES)[number];
+
+/** Who holds a report: a person on the team, or a coding agent with its own name. */
+export type ClaimantKind = 'person' | 'agent';
+export interface Claimant {
+  kind: ClaimantKind;
+  /** Stable id: a member's email or user id, or an agent's id. */
+  id: string;
+  /** What the CueLog shows, e.g. "Ada" or "claude-code". */
+  name: string;
+}
+
+/** A plain name, as agents with the shared token send, is an agent named that. */
+export function toClaimant(who: string | Claimant): Claimant {
+  return typeof who === 'string' ? { kind: 'agent', id: who, name: who } : who;
+}
+
+export const EVENT_ACTIONS = ['claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority'] as const;
+export type ReportEventAction = (typeof EVENT_ACTIONS)[number];
+
+/** One change to a report, for its history in the CueLog. */
+export interface ReportEvent {
+  id: string;
+  reportId: string;
+  action: ReportEventAction;
+  /** Who did it; null when nobody is known (a shared-token agent releasing, say). */
+  actor: Claimant | null;
+  detail: Record<string, unknown>;
+  at: string;
+}
 
 export const TYPE_LABEL: Record<ReportType, string> = { bug: 'Bug', feature: 'Feature request', task: 'Agent task' };
 const TITLE_PREFIX: Record<ReportType, string> = { bug: 'Bug', feature: 'Feature', task: 'Task' };
@@ -139,8 +168,16 @@ export interface Report extends ReportInput {
   reporter: string | null;
   status: Status;
   createdAt: string;
+  /** The holder's name, kept for boards and agents that read only this. */
   claimedBy: string | null;
   claimedAt: string | null;
+  /** Person or agent; with claimantId, who holds it (or who it is queued for, while open). */
+  claimantKind?: ClaimantKind | null;
+  claimantId?: string | null;
+  /** When an agent's claim runs out unless it checks in; null for people and for no lease. */
+  leaseExpiresAt?: string | null;
+  /** The pull request for the fix, once there is one. */
+  prUrl?: string | null;
   /** What the fixer said when closing it, e.g. a PR link. */
   resolution: string | null;
   /** A screen recording or video of the problem, if one was attached. */

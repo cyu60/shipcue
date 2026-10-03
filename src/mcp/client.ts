@@ -1,4 +1,4 @@
-import type { Report, Status } from '../core';
+import type { Report, ReportEvent, Status } from '../core';
 
 export interface AgentClientOptions {
   /** Where createShipcueHandler is mounted, e.g. https://app.example.com/api/shipcue */
@@ -38,6 +38,13 @@ export function createAgentClient(opts: AgentClientOptions) {
       const q = status ? `?status=${encodeURIComponent(status)}` : '';
       return (await call<{ reports: Report[] }>(q))!.reports;
     },
+    /** What this agent holds or has queued for it. */
+    async mine(): Promise<Report[]> {
+      return (await call<{ reports: Report[] }>(`?mine=1&agent=${encodeURIComponent(agent)}`))!.reports;
+    },
+    async events(id: string): Promise<ReportEvent[]> {
+      return (await call<{ events: ReportEvent[] }>(`/${encodeURIComponent(id)}/events`))!.events;
+    },
     async get(id: string): Promise<Claimed> {
       return (await call<Claimed>(`/${encodeURIComponent(id)}`))!;
     },
@@ -48,8 +55,16 @@ export function createAgentClient(opts: AgentClientOptions) {
     async release(id: string): Promise<Report> {
       return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/release`))!.report;
     },
-    async close(id: string, status: 'fixed' | 'wontfix', resolution?: string): Promise<Report> {
-      return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/close`, { status, resolution }))!.report;
+    async close(id: string, status: 'fixed' | 'wontfix', resolution?: string, prUrl?: string): Promise<Report> {
+      return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/close`, { status, resolution, prUrl }))!.report;
+    },
+    /** Renews this agent's lease on a report it holds. */
+    async heartbeat(id: string): Promise<Report> {
+      return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/heartbeat`))!.report;
+    },
+    /** A PR is up: the report goes to in review. */
+    async review(id: string, prUrl: string): Promise<Report> {
+      return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/review`, { prUrl }))!.report;
     },
   };
 }

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { BLOCKED_FILE_TYPES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateReport, videoExtension, videoType, type Board, type Capabilities, type ShipcueConfig, type Report } from '../core';
+import { BLOCKED_FILE_TYPES, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateReport, videoExtension, videoType, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 
@@ -29,8 +29,31 @@ export interface HandlerOptions {
   saveVideo?: (file: File, key: string) => Promise<string>;
   /** Runs after a report is saved: email, Slack, a task board. A failure here never fails the report. */
   onReport?: (report: Report) => Promise<void>;
-  /** Bearer token for the agent API. Leave unset to switch the agent API off. */
+  /** Bearer token for the agent API, shared by every agent. Leave unset (and agents unset) to switch the agent API off. */
   agentToken?: string;
+  /**
+   * Each agent with its own token: return who the token belongs to, or null. Its claims carry
+   * its id and name (not whatever it sends), and it can only release or close what it holds.
+   * Works alongside agentToken.
+   */
+  agents?: (token: string, req: Request) => Promise<AgentIdentity | null>;
+  /**
+   * Seconds an agent's claim lasts unless it checks in (heartbeat, or any call on the report);
+   * an expired claim goes back to the queue. Leave unset for claims that never run out. An
+   * agent's own leaseSeconds wins.
+   */
+  leaseSeconds?: number;
+  /**
+   * The team API behind the CueLog table: GET/POST {base}/team/... for signed-in members to
+   * see every report in full and claim, assign, release, close, reopen and reprioritise.
+   * Viewers can only read.
+   */
+  team?: {
+    /** The signed-in member from the request's session, or null. */
+    getMember: (req: Request) => Promise<TeamMember | null>;
+    /** The people and agents a report can be assigned to. */
+    claimants?: (req: Request) => Promise<Claimant[]>;
+  };
   /**
    * The public board: GET {base}/board returns the queue (open and claimed) and the
    * changelog (fixed, with each fix's resolution), for <ShipcueBoard />. Off by default.
@@ -69,6 +92,24 @@ export interface HandlerOptions {
    * like shipcue Cloud; off by default, so a self-hosted handler answers its own site only.
    */
   cors?: string[] | ((origin: string, req: Request) => boolean | Promise<boolean>);
+}
+
+/** Who an agent token belongs to (see HandlerOptions.agents). */
+export interface AgentIdentity {
+  id: string;
+  name: string;
+  /** Take unassigned open reports too (pull mode). True by default. */
+  pull?: boolean;
+  /** Only these report types; all when left out. */
+  types?: ReportType[];
+  leaseSeconds?: number;
+}
+
+export interface TeamMember {
+  /** Stable id, e.g. an email: claims are stored under it. */
+  id: string;
+  name: string;
+  role: 'owner' | 'member' | 'viewer';
 }
 
 const json = (body: unknown, status = 200) =>
@@ -111,7 +152,12 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
  *   POST {base}/reports/next/claim      agent: take the most urgent open report
  *   POST {base}/reports/:id/claim       agent: take a specific report
  *   POST {base}/reports/:id/release     agent: give it back
- *   POST {base}/reports/:id/close       agent: { status: fixed|wontfix, resolution }
+ *   POST {base}/reports/:id/close       agent: { status: fixed|wontfix, resolution, prUrl? }
+ *   POST {base}/reports/:id/heartbeat   agent: renew its lease
+ *   POST {base}/reports/:id/review      agent: { prUrl }: a PR is up, the report is in review
+ *   GET  {base}/reports/:id/events      agent: the report's history
+ *   GET  {base}/reports?mine=1          agent: what it holds or has queued
+ *   GET|POST {base}/team/...            the CueLog table for signed-in members (see the team option)
  *
  * In Next.js: app/api/shipcue/[...path]/route.ts → export { handler as GET, handler as POST }.
  */
@@ -244,48 +290,200 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
 
   const withPrompt = (r: Report) => ({ report: r, prompt: toAgentPrompt(r, config) });
 
+  /** Releases claims whose lease ran out, and tells the broadcasters. */
+  async function expireLeases() {
+    if (!store.expire) return;
+    for (const r of await store.expire()) await emit('report.released', r);
+  }
+
+  const isPrUrl = (v: unknown): v is string => typeof v === 'string' && v.length <= 500 && /^https?:\/\/[^\s]+$/i.test(v);
+
+  /** 409 naming the holder when there is one, else 404. */
+  async function lost(id: string, verb = 'Someone else has it'): Promise<Response> {
+    const r = await store.get(id);
+    if (!r) return fail('No such report', 404);
+    return fail(r.claimedBy ? `${r.claimedBy} has it now.` : verb, 409);
+  }
+
   async function agentApi(req: Request, parts: string[]): Promise<Response> {
-    if (!opts.agentToken) return fail('Not found', 404);
+    if (!opts.agentToken && !opts.agents) return fail('Not found', 404);
     const auth = req.headers.get('authorization') ?? '';
-    if (!auth.startsWith('Bearer ') || !sameToken(auth.slice(7), opts.agentToken)) return fail('Unauthorized', 401);
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    const identity = token && opts.agents ? await opts.agents(token, req) : null;
+    if (!identity && !(token && opts.agentToken && sameToken(token, opts.agentToken))) return fail('Unauthorized', 401);
 
     const [id, action] = parts;
+    const body = req.method === 'POST' ? await readJson(req) : {};
+    // A shared-token agent says who it is; an agent with its own token is who its token says.
+    const said = String(body.agent ?? new URL(req.url).searchParams.get('agent') ?? 'agent').slice(0, 100);
+    const me: Claimant = identity ? { kind: 'agent', id: identity.id, name: identity.name } : { kind: 'agent', id: said, name: said };
+    const holder = identity ? identity.id : undefined;
+    const by = identity ? me : null;
+    const leaseSeconds = identity?.leaseSeconds ?? opts.leaseSeconds;
+
     if (req.method === 'GET' && !id) {
-      const status = new URL(req.url).searchParams.get('status');
-      const allowed = ['open', 'claimed', 'fixed', 'wontfix'] as const;
-      const filter = allowed.find((s) => s === status);
-      return json({ reports: await store.list(filter ? { status: filter } : {}) });
+      await expireLeases();
+      const params = new URL(req.url).searchParams;
+      const filter = (['open', 'claimed', 'in_review', 'fixed', 'wontfix'] as const).find((s) => s === params.get('status'));
+      const mine = params.get('mine') === '1' ? me.id : undefined;
+      return json({ reports: await store.list({ ...(filter ? { status: filter } : {}), ...(mine ? { claimant: mine } : {}) }) });
     }
     if (req.method === 'GET' && id && !action) {
       const r = await store.get(id);
       return r ? json(withPrompt(r)) : fail('No such report', 404);
     }
+    if (req.method === 'GET' && id && action === 'events') {
+      if (!(await store.get(id))) return fail('No such report', 404);
+      return json({ events: store.events ? await store.events(id) : [] });
+    }
     if (req.method !== 'POST' || !id || !action) return fail('Not found', 404);
 
-    const body = await readJson(req);
-    const agentName = String(body.agent ?? 'agent').slice(0, 100);
     if (id === 'next' && action === 'claim') {
-      const r = await store.claimNext(agentName);
+      await expireLeases();
+      const r = await store.claimNext(me, { leaseSeconds, pull: identity?.pull, types: identity?.types });
       await emit('report.claimed', r);
       return r ? json(withPrompt(r)) : new Response(null, { status: 204 });
     }
     if (action === 'claim') {
-      const r = await store.claim(id, agentName);
+      await expireLeases();
+      if (identity?.types) {
+        const r = await store.get(id);
+        if (r && !identity.types.includes(r.type)) return fail(`This agent does not take ${r.type} reports.`, 403);
+      }
+      const r = await store.claim(id, me, { leaseSeconds });
       await emit('report.claimed', r);
-      if (r) return json(withPrompt(r));
-      return (await store.get(id)) ? fail('Someone else has it', 409) : fail('No such report', 404);
+      return r ? json(withPrompt(r)) : lost(id);
     }
     if (action === 'release') {
-      const r = await store.release(id);
+      const r = await store.release(id, { holder, by });
       await emit('report.released', r);
-      return r ? json({ report: r }) : fail('Not claimed', 409);
+      return r ? json({ report: r }) : identity ? lost(id, 'Not claimed') : fail('Not claimed', 409);
+    }
+    if (action === 'heartbeat') {
+      if (!store.heartbeat || leaseSeconds === undefined) {
+        const r = await store.get(id);
+        return r ? json({ report: r }) : fail('No such report', 404);
+      }
+      const r = await store.heartbeat(id, me.id, leaseSeconds);
+      return r ? json({ report: r }) : lost(id, 'Not claimed');
+    }
+    if (action === 'review') {
+      if (!store.review) return fail('Not found', 404);
+      if (!isPrUrl(body.prUrl)) return fail('prUrl must be an http(s) link.');
+      const r = await store.review(id, body.prUrl, { holder, by });
+      await emit('report.review', r);
+      return r ? json({ report: r }) : lost(id);
     }
     if (action === 'close') {
       if (body.status !== 'fixed' && body.status !== 'wontfix') return fail('status must be fixed or wontfix');
+      if (body.prUrl != null && !isPrUrl(body.prUrl)) return fail('prUrl must be an http(s) link.');
       const resolution = body.resolution == null ? null : String(body.resolution).slice(0, 2000);
-      const r = await store.close(id, body.status, resolution);
+      const r = await store.close(id, body.status, resolution, { holder, by, prUrl: (body.prUrl as string | undefined) ?? null });
       await emit('report.closed', r);
-      return r ? json({ report: r }) : fail('No such report', 404);
+      return r ? json({ report: r }) : identity ? lost(id) : fail('No such report', 404);
+    }
+    return fail('Not found', 404);
+  }
+
+  // Data-URL attachments become links on the team API, so the list stays small.
+  const teamShots = (r: Report) => r.screenshots.map((src, n) => (src.startsWith('data:') ? `${base}/team/screenshot/${r.id}/${n}` : src));
+  const forTeam = (r: Report) => ({ ...r, screenshots: teamShots(r) });
+
+  async function teamApi(req: Request, parts: string[]): Promise<Response> {
+    if (!opts.team) return fail('Not found', 404);
+    const member = await opts.team.getMember(req);
+    if (!member) return fail('Sign in to see the CueLog.', 401);
+    const me: Claimant = { kind: 'person', id: member.id, name: member.name };
+    const claimants = () => (opts.team!.claimants ? opts.team!.claimants(req) : Promise.resolve([me]));
+    const [section, id, action] = parts;
+
+    if (req.method === 'GET' && section === 'me') return json({ member, claimants: await claimants() });
+    if (req.method === 'GET' && section === 'version') {
+      const version = store.version ? await store.version() : String((await store.list()).length);
+      return new Response(JSON.stringify({ version }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
+    if (req.method === 'GET' && section === 'screenshot' && id && action && /^\d{1,2}$/.test(action)) {
+      const r = await store.get(id);
+      const m = /^data:([^;,]+)(?:;[^;,]+)*;base64,(.+)$/.exec(r?.screenshots[Number(action)] ?? '');
+      if (!m) return fail('Not found', 404);
+      const type = m[1] ?? 'application/octet-stream';
+      const image = /^image\/(png|jpeg|webp|gif)$/.test(type);
+      return new Response(Buffer.from(m[2] ?? '', 'base64'), {
+        headers: {
+          'content-type': image ? type : 'application/octet-stream',
+          ...(image ? {} : { 'content-disposition': 'attachment' }),
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox",
+          'cache-control': 'private, max-age=3600',
+        },
+      });
+    }
+    if (section !== 'reports') return fail('Not found', 404);
+    if (req.method === 'GET' && !id) {
+      await expireLeases();
+      const status = (['open', 'claimed', 'in_review', 'fixed', 'wontfix'] as const).find((s) => s === new URL(req.url).searchParams.get('status'));
+      return json({ reports: (await store.list(status ? { status } : {})).map(forTeam) });
+    }
+    if (req.method === 'GET' && id && !action) {
+      const r = await store.get(id);
+      if (!r) return fail('No such report', 404);
+      return json({ report: forTeam(r), prompt: toAgentPrompt(r, config), events: store.events ? await store.events(id) : [] });
+    }
+    if (req.method !== 'POST' || !id || !action) return fail('Not found', 404);
+    if (member.role === 'viewer') return fail('Viewers can look but not change reports.', 403);
+    const body = await readJson(req);
+
+    switch (action) {
+      case 'claim': {
+        const r = await store.claim(id, me);
+        await emit('report.claimed', r);
+        return r ? json({ report: forTeam(r) }) : lost(id);
+      }
+      case 'assign': {
+        if (!store.assign) return fail('Not found', 404);
+        let to: Claimant | null = null;
+        if (body.to != null) {
+          const want = body.to as { kind?: unknown; id?: unknown };
+          to = (await claimants()).find((c) => c.kind === want.kind && c.id === want.id) ?? null;
+          if (!to) return fail('Pick someone from the list.');
+        }
+        const r = await store.assign(id, to, me);
+        await emit('report.assigned', r);
+        return r ? json({ report: forTeam(r) }) : fail('Only open or claimed reports can be assigned.', 409);
+      }
+      case 'release': {
+        const r = await store.release(id, { by: me });
+        await emit('report.released', r);
+        return r ? json({ report: forTeam(r) }) : fail('Not claimed', 409);
+      }
+      case 'close': {
+        if (body.status !== 'fixed' && body.status !== 'wontfix') return fail('status must be fixed or wontfix');
+        if (body.prUrl != null && !isPrUrl(body.prUrl)) return fail('prUrl must be an http(s) link.');
+        const resolution = body.resolution == null ? null : String(body.resolution).slice(0, 2000);
+        const r = await store.close(id, body.status, resolution, { by: me, prUrl: (body.prUrl as string | undefined) ?? null });
+        await emit('report.closed', r);
+        return r ? json({ report: forTeam(r) }) : fail('No such report', 404);
+      }
+      case 'reopen': {
+        if (!store.reopen) return fail('Not found', 404);
+        const r = await store.reopen(id, me);
+        await emit('report.reopened', r);
+        return r ? json({ report: forTeam(r) }) : fail('Only closed or in-review reports can be reopened.', 409);
+      }
+      case 'review': {
+        if (!store.review) return fail('Not found', 404);
+        if (!isPrUrl(body.prUrl)) return fail('prUrl must be an http(s) link.');
+        const r = await store.review(id, body.prUrl, { by: me });
+        await emit('report.review', r);
+        return r ? json({ report: forTeam(r) }) : fail('Only open or claimed reports can go to review.', 409);
+      }
+      case 'priority': {
+        if (!store.setPriority) return fail('Not found', 404);
+        const priority = PRIORITIES.find((x) => x === body.priority);
+        if (!priority) return fail('Pick a priority.');
+        const r = await store.setPriority(id, priority, me);
+        return r ? json({ report: forTeam(r) }) : fail('No such report', 404);
+      }
     }
     return fail('Not found', 404);
   }
@@ -295,14 +493,15 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
   async function board(req: Request): Promise<Response> {
     const allowed = typeof opts.board === 'function' ? await opts.board(req) : opts.board === true;
     if (!allowed) return fail('Not found', 404);
-    const [open, claimed, fixed] = await Promise.all([
+    const [open, claimed, inReview, fixed] = await Promise.all([
       store.list({ status: 'open' }),
       store.list({ status: 'claimed' }),
+      store.list({ status: 'in_review' }),
       store.list({ status: 'fixed' }),
     ]);
     const item = (r: Report) => toBoardItem(r, opts.boardScreenshots ? boardShots(r) : undefined);
     const result: Board = {
-      queue: [...claimed, ...open].slice(0, BOARD_LIMIT).map(item),
+      queue: [...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item),
       changelog: fixed
         .map(item)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -323,8 +522,8 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     const allowed = typeof opts.board === 'function' ? await opts.board(req) : opts.board === true;
     if (!allowed || !opts.boardScreenshots) return fail('Not found', 404);
     const r = await store.get(id);
-    // Only what the board lists: open, claimed or fixed.
-    if (!r || !['open', 'claimed', 'fixed'].includes(r.status)) return fail('Not found', 404);
+    // Only what the board lists: open, claimed, in review or fixed.
+    if (!r || !['open', 'claimed', 'in_review', 'fixed'].includes(r.status)) return fail('Not found', 404);
     const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/.exec(r.screenshots[n] ?? '');
     if (!m) return fail('Not found', 404);
     return new Response(Buffer.from(m[2] ?? '', 'base64'), {
@@ -396,6 +595,14 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         return await board(req);
       } catch (err) {
         console.error('shipcue: board failed', err);
+        return fail('Something went wrong. Please try again.', 500);
+      }
+    }
+    if (path.startsWith(`${base}/team/`)) {
+      try {
+        return await teamApi(req, path.slice(`${base}/team`.length).split('/').filter(Boolean));
+      } catch (err) {
+        console.error('shipcue: team api failed', err);
         return fail('Something went wrong. Please try again.', 500);
       }
     }

@@ -255,6 +255,8 @@ export { handler as GET, handler as POST };</code></pre>
 import { ShipcueBoard } from 'shipcue/react';
 &lt;ShipcueBoard endpoint="/api/shipcue" /&gt;        // or &lt;ShipcueQueue /&gt;, &lt;ShipcueChangelog /&gt;</code></pre>
 <p>The board lists open and in-progress reports, most urgent first, and every fixed report with the resolution it was closed with, latest first. It never shows who filed a report, the page it came from, diagnostics or attachments. Close reports with a one-line, user-facing resolution and the changelog writes itself. It updates live as reports come in, and each viewer can switch between pills and tabs, cards and a list. See it on <a href="/cuelog/">shipcue's own CueLog</a>.</p>
+<h2>The CueLog table</h2>
+<p>For your team: every report in full, claimed and worked by people and agents together. Give the handler a <code>team</code> option with <code>getMember</code> (who is signed in, and their role: owner, member or viewer) and <code>claimants</code> (the people and agents a report can go to), then render <code>&lt;CueLogTable endpoint="/api/shipcue" /&gt;</code> on a signed-in page. Claim a report, assign it to a teammate, or queue it for an agent: that agent's <code>claim_next_report</code> returns it first. Give each agent its own token with the <code>agents</code> option and a lease with <code>leaseSeconds</code>; an agent that stops sending <code>heartbeat_report</code> loses the report back to the queue, and <code>submit_for_review</code> moves it to In review with the PR link. Run the "Upgrading from 0.12" lines in <code>sql/schema.sql</code> first. Or use <a href="/cloud/">shipcue Cloud</a>, where all of this is hosted.</p>
 
 <h2>6. Broadcast and listen</h2>
 <p>Tell people or agents when a report is filed, claimed, released, closed or gets a video. Each broadcaster gets the events it asks for; one that fails never fails the request.</p>
@@ -300,17 +302,29 @@ GET  /capabilities            no token: what the handler takes (video, files, li
 CLOUD = """
 <div class="prose">
 <h1>Cloud</h1>
-<p class="lede">The same queue without running a database: add the button, get a hosted queue, connect your agents.</p>
-<div class="note">shipcue Cloud is planned, not built yet. Self-hosting is the way to use shipcue today. <a href="/contact/">Tell us you want it</a> and we will build it with you.</div>
-<h2>What it would add</h2>
+<p class="lede">The same queue without running a database: add the button, get a hosted queue, and work it in the CueLog with your team and your agents.</p>
+<div class="note">shipcue Cloud is in an invite-only beta, free while it lasts. <a href="/app/">Sign in</a>, or <a href="/contact/">ask to join</a>.</div>
+<h2>What you get</h2>
 <ul>
-  <li>A hosted queue and screenshot storage, so you only add the button</li>
-  <li>A web view of the queue for people who do not live in a terminal</li>
+  <li><strong>A hosted queue.</strong> One project per app, with a key for the button. No table, no handler to run.</li>
+  <li><strong>The CueLog.</strong> One table with every report in full: who filed it, screenshots, context, the app snapshot. Filter, sort, set priority, and see each report's history.</li>
+  <li><strong>People and agents claim from the same table.</strong> Claim a report yourself, assign it to a teammate, or queue it for an agent. Each agent has its own token, so you can see which one holds what.</li>
+  <li><strong>No double work.</strong> Claims are all-or-nothing. An agent's claim runs out if it stops checking in, and an open PR puts the report in review.</li>
+  <li><strong>A team.</strong> Invite people as owners, members (work the queue) or viewers (see it).</li>
+</ul>
+<h2>Set up</h2>
+<ol>
+  <li><a href="/app/">Sign in</a> and create a project.</li>
+  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" /&gt;</code> to your app, and list the sites it runs on.</li>
+  <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
+</ol>
+<h2>What stays the same</h2>
+<p>The button, the API and the MCP tools are the same as the open source package, and the CueLog table is in it too (<code>CueLogTable</code> with the handler's <code>team</code> option). You can move between hosted and self-hosted at any time.</p>
+<h2>Later</h2>
+<ul>
   <li>Sending reports on to GitHub Issues, Linear, Slack and email</li>
   <li>An email to the reporter when their report is fixed</li>
 </ul>
-<h2>What stays the same</h2>
-<p>The button, the API and the MCP tools are the same as the open source package, so you can move between hosted and self-hosted at any time.</p>
 </div>
 """
 
@@ -459,7 +473,11 @@ CONTACT = """
 page("index.html", "shipcue: bug reports your coding agents can fix", "A report button, a queue in your own Postgres, and an MCP server so coding agents can fix what people report.", HOME, "/")
 DOCS = DOCS.replace("{VERSION}", VERSION)
 page("docs/index.html", "Docs · shipcue", "Set up shipcue: the table, the handler, the button and the agent tools.", DOCS, "/docs/")
-page("cloud/index.html", "Cloud · shipcue", "shipcue Cloud: the same queue without running a database. Planned.", CLOUD, "/cloud/")
+page("cloud/index.html", "Cloud · shipcue", "shipcue Cloud: a hosted queue and the CueLog, where your team and your agents claim reports together.", CLOUD, "/cloud/")
+APP = """<div id="shipcue-app"></div>
+<script src="/assets/shipcue-app.js" defer></script>
+"""
+page("app/index.html", "CueLog · shipcue Cloud", "Sign in to shipcue Cloud and work your CueLog.", APP, "/cloud/")
 page("blog/index.html", "Blog · shipcue", "Notes on building shipcue.", BLOG, "/blog/")
 page("blog/agents-should-read-your-bug-reports/index.html", "Your bug report button should feed your agents · shipcue", "Why shipcue treats the bug report inbox as a queue that agents work from.", POST, "/blog/")
 page("use-cases/index.html", "Use cases · shipcue", "Who shipcue is for: hackathon teams running many agents, founders with early users, internal tools, beta tests and more.", USE_CASES, "/use-cases/")
