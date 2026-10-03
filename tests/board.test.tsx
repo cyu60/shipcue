@@ -10,6 +10,7 @@ const item = (id: string, extra: Record<string, unknown> = {}) => ({
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, '', '/'); // the board keeps its tab in ?view=
   vi.restoreAllMocks();
 });
 

@@ -1,4 +1,4 @@
-import { sortQueue, toClaimant, type Claimant, type Priority, type Report, type ReportEvent, type ReportEventAction, type ReportInput, type ReportType, type Status } from '../core';
+import { EDIT_FIELDS, sortQueue, toClaimant, type Claimant, type ReportEdit, type Priority, type Report, type ReportEvent, type ReportEventAction, type ReportInput, type ReportType, type Status } from '../core';
 
 export type NewReport = ReportInput & {
   reporter: string | null;
@@ -82,7 +82,15 @@ export interface ReportStore {
    * agent saying something about it. The report itself only gets a new updatedAt. Null for an unknown id.
    */
   note?(id: string, text: string, by?: Claimant | null): Promise<ReportEvent | null>;
+  /**
+   * Rewrites a filed report's text, type, area or what-changed line, in any status (shipcue
+   * report 5c54da74). The history gets an 'edited' event naming the fields. Null for an unknown id.
+   */
+  edit?(id: string, patch: ReportEdit, by?: Claimant | null): Promise<Report | null>;
 }
+
+/** The fields an edit sets, in a fixed order, for the history. */
+export const editedFields = (patch: ReportEdit) => EDIT_FIELDS.filter((f) => patch[f] !== undefined);
 
 const holds = (r: Report, holder: string | undefined) => holder === undefined || r.claimantId == null || r.claimantId === holder;
 const leaseUntil = (s: number | undefined) => (s === undefined ? null : new Date(Date.now() + s * 1000).toISOString());
@@ -223,6 +231,14 @@ export function memoryStore(): ReportStore {
     async note(id, text, by) {
       if (!update(id, () => true, () => ({}))) return null;
       return { ...record(id, 'note', by, { text }) };
+    },
+    async edit(id, patch, by) {
+      const fields = editedFields(patch);
+      const set: Partial<Report> = {};
+      for (const f of fields) Object.assign(set, { [f]: patch[f] });
+      const r = update(id, () => true, () => set);
+      if (r) record(id, 'edited', by, { fields });
+      return r;
     },
     async countFromClient(clientKey) {
       return [...clients.entries()].filter(([id, k]) => k === clientKey && rows.has(id)).length;

@@ -1,5 +1,5 @@
 import { toClaimant, type Claimant, type ClaimantKind, type Report, type ReportEvent, type ReportEventAction } from '../core';
-import type { ReportStore } from './store';
+import { editedFields, type ReportStore } from './store';
 
 /** Anything with a pg-style query: node-postgres Pool/Client, PGlite, Neon, Vercel Postgres. */
 export interface Queryable {
@@ -315,6 +315,14 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
         params,
       );
       return rows[0] ? toEvent(rows[0] as EventRow) : null;
+    },
+    async edit(id, patch, by) {
+      if (!isUuid(id)) return null;
+      const fields = editedFields(patch);
+      const params: unknown[] = [];
+      if (fields.length === 0) return one(`SELECT ${COLUMNS} FROM ${table} WHERE id = ${p(params, id)} AND NOT is_deleted${scope(params)}`, params);
+      const set = fields.map((f) => `${f} = ${p(params, patch[f])}`).join(', ');
+      return mutate(params, set, `id = ${p(params, id)}`, { action: 'edited', actor: by, detail: { fields } });
     },
     async events(id) {
       if (!isUuid(id)) return [];

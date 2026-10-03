@@ -6,7 +6,10 @@ import { createShipcueHandler, memoryStore, type TeamMember } from '../src/serve
 import type { Claimant, Report } from '../src/core';
 import { sample } from './store.contract';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.history.replaceState(null, '', '/'); // the table keeps ?tab= and ?report= in the URL
+});
 
 const ADA: TeamMember = { id: 'ada@example.com', name: 'Ada', role: 'member' };
 const CLAIMANTS: Claimant[] = [

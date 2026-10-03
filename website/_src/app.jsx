@@ -654,7 +654,7 @@ function Project({ id, me, onProjects }) {
       </div>
       {tab === 'cuelog' && (
         <div style={{ ...s.card, display: 'block' }}>
-          <CueLogTable endpoint={`${API}/p/${detail.project.publicKey}`} staleDays={detail.project.staleDays} areas={detail.project.areas} />
+          <CueLogTable syncUrl hotkeys endpoint={`${API}/p/${detail.project.publicKey}`} staleDays={detail.project.staleDays} areas={detail.project.areas} />
         </div>
       )}
       {tab === 'setup' && <Setup detail={detail} reload={reload} onProjects={onProjects} />}

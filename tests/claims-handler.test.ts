@@ -109,7 +109,11 @@ describe('the team API (the CueLog)', () => {
     expect(me.member.name).toBe('Ada');
     expect(me.claimants).toHaveLength(3);
     const { reports } = await (await handle(call('GET', '/team/reports', member('ada')))).json();
-    expect(reports[0]).toMatchObject({ reporter: 'ada@example.com', diagnostics: { a: 1 } });
+    expect(reports[0]).toMatchObject({ reporter: 'ada@example.com' });
+    // The list leaves diagnostics out (they can be large); the report's own read has them (shipcue report 5c54da74).
+    expect(reports[0]).not.toHaveProperty('diagnostics');
+    const one = await (await handle(call('GET', `/team/reports/${reports[0].id}`, member('ada')))).json();
+    expect(one.report.diagnostics).toEqual({ a: 1 });
     // Data-URL screenshots become links the member can open.
     expect(reports[0].screenshots[0]).toMatch(/\/api\/shipcue\/team\/screenshot\/.+\/0$/);
     const shot = await handle(call('GET', new URL(reports[0].screenshots[0], BASE).pathname.replace('/api/shipcue', ''), member('ada')));

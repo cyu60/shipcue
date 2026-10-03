@@ -3,6 +3,7 @@ import { shotAlt, type Board, type BoardItem, type ReportType } from '../core';
 import { fill, resolveText, type ShipcueText } from './text';
 import { useLightbox } from './Lightbox';
 import { PinIcon } from './PinIcon';
+import { fixLabel } from './fixLink';
 import { starredFirst, useStars } from './stars';
 
 type View = 'open' | 'fixed' | 'all' | 'changelog' | 'starred';
@@ -35,6 +36,10 @@ export interface ShipcueBoardProps {
   layout?: BoardLayout;
   /** The small View control that lets each viewer pick. On by default. */
   viewPicker?: boolean;
+  /** A search box, and a type picker when the board has more than one type. Off by default. */
+  filters?: boolean;
+  /** Keep the tab in the page's URL (?view=changelog), so it can be linked. Off by default: it writes to your URL. */
+  syncUrl?: boolean;
   /** Your own words for the tabs, empty states and labels; see DEFAULT_TEXT. */
   text?: Partial<ShipcueText>;
   /** Heading color and the small accents. */
@@ -61,6 +66,8 @@ export function ShipcueBoard({
   tabStyle: tabStyleProp = 'pills',
   layout: layoutProp = 'cards',
   viewPicker = true,
+  filters = false,
+  syncUrl = false,
   text: textProp,
   accentColor = '#16203A',
   refreshMs = 60_000,
@@ -73,7 +80,16 @@ export function ShipcueBoard({
   const t = resolveText(textProp);
   const st = useStars();
   const lb = useLightbox();
-  const [view, setView] = useState<View>(initialView === 'queue' ? 'open' : initialView);
+  const startView: View = initialView === 'queue' ? 'open' : initialView;
+  const urlOn = syncUrl && show === 'both';
+  const [view, setViewState] = useState<View>(() => (urlOn ? (readView() ?? startView) : startView));
+  // The tab goes in the URL, so /cuelog/?view=changelog can be linked (Habitect's /reports?tab=).
+  const setView = (next: View) => {
+    setViewState(next);
+    if (urlOn) writeView(next === startView ? null : next);
+  };
+  const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<ReportType | ''>('');
   // Each viewer's own pick (shipcue report bf463120), over the app's default.
   const [picked, setPicked] = useState<{ tabStyle?: BoardTabStyle; layout?: BoardLayout }>({});
   useEffect(() => {
@@ -146,6 +162,39 @@ export function ShipcueBoard({
   if (error && !board) return <p className={className} style={{ ...s.muted, ...style }}>{error}</p>;
   if (!board) return <p className={className} style={{ ...s.muted, ...style }}>{t.loading}</p>;
 
+  // Search and type narrow every list, and the counts follow (shipcue report 5c54da74).
+  const types = [...new Set([...board.queue, ...board.changelog].map((r) => r.type))];
+  const q = query.trim().toLowerCase();
+  const keep = (r: BoardItem) =>
+    (!typeFilter || r.type === typeFilter) && (!q || `${r.description} ${r.resolution ?? ''} ${r.area}`.toLowerCase().includes(q));
+  const narrowed = q || typeFilter ? { queue: board.queue.filter(keep), changelog: board.changelog.filter(keep) } : board;
+  return <BoardBody {...{ board: narrowed, types, query, setQuery, typeFilter, setTypeFilter, filters, view, setView, show, tabStyle, layout, viewPicker, pick, t, st, lb, accentColor, className, style }} />;
+}
+
+interface BodyProps {
+  board: Board;
+  types: ReportType[];
+  query: string;
+  setQuery: (q: string) => void;
+  typeFilter: ReportType | '';
+  setTypeFilter: (t: ReportType | '') => void;
+  filters: boolean;
+  view: View;
+  setView: (v: View) => void;
+  show: 'both' | 'queue' | 'changelog';
+  tabStyle: BoardTabStyle;
+  layout: BoardLayout;
+  viewPicker: boolean;
+  pick: (next: { tabStyle?: BoardTabStyle; layout?: BoardLayout }) => void;
+  t: ShipcueText;
+  st: ReturnType<typeof useStars>;
+  lb: ReturnType<typeof useLightbox>;
+  accentColor: string;
+  className?: string;
+  style?: CSSProperties;
+}
+
+function BoardBody({ board, types, query, setQuery, typeFilter, setTypeFilter, filters, view, setView, show, tabStyle, layout, viewPicker, pick, t, st, lb, accentColor, className, style }: BodyProps) {
   // With both lists, pill tabs: Open, Fixed, All, Changelog, with counts
   // (shipcue reports 9fdd0b45, 15720123).
   const TABS: { id: View; label: string; count?: number }[] = [
@@ -171,7 +220,7 @@ export function ShipcueBoard({
   );
   return (
     <div className={className} style={{ ...s.wrap, ...style }}>
-      {(show === 'both' || viewPicker) && (
+      {(show === 'both' || viewPicker || filters) && (
         <div style={tabStyle === 'tabs' ? { ...s.bar, ...s.barTabs } : s.bar}>
       {show === 'both' ? (
         <div role="tablist" aria-label="Reports" style={tabStyle === 'tabs' ? s.underTabs : s.tabs}>
@@ -200,6 +249,21 @@ export function ShipcueBoard({
         </div>
       ) : (
         <span />
+      )}
+      {filters && (
+        <span style={s.filters}>
+          <input type="search" aria-label={t.search} placeholder={t.search} value={query} onChange={(e) => setQuery(e.target.value)} style={s.search} />
+          {types.length > 1 && (
+            <select aria-label="Type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as ReportType | '')} style={s.search}>
+              <option value="">{t.allTypes}</option>
+              {types.map((k) => (
+                <option key={k} value={k}>
+                  {typeLabel(t, k)}
+                </option>
+              ))}
+            </select>
+          )}
+        </span>
       )}
       {viewPicker && (
         <span style={s.picker} aria-label="View">
@@ -247,11 +311,17 @@ export function ShipcueBoard({
         <section>
           {show !== 'both' && <h2 style={{ ...s.h2, color: accentColor }}>{t.changelog}</h2>}
           <p style={s.muted}>{board.changelog.length === 0 ? t.nothingShipped : t.latestFirst}</p>
-          <ul style={layout === 'list' ? s.listCompact : s.list}>
-            {starredFirst(board.changelog, st.stars).map((r) => (
-              <Item key={r.id} r={r} t={t} accent={accentColor} changelog compact={layout === 'list'} {...itemProps(r)} />
-            ))}
-          </ul>
+          {/* Pinned first, then a heading per day it shipped, as Habitect's changelog groups them. */}
+          {byDay(board.changelog, st.stars, t.pinnedHeading).map((g) => (
+            <div key={g.label} style={s.day}>
+              <h3 style={s.dayHead}>{g.label}</h3>
+              <ul style={layout === 'list' ? s.listCompact : s.list}>
+                {g.items.map((r) => (
+                  <Item key={r.id} r={r} t={t} accent={accentColor} changelog compact={layout === 'list'} {...itemProps(r)} />
+                ))}
+              </ul>
+            </div>
+          ))}
         </section>
       )}
       {lb.box}
@@ -263,6 +333,37 @@ export function ShipcueBoard({
 export const ShipcueQueue = (props: Omit<ShipcueBoardProps, 'show'>) => <ShipcueBoard {...props} show="queue" />;
 /** Just the changelog. */
 export const ShipcueChangelog = (props: Omit<ShipcueBoardProps, 'show'>) => <ShipcueBoard {...props} show="changelog" />;
+
+const VIEWS: readonly View[] = ['open', 'fixed', 'all', 'changelog', 'starred'];
+function readView(): View | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const v = new URL(window.location.href).searchParams.get('view');
+  return VIEWS.find((x) => x === v);
+}
+function writeView(v: View | null) {
+  try {
+    const url = new URL(window.location.href);
+    if (v) url.searchParams.set('view', v);
+    else url.searchParams.delete('view');
+    if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url);
+  } catch {
+    // No URL to update: the tab still switches.
+  }
+}
+
+/** The changelog in groups: pinned ones first, then one per day, latest first. */
+export function byDay<T extends BoardItem>(items: readonly T[], pins: readonly string[], pinnedLabel: string): { label: string; items: T[] }[] {
+  const pinned = items.filter((r) => pins.includes(r.id));
+  const groups: { label: string; items: T[] }[] = pinned.length ? [{ label: pinnedLabel, items: pinned }] : [];
+  for (const r of items) {
+    if (pins.includes(r.id)) continue;
+    const label = day(r.updatedAt);
+    const last = groups[groups.length - 1];
+    if (last && last.label === label && last.label !== pinnedLabel) last.items.push(r);
+    else groups.push({ label, items: [r] });
+  }
+  return groups;
+}
 
 function day(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -309,8 +410,7 @@ function StarButton({ star, label }: { star: ItemStar; label: string }) {
 
 /** "PR #12 ↗" (or "commit ↗"), out to the fix on GitHub. */
 function FixLink({ url, t }: { url: string; t: ShipcueText }) {
-  const m = /\/(pull|issues|commit|compare)\/([\w.]+)/.exec(url);
-  const label = m?.[1] === 'pull' ? `PR #${m[2]}` : m?.[1] === 'issues' ? `#${m[2]}` : m?.[1] === 'commit' ? m[2]!.slice(0, 7) : 'GitHub';
+  const label = fixLabel(url);
   return (
     <a href={url} target="_blank" rel="noopener noreferrer" title={t.seeTheFix} aria-label={`${t.seeTheFix}: ${label}`} style={{ ...s.tag, color: 'inherit', textDecoration: 'none', flex: 'none' }}>
       {label} ↗
@@ -405,6 +505,10 @@ const s: Record<string, CSSProperties> = {
   // borderBottomColor left a grey line under every tab once it had been current (report 2c9034d0).
   underTab: { font: 'inherit', fontSize: '0.9em', padding: '0.4em 0', margin: '0 0 -1px', borderTopWidth: 0, borderLeftWidth: 0, borderRightWidth: 0, borderBottomWidth: 2, borderBottomStyle: 'solid', borderBottomColor: 'transparent', background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },
   underTabOn: { opacity: 1, fontWeight: 600 },
+  filters: { display: 'inline-flex', flexWrap: 'wrap', gap: '0.4em', marginLeft: 'auto' },
+  search: { font: 'inherit', fontSize: '0.78em', padding: '0.15em 0.5em', border: '1px solid rgba(128,128,128,0.3)', borderRadius: 999, background: 'transparent', color: 'inherit', minWidth: 0, maxWidth: '14em' },
+  day: { display: 'grid', gap: '0.4em', marginTop: '0.6em' },
+  dayHead: { margin: 0, fontSize: '0.8em', fontWeight: 600, opacity: 0.6 },
   picker: { fontSize: '0.75em', opacity: 0.7, whiteSpace: 'nowrap' },
   pickBtn: { font: 'inherit', padding: '0 0.3em', border: 0, background: 'none', color: 'inherit', opacity: 0.6, cursor: 'pointer' },
   pickOn: { opacity: 1, fontWeight: 600 },

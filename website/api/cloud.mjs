@@ -128,6 +128,33 @@ function validateReport(raw, config) {
     }
   };
 }
+var MAX_RESOLUTION = 2e3;
+var EDIT_FIELDS = ["description", "type", "area", "resolution"];
+function validateEdit(raw, config) {
+  const edit = {};
+  if (raw.description !== void 0) {
+    const description = String(raw.description ?? "").trim();
+    if (description.length < config.minLength) return { ok: false, error: `Tell us a little more (at least ${config.minLength} characters).` };
+    if (description.length > config.maxLength) return { ok: false, error: `Keep the report under ${config.maxLength.toLocaleString("en-US")} characters.` };
+    edit.description = description;
+  }
+  if (raw.type !== void 0) {
+    if (!includes(REPORT_TYPES, raw.type)) return { ok: false, error: "Pick bug, feature request or agent task." };
+    edit.type = raw.type;
+  }
+  if (raw.area !== void 0) {
+    const area = String(raw.area);
+    if (!config.areas.some((a) => a.value === area)) return { ok: false, error: "Pick where it happened." };
+    edit.area = area;
+  }
+  if (raw.resolution !== void 0) {
+    const resolution = raw.resolution == null ? "" : String(raw.resolution).trim();
+    if (resolution.length > MAX_RESOLUTION) return { ok: false, error: `Keep what changed under ${MAX_RESOLUTION.toLocaleString("en-US")} characters.` };
+    edit.resolution = resolution || null;
+  }
+  if (Object.keys(edit).length === 0) return { ok: false, error: "Nothing to change." };
+  return { ok: true, value: edit };
+}
 function areaLabel(area, config) {
   return config.areas.find((a) => a.value === area)?.label ?? area;
 }
@@ -158,6 +185,9 @@ function toAgentPrompt(r, config) {
     ask
   ].join("\n");
 }
+
+// src/server/store.ts
+var editedFields = (patch) => EDIT_FIELDS.filter((f) => patch[f] !== void 0);
 
 // src/server/postgres.ts
 var iso = (v) => v === null ? null : new Date(v).toISOString();
@@ -391,6 +421,14 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
         params
       );
       return rows[0] ? toEvent(rows[0]) : null;
+    },
+    async edit(id, patch, by) {
+      if (!isUuid(id)) return null;
+      const fields = editedFields(patch);
+      const params = [];
+      if (fields.length === 0) return one(`SELECT ${COLUMNS} FROM ${table} WHERE id = ${p(params, id)} AND NOT is_deleted${scope(params)}`, params);
+      const set = fields.map((f) => `${f} = ${p(params, patch[f])}`).join(", ");
+      return mutate(params, set, `id = ${p(params, id)}`, { action: "edited", actor: by, detail: { fields } });
     },
     async events(id) {
       if (!isUuid(id)) return [];
@@ -780,7 +818,7 @@ function createShipcueHandler(opts) {
     if (action === "close") {
       if (body2.status !== "fixed" && body2.status !== "wontfix") return fail("status must be fixed or wontfix");
       if (body2.prUrl != null && !isPrUrl(body2.prUrl)) return fail("prUrl must be an http(s) link.");
-      const resolution = body2.resolution == null ? null : String(body2.resolution).slice(0, 2e3);
+      const resolution = body2.resolution == null ? null : String(body2.resolution).slice(0, MAX_RESOLUTION);
       const r = await store.close(id, body2.status, resolution, { holder, by, prUrl: body2.prUrl ?? null });
       await emit("report.closed", r);
       return r ? json({ report: r }) : identity ? lost(id) : fail("No such report", 404);
@@ -796,6 +834,10 @@ function createShipcueHandler(opts) {
   }
   const teamShots = (r) => r.screenshots.map((src, n) => src.startsWith("data:") ? `${base}/team/screenshot/${r.id}/${n}${altFragment(src)}` : src);
   const forTeam = (r) => ({ ...r, screenshots: teamShots(r) });
+  const forTeamList = (r) => {
+    const { diagnostics: _, ...row } = forTeam(r);
+    return row;
+  };
   async function teamApi(req, parts) {
     if (!opts.team) return fail("Not found", 404);
     const member = await opts.team.getMember(req);
@@ -803,7 +845,7 @@ function createShipcueHandler(opts) {
     const me = { kind: "person", id: member.id, name: member.name };
     const claimants = () => opts.team.claimants ? opts.team.claimants(req) : Promise.resolve([me]);
     const [section, id, action] = parts;
-    if (req.method === "GET" && section === "me") return json({ member, claimants: await claimants() });
+    if (req.method === "GET" && section === "me") return json({ member, claimants: await claimants(), areas: config.areas });
     if (req.method === "GET" && section === "version") {
       const version = store.version ? await store.version() : String((await store.list()).length);
       return new Response(JSON.stringify({ version }), { headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -828,7 +870,7 @@ function createShipcueHandler(opts) {
     if (req.method === "GET" && !id) {
       await expireLeases();
       const status = ["open", "claimed", "in_review", "fixed", "wontfix"].find((s) => s === new URL(req.url).searchParams.get("status"));
-      return json({ reports: (await store.list(status ? { status } : {})).map(forTeam) });
+      return json({ reports: (await store.list(status ? { status } : {})).map(forTeamList) });
     }
     if (req.method === "GET" && id && !action) {
       const r = await store.get(id);
@@ -864,7 +906,7 @@ function createShipcueHandler(opts) {
       case "close": {
         if (body2.status !== "fixed" && body2.status !== "wontfix") return fail("status must be fixed or wontfix");
         if (body2.prUrl != null && !isPrUrl(body2.prUrl)) return fail("prUrl must be an http(s) link.");
-        const resolution = body2.resolution == null ? null : String(body2.resolution).slice(0, 2e3);
+        const resolution = body2.resolution == null ? null : String(body2.resolution).slice(0, MAX_RESOLUTION);
         const r = await store.close(id, body2.status, resolution, { by: me, prUrl: body2.prUrl ?? null });
         await emit("report.closed", r);
         return r ? json({ report: forTeam(r) }) : fail("No such report", 404);
@@ -889,6 +931,13 @@ function createShipcueHandler(opts) {
         const event = await store.note(id, n.text, me);
         const r = event && await store.get(id);
         return r ? json({ event, report: forTeam(r) }, 201) : fail("No such report", 404);
+      }
+      case "edit": {
+        if (!store.edit) return fail("Not found", 404);
+        const edit = validateEdit(body2, config);
+        if (!edit.ok) return fail(edit.error);
+        const r = await store.edit(id, edit.value, me);
+        return r ? json({ report: forTeam(r) }) : fail("No such report", 404);
       }
       case "priority": {
         if (!store.setPriority) return fail("Not found", 404);

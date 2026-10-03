@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { altFragment, BLOCKED_FILE_TYPES, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
+import { altFragment, BLOCKED_FILE_TYPES, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 import { findGitHubLink, publicGitHubLinks } from './links';
@@ -435,7 +435,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     if (action === 'close') {
       if (body.status !== 'fixed' && body.status !== 'wontfix') return fail('status must be fixed or wontfix');
       if (body.prUrl != null && !isPrUrl(body.prUrl)) return fail('prUrl must be an http(s) link.');
-      const resolution = body.resolution == null ? null : String(body.resolution).slice(0, 2000);
+      const resolution = body.resolution == null ? null : String(body.resolution).slice(0, MAX_RESOLUTION);
       const r = await store.close(id, body.status, resolution, { holder, by, prUrl: (body.prUrl as string | undefined) ?? null });
       await emit('report.closed', r);
       return r ? json({ report: r }) : identity ? lost(id) : fail('No such report', 404);
@@ -454,6 +454,11 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
   // Data-URL attachments become links on the team API, so the list stays small.
   const teamShots = (r: Report) => r.screenshots.map((src, n) => (src.startsWith('data:') ? `${base}/team/screenshot/${r.id}/${n}${altFragment(src)}` : src));
   const forTeam = (r: Report) => ({ ...r, screenshots: teamShots(r) });
+  /** A row of the list: no diagnostics, which can be large; GET team/reports/:id has them. */
+  const forTeamList = (r: Report) => {
+    const { diagnostics: _, ...row } = forTeam(r);
+    return row;
+  };
 
   async function teamApi(req: Request, parts: string[]): Promise<Response> {
     if (!opts.team) return fail('Not found', 404);
@@ -463,7 +468,8 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     const claimants = () => (opts.team!.claimants ? opts.team!.claimants(req) : Promise.resolve([me]));
     const [section, id, action] = parts;
 
-    if (req.method === 'GET' && section === 'me') return json({ member, claimants: await claimants() });
+    // The areas come along so the CueLog's Edit can offer them without the app passing them again.
+    if (req.method === 'GET' && section === 'me') return json({ member, claimants: await claimants(), areas: config.areas });
     if (req.method === 'GET' && section === 'version') {
       const version = store.version ? await store.version() : String((await store.list()).length);
       return new Response(JSON.stringify({ version }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -488,7 +494,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     if (req.method === 'GET' && !id) {
       await expireLeases();
       const status = (['open', 'claimed', 'in_review', 'fixed', 'wontfix'] as const).find((s) => s === new URL(req.url).searchParams.get('status'));
-      return json({ reports: (await store.list(status ? { status } : {})).map(forTeam) });
+      return json({ reports: (await store.list(status ? { status } : {})).map(forTeamList) });
     }
     if (req.method === 'GET' && id && !action) {
       const r = await store.get(id);
@@ -525,7 +531,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       case 'close': {
         if (body.status !== 'fixed' && body.status !== 'wontfix') return fail('status must be fixed or wontfix');
         if (body.prUrl != null && !isPrUrl(body.prUrl)) return fail('prUrl must be an http(s) link.');
-        const resolution = body.resolution == null ? null : String(body.resolution).slice(0, 2000);
+        const resolution = body.resolution == null ? null : String(body.resolution).slice(0, MAX_RESOLUTION);
         const r = await store.close(id, body.status, resolution, { by: me, prUrl: (body.prUrl as string | undefined) ?? null });
         await emit('report.closed', r);
         return r ? json({ report: forTeam(r) }) : fail('No such report', 404);
@@ -550,6 +556,14 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         const event = await store.note(id, n.text, me);
         const r = event && (await store.get(id));
         return r ? json({ event, report: forTeam(r) }, 201) : fail('No such report', 404);
+      }
+      case 'edit': {
+        // Rewrite the text, type, area or what-changed line (shipcue report 5c54da74).
+        if (!store.edit) return fail('Not found', 404);
+        const edit = validateEdit(body, config);
+        if (!edit.ok) return fail(edit.error);
+        const r = await store.edit(id, edit.value, me);
+        return r ? json({ report: forTeam(r) }) : fail('No such report', 404);
       }
       case 'priority': {
         if (!store.setPriority) return fail('Not found', 404);

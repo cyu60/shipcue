@@ -119,6 +119,10 @@ export interface ShipcueText {
   /** {n} is how many are open. */
   queueSummary: string;
   doneBelow: string;
+  // Narrow the board (shipcue report 5c54da74).
+  search: string;
+  allTypes: string;
+  pinnedHeading: string;
 }
 
 export const DEFAULT_TEXT: ShipcueText = {
@@ -229,6 +233,9 @@ export const DEFAULT_TEXT: ShipcueText = {
   queueTitle: 'Queue',
   queueSummary: '{n} open, most urgent first.',
   doneBelow: 'Done ones stay below, greyed out.',
+  search: 'Search',
+  allTypes: 'All types',
+  pinnedHeading: 'Pinned',
 };
 
 /** The defaults with an app's own words on top; empty strings are ignored. */
