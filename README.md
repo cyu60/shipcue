@@ -259,6 +259,7 @@ pnpm build
 
 ## Changelog
 
+- **next**: isolation regression suite for Cloud (shipcue report 407a5d6d). `tests/isolation.test.ts` runs every read and write path (store methods, the public board, its version and screenshots, the team API, the agent API, the button's video route, and Cloud's per-project queue at `/api/cloud/p/<key>/`) with two Cloud projects and an own-rows store (`project: null`) on one database, and checks nothing crosses over in any direction, so the 0.16.1 leak (the site's own queue reading every Cloud project's reports) cannot come back unnoticed. No leak found; tests only.
 - **0.24.2**: when key presses on the resize grip come quicker than the panel redraws, each one now counts (shipcue report ee970b18).
 - **0.24.1**: the Send button keeps its size while sending: "Sending…" no longer wraps it onto two lines or makes it taller.
 - **0.24.0**: resize the panel (shipcue report ee970b18). A small grip on the floating panel's free corner (the one away from the button, so it follows the quadrant) resizes it by drag, or by the arrow keys once focused (Shift for bigger steps); the text box takes the extra height. At least the default size, at most 8px inside the window, scaled with the text size, kept in this browser (`shipcue:panel-size`); Reset position (⌃⇧H or Display) also resets the size, and is now offered with `movable={false}` too. New: prop `resizable` (on by default for the floating panel); text key `resizePanel`.
