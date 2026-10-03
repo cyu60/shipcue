@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS shipcue_report_events (
   report_id   uuid NOT NULL,
   -- The Cloud project, when the table serves many (see cloud.sql); null for one app.
   project_id  uuid,
-  action      text NOT NULL CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority')),
+  action      text NOT NULL CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note')),
   actor_kind  text CHECK (actor_kind IN ('person', 'agent')),
   actor_id    text,
   actor_name  text,
@@ -81,3 +81,9 @@ ALTER TABLE shipcue_report_events ADD COLUMN IF NOT EXISTS seq bigint GENERATED 
 -- address (never the address), so the handler can ask them to sign in after a few.
 ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS client_key text CHECK (length(client_key) <= 64);
 CREATE INDEX IF NOT EXISTS shipcue_reports_client ON shipcue_reports (client_key) WHERE client_key IS NOT NULL AND NOT is_deleted;
+
+-- Upgrading from 0.18: notes on a report's history, from people, agents (add_note) and shipcue
+-- Cloud's hosted agent. Widens the action check to take 'note'.
+ALTER TABLE shipcue_report_events DROP CONSTRAINT IF EXISTS shipcue_report_events_action_check;
+ALTER TABLE shipcue_report_events ADD CONSTRAINT shipcue_report_events_action_check
+  CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note'));

@@ -122,6 +122,19 @@ server.registerTool(
 );
 
 server.registerTool(
+  'add_note',
+  {
+    description:
+      "Add a note to a report's history that the team sees in the CueLog: what you found, what is missing, why you released it. Does not change the report.",
+    inputSchema: { id: z.string(), text: z.string() },
+  },
+  async ({ id, text: note }) => {
+    await client.note(id, note);
+    return text('Noted.');
+  },
+);
+
+server.registerTool(
   'list_my_reports',
   { description: 'Reports you hold or that someone assigned to you.' },
   async () => {

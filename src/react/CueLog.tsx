@@ -47,6 +47,8 @@ export const CUELOG_TEXT = {
   copyPrompt: 'Copy agent prompt',
   copied: 'Copied',
   history: 'History',
+  addNote: 'Add note',
+  notePlaceholder: 'A note for the team or the next agent',
   stale: 'stale',
   lease: 'lease',
   selected: 'selected',
@@ -586,6 +588,7 @@ function Drawer({
   const [resolution, setResolution] = useState('');
   const [pr, setPr] = useState(r.prUrl ?? '');
   const [copied, setCopied] = useState(false);
+  const [note, setNote] = useState('');
   const lb = useLightbox('Attachment');
   useEffect(() => {
     let live = true;
@@ -734,9 +737,24 @@ function Drawer({
               <li key={e.id}>
                 {e.actor ? `${e.actor.kind === 'agent' ? '🤖 ' : ''}${e.actor.name} ` : ''}
                 {eventText(e)} · {ago(e.at)} ago
+                {/* Notes show in full (shipcue report 3d2dded6). */}
+                {e.action === 'note' && typeof e.detail.text === 'string' && <div style={s.note}>{e.detail.text}</div>}
               </li>
             ))}
           </ol>
+          {canEdit && (
+            <span style={s.inline}>
+              <textarea aria-label={t.addNote} placeholder={t.notePlaceholder} value={note} onChange={(e) => setNote(e.target.value)} rows={2} style={{ ...s.input, flex: 1, minWidth: '12em' }} />
+              <button
+                type="button"
+                style={s.btn}
+                disabled={!note.trim()}
+                onClick={() => void act(r.id, 'note', { text: note }).then((saved) => saved && setNote(''))}
+              >
+                {t.addNote}
+              </button>
+            </span>
+          )}
         </>
       )}
       {lb.box}
@@ -763,6 +781,8 @@ function eventText(e: ReportEvent): string {
       return 'reopened it';
     case 'priority':
       return `set priority to ${String(e.detail.priority)}`;
+    case 'note':
+      return 'added a note';
   }
 }
 
@@ -833,4 +853,5 @@ const s: Record<string, CSSProperties> = {
   actions: { display: 'grid', gap: '0.4em', justifyItems: 'start' },
   inline: { display: 'inline-flex', flexWrap: 'wrap', gap: '0.3em', alignItems: 'center' },
   timeline: { margin: 0, paddingLeft: '1.1em', fontSize: '0.85em', display: 'grid', gap: '0.2em' },
+  note: { margin: '0.2em 0 0.3em', padding: '0.4em 0.55em', whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: line, borderRadius: 6 },
 };

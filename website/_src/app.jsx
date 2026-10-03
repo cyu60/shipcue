@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { CueLogTable } from '../../src/react';
+import { LISTEN_EVENTS } from '../../src/mcp/events';
+import { DEFAULT_LISTEN_COMMAND, launchdInstall, listenCommand, releaseTarball, slug, systemdInstall } from './listener.mjs';
 
 const API = '/api/cloud';
 const ORIGIN = window.location.origin;
@@ -170,6 +172,144 @@ function NewProject({ onMade }) {
   );
 }
 
+/** The MCP line for an agent's token, from the prebuilt release (shipcue is not on npm yet). */
+const mcpLine = (endpoint, token) => `claude mcp add shipcue -e SHIPCUE_URL=${endpoint} -e SHIPCUE_TOKEN=${token} -- npx -y -p ${releaseTarball(VERSION)} shipcue-mcp`;
+
+/**
+ * Run a listener (shipcue report 3d2dded6): pick or create an agent, the events and the command, and copy
+ * shipcue-listen as one command, a launchd agent (macOS) or a systemd --user unit (Linux).
+ */
+function Listener({ detail, endpoint, run }) {
+  const p = detail.project;
+  const [pick, setPick] = useState(detail.agents[0]?.id ?? 'new');
+  const [newName, setNewName] = useState('');
+  const [made, setMade] = useState(null);
+  const [events, setEvents] = useState(['filed', 'assigned']);
+  const [command, setCommand] = useState(DEFAULT_LISTEN_COMMAND);
+  const [folder, setFolder] = useState(`~/code/${slug(p.name)}`);
+  const [os, setOs] = useState('cmd');
+  const agent = made && made.id === pick ? made : detail.agents.find((a) => a.id === pick);
+  const opts = {
+    url: endpoint,
+    token: made && made.id === pick ? made.token : `<${agent?.name ?? 'agent'}'s token>`,
+    agent: agent?.name ?? 'agent',
+    events,
+    command,
+    folder,
+    project: p.name,
+    version: VERSION,
+  };
+  const create = () =>
+    run(async () => {
+      const r = await api(`/projects/${p.id}/agents`, { name: newName });
+      setMade({ id: r.agent.id, name: r.agent.name, token: r.token });
+      setPick(r.agent.id);
+      setNewName('');
+    });
+  return (
+    <section style={s.card}>
+      <h3 style={{ margin: 0 }}>3. Run a listener</h3>
+      <p style={s.small}>
+        Keep an agent on a Mac, a VPS or any machine working the queue like a daemon: shipcue-listen checks every 15 seconds (no open port) and runs your command once per
+        event, with the report's id in $SHIPCUE_REPORT_ID.
+      </p>
+      <div style={s.row}>
+        <select style={s.input} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Agent">
+          {detail.agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              🤖 {a.name}
+            </option>
+          ))}
+          <option value="new">New agent…</option>
+        </select>
+        {pick === 'new' && (
+          <>
+            <input style={s.input} placeholder="mac-mini" value={newName} onChange={(e) => setNewName(e.target.value.toLowerCase())} aria-label="New agent name" />
+            <Button ink onClick={create} disabled={!newName.trim()}>
+              Create agent
+            </Button>
+          </>
+        )}
+      </div>
+      {pick !== 'new' && (
+        <>
+          <div style={s.row} role="group" aria-label="Events to act on">
+            {LISTEN_EVENTS.map((ev) => (
+              <label key={ev} style={{ ...s.small, display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                <input type="checkbox" checked={events.includes(ev)} onChange={(e) => setEvents(e.target.checked ? [...events, ev] : events.filter((x) => x !== ev))} />
+                {ev === 'assigned' ? 'assigned to it' : ev}
+              </label>
+            ))}
+          </div>
+          <label style={s.small}>
+            Runs, per event
+            <textarea style={{ ...s.input, display: 'block', width: '100%', boxSizing: 'border-box', minHeight: 54, marginTop: 4 }} value={command} onChange={(e) => setCommand(e.target.value)} />
+          </label>
+          <label style={s.small}>
+            In the folder <input style={{ ...s.input, width: 260 }} value={folder} onChange={(e) => setFolder(e.target.value)} aria-label="Folder it runs in" />
+          </label>
+          {made && made.id === pick ? (
+            <>
+              <p style={s.small}>{made.name}'s token is in these, shown this once. Give claude the shipcue tools in that folder first:</p>
+              <Copy text={mcpLine(endpoint, made.token)} />
+            </>
+          ) : (
+            <p style={s.small}>Put {agent?.name}'s token (shown once when it was connected) where it says so, or create a new agent here to fill it in.</p>
+          )}
+          <div style={s.pills} role="tablist" aria-label="How to run it">
+            {[
+              ['cmd', 'Command'],
+              ['mac', 'macOS (launchd)'],
+              ['linux', 'Linux (systemd)'],
+            ].map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={os === k} style={{ ...s.pill, ...(os === k ? s.pillOn : {}) }} onClick={() => setOs(k)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <Copy text={os === 'cmd' ? listenCommand(opts) : os === 'mac' ? launchdInstall(opts) : systemdInstall(opts)} />
+          <p style={s.small}>
+            {os === 'cmd'
+              ? 'Runs while the terminal is open. Use launchd or systemd to keep it running after you log out and restart it if it stops.'
+              : os === 'mac'
+                ? `Keeps running (KeepAlive) and starts at login; logs go to ~/Library/Logs/shipcue-listen-${slug(p.name)}.log.`
+                : 'Restarts whenever it stops and keeps running after you log out (linger).'}{' '}
+            Want it instant instead of every 15 seconds? Point the webhook under Forward reports at that machine (say a Tailscale Funnel address) and the project pushes
+            each event to it as signed JSON.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** The hosted agent (shipcue report 3d2dded6): shipcue-agent triages on OpenAI and leaves a note. */
+function Hosted({ detail, save }) {
+  const p = detail.project;
+  const owner = detail.role === 'owner';
+  const h = detail.hosted ?? { available: false, name: 'shipcue-agent', dailyLimit: null };
+  return (
+    <section style={s.card}>
+      <h3 style={{ margin: 0 }}>4. Hosted agent</h3>
+      <p style={s.small}>
+        {h.name} runs on shipcue (OpenAI), nothing to install. Assign a report to it in the CueLog and it adds a note: a summary, the likely area, a suggested priority
+        with a reason, steps to reproduce or what is missing, and a short plan for a coding agent. Then it puts the report back in the queue. It never changes code.
+        {h.dailyLimit ? ` Up to ${h.dailyLimit} a day per project.` : ''}
+      </p>
+      {!h.available && <p style={s.small}>Not available on this server yet.</p>}
+      <label style={{ ...s.small, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input type="checkbox" checked={p.hostedAgent} disabled={!owner || (!h.available && !p.hostedAgent)} onChange={(e) => save({ hostedAgent: e.target.checked })} /> Turn on{' '}
+        {h.name}
+      </label>
+      <label style={{ ...s.small, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input type="checkbox" checked={p.hostedAutoTriage} disabled={!owner || !p.hostedAgent} onChange={(e) => save({ hostedAutoTriage: e.target.checked })} /> Triage every
+        new report, not only the ones assigned to it
+      </label>
+      {!owner && <p style={s.small}>Owners turn it on.</p>}
+    </section>
+  );
+}
+
 function Setup({ detail, reload, onProjects }) {
   const p = detail.project;
   const owner = detail.role === 'owner';
@@ -245,7 +385,7 @@ function Setup({ detail, reload, onProjects }) {
             </Button>
           </div>
         )}
-        {token && <Copy text={`claude mcp add shipcue -e SHIPCUE_URL=${endpoint} -e SHIPCUE_TOKEN=${token.token} -- npx shipcue-mcp`} />}
+        {token && <Copy text={mcpLine(endpoint, token.token)} />}
         {detail.agents.length > 0 && (
           <table style={s.table}>
             <tbody>
@@ -265,9 +405,13 @@ function Setup({ detail, reload, onProjects }) {
         )}
       </section>
 
+      {detail.role !== 'viewer' && <Listener detail={detail} endpoint={endpoint} run={run} />}
+
+      <Hosted detail={detail} save={save} />
+
       {owner && (
         <section style={s.card}>
-          <h3 style={{ margin: 0 }}>3. Forward reports</h3>
+          <h3 style={{ margin: 0 }}>5. Forward reports</h3>
           <p style={s.small}>Announce this project's reports in a Slack channel, or send them to your own endpoint as signed JSON. Neither ever includes who filed it or the app snapshot in Slack.</p>
           <div style={s.row}>
             <input style={{ ...s.input, flex: 1 }} placeholder={p.slackConnected ? 'Slack is connected. Paste a new URL to change it' : 'https://hooks.slack.com/services/…'} value={slackUrl} onChange={(e) => setSlackUrl(e.target.value)} />

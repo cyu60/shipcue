@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-303%20passing-2E5BFF?style=flat-square" alt="303 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-328%20passing-2E5BFF?style=flat-square" alt="328 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -144,7 +144,7 @@ claude mcp add shipcue \
   -- npx shipcue-mcp
 ```
 
-Tools: `file_report`, `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`, `submit_for_review`, `heartbeat_report`, `list_my_reports`.
+Tools: `file_report`, `list_reports`, `claim_next_report`, `get_report`, `claim_report`, `release_report`, `close_report`, `submit_for_review`, `heartbeat_report`, `add_note`, `list_my_reports`.
 
 **Filing for a person.** `file_report` files a bug, feature request or agent task with the same fields the panel sends (type, description, priority, area, page URL, context, diagnostics), as a multipart POST from the agent's machine to `{SHIPCUE_URL}/reports`, so your browser CORS rules do not get in the way (sign-in and anonymous limits still apply). It needs no token: `SHIPCUE_URL` alone is enough for it. The panel's **Copy prompt for my agent** link hands the agent everything it needs to call it.
 
@@ -189,8 +189,9 @@ Claims are atomic (`FOR UPDATE SKIP LOCKED`), so several agents can drain the qu
 | `POST` | `/reports/:id/review` | agent, `{ prUrl }`: a PR is up, the report is in review |
 | `GET` | `/reports/:id/events` | agent: the report's history |
 | `GET` | `/reports?mine=1` | agent: what it holds or has queued |
+| `POST` | `/reports/:id/note` | agent, `{ text }`: a note on the report's history |
 | `GET` | `/team/me`, `/team/reports`, `/team/reports/:id` | signed-in members, with the `team` option |
-| `POST` | `/team/reports/:id/{claim,assign,release,close,reopen,review,priority}` | members (not viewers) |
+| `POST` | `/team/reports/:id/{claim,assign,release,close,reopen,review,priority,note}` | members (not viewers) |
 | `GET` | `/board` | anyone, only with `board` on: the queue and the changelog |
 | `GET` | `/board/version` | anyone, only with `board` on: a short string that changes when any report does |
 | `GET` | `/capabilities` | the button: what this handler takes (video, files, limits) |
@@ -233,9 +234,11 @@ An agent that would rather not open a port listens instead: `shipcue-listen` pol
 ```bash
 SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=... \
   npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"
-# --on filed,claimed,released,closed,video   --every 15 (seconds)   --backlog   --once
+# --on filed,assigned,claimed,released,closed,video   --every 15 (seconds)   --backlog   --once
 # No command: prints one JSON line per event.
 ```
+
+`assigned` fires when someone queues a report for this agent in the CueLog. To keep a listener running as a daemon, shipcue Cloud's Setup tab writes it out for you (Run a listener): the one-line command, a macOS launchd agent (KeepAlive, logs in `~/Library/Logs`) or a Linux systemd `--user` unit, with the agent's token filled in.
 
 ## Try it locally
 
@@ -254,6 +257,7 @@ pnpm build
 
 ## Changelog
 
+- **0.20.0**: notes on a report: a `note` action in `shipcue_report_events`, `store.note(id, text, by)`, `POST /team/reports/:id/note` (members, not viewers) and `POST /reports/:id/note` for agents, the MCP tool `add_note`, and the CueLog drawer shows notes in full with an Add note box (`maxNote`, 4,000 by default). `shipcue-listen --on assigned` hears reports queued for its agent. shipcue Cloud: **Run a listener** in Setup (pick or create an agent, events and command; copy it as one command, a launchd agent or a systemd unit) and a **hosted agent**, `shipcue-agent`, that triages reports assigned to it (or every new one) on OpenAI and leaves a note: summary, likely area, suggested priority, steps to reproduce and a plan for a coding agent (shipcue report 3d2dded6). **Upgrading:** run the "Upgrading from 0.18" lines at the end of `sql/schema.sql`; Cloud also runs the new lines in `sql/cloud.sql`.
 - **0.19.0**: dragging the panel by its title moves the whole widget, button and panel together, with one saved position (the button's); the panel stays on screen and flips above or below the button when you let go (shipcue report 30beb674; the 0.17 `shipcue:panel-offset` key is cleared). New **Copy prompt for my agent** link: a prompt for Claude Code or Codex that fills the report out and files it, and a new MCP tool `file_report` (`createAgentClient().file()`) that needs no token (shipcue report 9f533ece). New text keys: `copyAgentPrompt`, `copyAgentPromptHint`, `copied`, `copyFailed`.
 - **0.18.0**: Select area (⌃⇧A / Alt+Shift+A): tint the page, drag out part of it, and it is captured from the tab and opened in a CleanShot-style annotator (draw, arrow, box, highlight, text, blur, crop, colours, line widths, undo/redo, clear) with alt text that travels with the screenshot (`screenshotAlt`, `maxAltText`) and shows on the board, the CueLog and the preview. Pasted screenshots can be marked up too (the pencil on each). `dimOnOpen` tints the page while the panel is open. New exports: `Annotator`, `AreaSelect`, `captureArea`, and `shotAlt` / `withShotAlt` from `shipcue`.
 - **0.17.1**: drag the panel by its title, as well as the button: it moves on its own, stays on screen, and is remembered in this browser. Reset position (⌃⇧H / Alt+Shift+H, or Display) puts both back; `movable={false}` keeps them still.

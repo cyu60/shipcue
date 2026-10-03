@@ -28,7 +28,7 @@
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
 <p>Until the first npm release is out, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
-<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.19.0/shipcue-0.19.0.tgz</code></pre>
+<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.20.0/shipcue-0.20.0.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 
 <h2>1. Create the table</h2>
@@ -143,6 +143,7 @@ createShipcueHandler({ ...,
 })</code></pre>
 <p>An agent that would rather not open a port can listen instead. <code>shipcue-listen</code> polls the queue and runs a command for each event, with the event as JSON on stdin:</p>
 <pre><code>SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=...   npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"</code></pre>
+<p>Events: <code>filed</code>, <code>assigned</code> (queued for this agent), <code>claimed</code>, <code>released</code>, <code>closed</code>, <code>video</code>. shipcue Cloud writes the launchd or systemd file that keeps it running (<a href="/cloud/">Run a listener</a>).</p>
 
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
@@ -153,6 +154,7 @@ POST /reports/next/claim      take the most urgent open report (204 when empty)
 POST /reports/:id/claim       take a specific report (409 if someone has it)
 POST /reports/:id/release     give it back to the queue
 POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }
+POST /reports/:id/note        { "text": "..." }: a note on the report's history
 GET  /board                   no token: the queue and the changelog (only with board on)
 GET  /board/version           no token: changes whenever a report does (for a live board)
 GET  /capabilities            no token: what the handler takes (video, files, limits)</code></pre>

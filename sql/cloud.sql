@@ -86,6 +86,18 @@ ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS webhook_url text CHECK (webh
 ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS webhook_secret text;
 ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS notify_events text[] NOT NULL DEFAULT '{report.filed,report.closed}';
 
+-- The hosted agent (shipcue report 3d2dded6): a built-in "shipcue-agent" each project can turn on.
+-- It is a cloud_agents row with no token (hosted), so assigning, claiming and history work as for any agent.
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS hosted_agent boolean NOT NULL DEFAULT false;
+-- Triage every new report, not only the ones assigned to it.
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS hosted_auto_triage boolean NOT NULL DEFAULT false;
+ALTER TABLE cloud_agents ADD COLUMN IF NOT EXISTS hosted boolean NOT NULL DEFAULT false;
+ALTER TABLE cloud_agents ALTER COLUMN token_hash DROP NOT NULL;
+ALTER TABLE cloud_agents DROP CONSTRAINT IF EXISTS cloud_agents_token_or_hosted;
+ALTER TABLE cloud_agents ADD CONSTRAINT cloud_agents_token_or_hosted CHECK (hosted OR token_hash IS NOT NULL);
+-- The daily cap counts the hosted agent's notes.
+CREATE INDEX IF NOT EXISTS shipcue_report_events_notes ON shipcue_report_events (project_id, actor_id, at) WHERE action = 'note';
+
 -- Server only: row-level security on with no policies, and no grants to browser roles.
 ALTER TABLE cloud_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_members ENABLE ROW LEVEL SECURITY;

@@ -77,6 +77,11 @@ export interface ReportStore {
   events?(id: string): Promise<ReportEvent[]>;
   /** How many signed-out reports came from this client key (see the handler's anonymousLimit). */
   countFromClient?(clientKey: string): Promise<number>;
+  /**
+   * Adds a note to a report's history (shipcue report 3d2dded6): a person, an agent or a hosted
+   * agent saying something about it. The report itself only gets a new updatedAt. Null for an unknown id.
+   */
+  note?(id: string, text: string, by?: Claimant | null): Promise<ReportEvent | null>;
 }
 
 const holds = (r: Report, holder: string | undefined) => holder === undefined || r.claimantId == null || r.claimantId === holder;
@@ -91,8 +96,11 @@ export function memoryStore(): ReportStore {
   // Strictly increasing so reports filed in the same millisecond keep their order.
   let last = 0;
   const now = () => new Date((last = Math.max(Date.now(), last + 1))).toISOString();
-  const record = (reportId: string, action: ReportEventAction, actor: Claimant | null | undefined, detail: Record<string, unknown> = {}) =>
-    log.push({ id: crypto.randomUUID(), reportId, action, actor: actor ?? null, detail, at: now() });
+  const record = (reportId: string, action: ReportEventAction, actor: Claimant | null | undefined, detail: Record<string, unknown> = {}) => {
+    const e: ReportEvent = { id: crypto.randomUUID(), reportId, action, actor: actor ?? null, detail, at: now() };
+    log.push(e);
+    return e;
+  };
   const update = (id: string, when: (r: Report) => boolean, patch: (r: Report) => Partial<Report>) => {
     const r = rows.get(id);
     if (!r || !when(r)) return null;
@@ -211,6 +219,10 @@ export function memoryStore(): ReportStore {
     },
     async events(id) {
       return log.filter((e) => e.reportId === id).map((e) => ({ ...e }));
+    },
+    async note(id, text, by) {
+      if (!update(id, () => true, () => ({}))) return null;
+      return { ...record(id, 'note', by, { text }) };
     },
     async countFromClient(clientKey) {
       return [...clients.entries()].filter(([id, k]) => k === clientKey && rows.has(id)).length;

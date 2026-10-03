@@ -3,8 +3,9 @@
 // agent on a Mac mini, a VPS or behind Tailscale hears about reports without opening a port.
 import type { Report } from '../core';
 
-export type ListenEvent = 'filed' | 'claimed' | 'released' | 'closed' | 'video';
-export const LISTEN_EVENTS: ListenEvent[] = ['filed', 'claimed', 'released', 'closed', 'video'];
+// 'assigned': someone queued an open report for an agent from the CueLog (shipcue report 3d2dded6).
+export type ListenEvent = 'filed' | 'assigned' | 'claimed' | 'released' | 'closed' | 'video';
+export const LISTEN_EVENTS: ListenEvent[] = ['filed', 'assigned', 'claimed', 'released', 'closed', 'video'];
 
 export interface Change {
   type: `report.${ListenEvent}`;
@@ -25,6 +26,8 @@ export function diffReports(before: Map<string, Report>, now: Report[]): Change[
       if (r.status === 'claimed') out.push({ type: 'report.claimed', report: r });
       else if (r.status === 'open') out.push({ type: 'report.released', report: r });
       else out.push({ type: 'report.closed', report: r });
+    } else if (r.status === 'open' && r.claimantKind === 'agent' && r.claimantId && was.claimantId !== r.claimantId) {
+      out.push({ type: 'report.assigned', report: r });
     }
     if (!was.video && r.video) out.push({ type: 'report.video', report: r });
   }

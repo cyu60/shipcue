@@ -5,7 +5,8 @@
 //   npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"
 //     runs the command per event, with the event as JSON on stdin and SHIPCUE_EVENT,
 //     SHIPCUE_REPORT_ID in its environment
-// Options: --on filed,claimed,released,closed,video (default filed), --every <seconds>
+// Options: --on filed,assigned,claimed,released,closed,video (default filed; assigned: queued
+// for this agent in the CueLog), --every <seconds>
 // (default 15), --backlog (treat reports already open as just filed), --once (one look, then
 // exit; with --backlog, act on what is open now).
 
@@ -83,7 +84,12 @@ async function tick(): Promise<void> {
     }
     // --backlog: only the open ones count as just filed, not the fixed history.
     const before = seen ?? new Map(now.filter((r) => r.status !== 'open' && r.status !== 'claimed').map((r) => [r.id, r]));
-    const changes = diffReports(before, now).filter((c) => on.has(c.type.slice('report.'.length) as ListenEvent));
+    let changes = diffReports(before, now).filter((c) => on.has(c.type.slice('report.'.length) as ListenEvent));
+    // Only what was queued for this agent, not for another one.
+    if (changes.some((c) => c.type === 'report.assigned')) {
+      const mine = new Set((await client.mine()).map((r) => r.id));
+      changes = changes.filter((c) => c.type !== 'report.assigned' || mine.has(c.report.id));
+    }
     seen = new Map(now.map((r) => [r.id, r]));
     // One at a time, in order: an agent working on one report is not handed the next mid-run.
     for (const c of changes) await run(c);
