@@ -190,7 +190,8 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
     },
     async list(filter = {}) {
       const params: unknown[] = [];
-      const where = (filter.status ? ` AND status = ${p(params, filter.status)}` : '') + (filter.claimant ? ` AND claimant_id = ${p(params, filter.claimant)}` : '');
+      const where = (filter.status ? ` AND status = ${p(params, filter.status)}` : '') + (filter.claimant ? ` AND claimant_id = ${p(params, filter.claimant)}` : '') +
+        (filter.reporter ? ` AND reporter = ${p(params, filter.reporter)}` : '');
       return many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted${where}${scope(params)} ${QUEUE_ORDER}`, params);
     },
     async version() {

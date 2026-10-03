@@ -105,6 +105,11 @@ export interface Capabilities {
   signedIn?: boolean;
   /** They may send a report without their name on it ("Send anonymously"). */
   anonymous?: boolean;
+  /**
+   * GET {base}/mine lists their own reports (the handler's reporterPortal, signed in), so the
+   * panel's Yours list works on any device (shipcue report 3d0d7995).
+   */
+  mine?: boolean;
 }
 
 /** The limits the button checks before sending; it takes them from the handler, or from its limits prop. */
@@ -270,6 +275,40 @@ export function toBoardItem(r: Report, screenshots?: string[]): BoardItem {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt,
     ...(screenshots?.length ? { screenshots } : {}),
+  };
+}
+
+/**
+ * One of the signed-in reporter's own reports, as GET {base}/mine returns it (shipcue report
+ * 3d0d7995): what they asked, where it stands and how it was fixed. No diagnostics, page,
+ * attachments or who holds it.
+ */
+export interface MineItem {
+  id: string;
+  type: ReportType;
+  status: Status;
+  /** The first line of what they sent. */
+  title: string;
+  /** The fix in one line, once there is one. */
+  resolution: string | null;
+  prUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A report's first line, at most 120 characters: how lists name it. */
+export const reportTitle = (description: string) => (description.trim().split('\n')[0] ?? '').slice(0, 120);
+
+export function toMineItem(r: Report): MineItem {
+  return {
+    id: r.id,
+    type: r.type,
+    status: r.status,
+    title: reportTitle(r.description),
+    resolution: r.resolution,
+    prUrl: r.prUrl ?? null,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt,
   };
 }
 

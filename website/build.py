@@ -186,6 +186,7 @@ const handler = createShipcueHandler({
 export { handler as GET, handler as POST };</code></pre>
 <p>Screenshots are stored as small data URLs unless you pass <code>saveScreenshot(file, key)</code> to upload them to S3 or Supabase Storage. A failure inside <code>onReport</code> never fails the report.</p>
 <p>Pass <code>saveVideo(file, key)</code> to let reporters attach a screen recording or video (WebM, MP4 or MOV, up to 40 MB) through <code>POST /reports/:id/video</code>. On hosts that cap request bodies, upload from the browser with the button's <code>uploadVideo</code> prop instead.</p>
+<p><strong>Reporter portal.</strong> When <code>getReporter</code> reads a verified session (your auth cookie), add <code>reporterPortal: true</code>: <code>GET /mine</code> returns the signed-in reporter's own reports (status, fix line, PR, dates; never anyone else's, never diagnostics), and the panel's Yours list adds them, so it works on any device. Pins stay in each browser. Pair it with <code>emailReporter({ mineLink })</code>, and see <a href="/app/mine/">My reports</a> on shipcue's own site. Never turn it on when the reporter comes from the browser (the button's <code>reporter</code> prop): anyone could read anyone's reports. That is why shipcue Cloud projects do not offer it.</p>
 
 <h2>3. Add the button</h2>
 <pre><code>import { ReportButton } from 'shipcue/react';
@@ -362,7 +363,7 @@ CLOUD = """
 <h2>Set up</h2>
 <ol>
   <li><a href="/app/">Sign in</a> and create a project.</li>
-  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app (or run <code>npx shipcue init --cloud &lt;key&gt; --write</code> in a Next.js app), and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report.</li>
+  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app (or run <code>npx shipcue init --cloud &lt;key&gt; --write</code> in a Next.js app), and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report. shipcue cannot check it, so Cloud projects have no reporter portal (a "My reports" list on any device); the Yours list stays per browser.</li>
   <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
   <li>Optional: under <strong>Close the loop with GitHub</strong>, turn on the project's webhook and add its URL and secret to your repository (Pull requests only), so opening a PR puts a report in review and merging it marks it Fixed.</li>
 </ol>
@@ -535,6 +536,14 @@ APP = """<div id="shipcue-app"></div>
 <script src="/assets/shipcue-app.js" defer></script>
 """
 page("app/index.html", "CueLog · shipcue Cloud", "Sign in to shipcue Cloud and work your CueLog.", APP, "/cloud/")
+MINE = """<div class="prose">
+<h1>My reports</h1>
+<p class="lede">What you sent to shipcue while signed in, where each one stands, and how it was fixed. The same on any device.</p>
+</div>
+<div id="shipcue-mine"></div>
+<script src="/assets/shipcue-mine.js" defer></script>
+"""
+page("app/mine/index.html", "My reports · shipcue", "The reports you sent to shipcue, and how each was fixed.", MINE, "/cloud/")
 page("blog/index.html", "Blog · shipcue", "Notes on building shipcue.", BLOG, "/blog/")
 page("blog/agents-should-read-your-bug-reports/index.html", "Your bug report button should feed your agents · shipcue", "Why shipcue treats the bug report inbox as a queue that agents work from.", POST, "/blog/")
 page("use-cases/index.html", "Use cases · shipcue", "Who shipcue is for: hackathon teams running many agents, founders with early users, internal tools, beta tests and more.", USE_CASES, "/use-cases/")

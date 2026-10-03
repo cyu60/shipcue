@@ -120,6 +120,10 @@ export interface ShipcueText {
   done: string;
   inProgress: string;
   inReview: string;
+  /** A report closed without a change, in Yours (the reporter portal). */
+  wontFix: string;
+  /** Yours is empty and comes from the handler too: reports show up on any device. */
+  noReportsYetAnywhere: string;
   pills: string;
   tabs: string;
   cards: string;
@@ -242,6 +246,8 @@ export const DEFAULT_TEXT: ShipcueText = {
   done: 'Done',
   inProgress: 'In progress',
   inReview: 'In review',
+  wontFix: "Won't fix",
+  noReportsYetAnywhere: 'Reports you send while signed in show up here, on any device.',
   pills: 'Pills',
   tabs: 'Tabs',
   cards: 'Cards',

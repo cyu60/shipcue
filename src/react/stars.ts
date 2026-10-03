@@ -2,6 +2,7 @@
 // to the top, in the report panel and on the CueLog. The panel also remembers the reports sent
 // from this browser, so you can find yours again.
 import { useEffect, useState } from 'react';
+import type { MineItem, Status } from '../core';
 
 const STARS = 'shipcue:stars';
 const MINE = 'shipcue:mine';
@@ -14,6 +15,10 @@ export interface MyReport {
   /** The first line of what was sent. */
   title: string;
   at: string;
+  /** From the handler's GET /mine (the reporter portal), when it offers one: where it stands now. */
+  status?: Status;
+  resolution?: string | null;
+  prUrl?: string | null;
 }
 
 function read<T>(key: string, fallback: T): T {
@@ -47,6 +52,20 @@ export const loadMine = (): MyReport[] => {
 };
 export function rememberMine(r: MyReport): void {
   write(MINE, [r, ...loadMine().filter((x) => x.id !== r.id)].slice(0, MAX_MINE));
+}
+
+/**
+ * Yours on any device (shipcue report 3d0d7995): the reports the handler knows you filed, merged
+ * with the ones sent from this browser. One per id (the server's status wins), newest first.
+ * Pins stay in this browser; only the list itself comes from the server.
+ */
+export function mergeMine(local: readonly MyReport[], server: readonly MineItem[]): MyReport[] {
+  const byId = new Map<string, MyReport>(local.map((m) => [m.id, m]));
+  for (const r of server) {
+    const had = byId.get(r.id);
+    byId.set(r.id, { id: r.id, type: r.type, title: r.title || had?.title || '', at: had?.at ?? r.createdAt, status: r.status, resolution: r.resolution, prUrl: r.prUrl });
+  }
+  return [...byId.values()].sort((a, b) => b.at.localeCompare(a.at));
 }
 
 /** Starred ids first, in their order, then the rest as they were. */

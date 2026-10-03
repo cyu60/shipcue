@@ -20,8 +20,13 @@ const handler = createShipcueHandler({
   // Any file can come along with a report here, not just screenshots (report e8b2dedd).
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: '/api/shipcue',
-  broadcasters: sendEmail ? [emailReporter({ appName: 'shipcue', link: 'https://shipcue.ibuildathing.com/cuelog/', send: sendEmail })] : [],
+  broadcasters: sendEmail
+    ? [emailReporter({ appName: 'shipcue', link: 'https://shipcue.ibuildathing.com/cuelog/', mineLink: 'https://shipcue.ibuildathing.com/app/mine/', send: sendEmail })]
+    : [],
   getReporter: async (req) => (await cloudUserFrom(req, auth))?.email ?? null,
+  // My reports at /app/mine/ (report 3d0d7995): GET /api/shipcue/mine. Safe here because getReporter
+  // above is the Cloud session cookie, checked with the sign-in service, never a header.
+  reporterPortal: true,
   // Three reports without an account, then sign in (report dce33fd0); signed in, they can still send anonymously.
   anonymousLimit: Number(process.env.SHIPCUE_ANONYMOUS_LIMIT ?? 3),
   signInUrl: (req) => {

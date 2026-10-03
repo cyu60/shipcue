@@ -47,6 +47,14 @@ export function storeContract(name: string, makeStore: () => Promise<ReportStore
       expect((await store.list()).length).toBe(3);
     });
 
+    it('lists one reporter\'s own reports (the reporter portal, report 3d0d7995)', async () => {
+      const mine = await store.create(sample({ reporter: 'ada@example.com' }));
+      await store.create(sample({ reporter: 'bob@example.com' }));
+      await store.create(sample({ reporter: null }));
+      expect((await store.list({ reporter: 'ada@example.com' })).map((r) => r.id)).toEqual([mine.id]);
+      expect(await store.list({ reporter: 'nobody@example.com' })).toEqual([]);
+    });
+
     it('claimNext takes the most urgent open report and never hands it out twice', async () => {
       await store.create(sample({ priority: 'low' }));
       const top = await store.create(sample({ priority: 'blocking' }));

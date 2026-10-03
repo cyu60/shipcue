@@ -91,6 +91,19 @@ function toBoardItem(r, screenshots) {
     ...screenshots?.length ? { screenshots } : {}
   };
 }
+var reportTitle = (description) => (description.trim().split("\n")[0] ?? "").slice(0, 120);
+function toMineItem(r) {
+  return {
+    id: r.id,
+    type: r.type,
+    status: r.status,
+    title: reportTitle(r.description),
+    resolution: r.resolution,
+    prUrl: r.prUrl ?? null,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.claimedAt ?? r.createdAt
+  };
+}
 var includes = (list2, v) => typeof v === "string" && list2.includes(v);
 function isPlainObject(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -306,7 +319,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
     },
     async list(filter = {}) {
       const params = [];
-      const where = (filter.status ? ` AND status = ${p(params, filter.status)}` : "") + (filter.claimant ? ` AND claimant_id = ${p(params, filter.claimant)}` : "");
+      const where = (filter.status ? ` AND status = ${p(params, filter.status)}` : "") + (filter.claimant ? ` AND claimant_id = ${p(params, filter.claimant)}` : "") + (filter.reporter ? ` AND reporter = ${p(params, filter.reporter)}` : "");
       return many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted${where}${scope(params)} ${QUEUE_ORDER}`, params);
     },
     async version() {
@@ -1300,6 +1313,14 @@ function createShipcueHandler(opts) {
     }
     return fail("Not found", 404);
   }
+  const MINE_LIMIT = 100;
+  async function mineRoute(req) {
+    if (!opts.reporterPortal || !opts.getReporter) return fail("Not found", 404);
+    const reporter = await opts.getReporter(req);
+    if (!reporter) return fail("Sign in to see your reports.", 401);
+    const reports = (await store.list({ reporter })).filter((r) => r.reporter === reporter).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, MINE_LIMIT).map(toMineItem);
+    return new Response(JSON.stringify({ reports }), { headers: { "content-type": "application/json", "cache-control": "private, no-store" } });
+  }
   const BOARD_LIMIT = 200;
   const defaultLinks = publicGitHubLinks();
   async function board(req) {
@@ -1372,6 +1393,8 @@ function createShipcueHandler(opts) {
       }
     }
     if (req.method === "GET" && path === `${base}/capabilities`) {
+      let asked;
+      const reporterOf = () => asked ??= opts.getReporter ? opts.getReporter(req) : Promise.resolve(null);
       const caps = {
         video: opts.saveVideo ? "form" : opts.acceptVideoUrl ? "url" : null,
         files: config.allowFiles,
@@ -1382,7 +1405,8 @@ function createShipcueHandler(opts) {
         maxScreenshotBytes: config.maxScreenshotBytes,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
         maxAltText: config.maxAltText,
-        ...opts.anonymousLimit !== void 0 ? { signedIn: !!(opts.getReporter && await opts.getReporter(req)), anonymous: true } : {}
+        ...opts.anonymousLimit !== void 0 ? { signedIn: !!await reporterOf(), anonymous: true } : {},
+        ...opts.reporterPortal && await reporterOf() ? { mine: true } : {}
       };
       return new Response(JSON.stringify(caps), { headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
@@ -1425,6 +1449,14 @@ function createShipcueHandler(opts) {
         return await teamApi(req, path.slice(`${base}/team`.length).split("/").filter(Boolean));
       } catch (err) {
         console.error("shipcue: team api failed", err);
+        return fail("Something went wrong. Please try again.", 500);
+      }
+    }
+    if (req.method === "GET" && path === `${base}/mine`) {
+      try {
+        return await mineRoute(req);
+      } catch (err) {
+        console.error("shipcue: mine failed", err);
         return fail("Something went wrong. Please try again.", 500);
       }
     }
