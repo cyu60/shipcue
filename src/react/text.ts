@@ -47,6 +47,7 @@ export interface ShipcueText {
   pinIt: string;
   unpinIt: string;
   pinHint: string;
+  dragPanel: string;
   seeTheFix: string;
   signIn: string;
   sendAnonymously: string;
@@ -131,12 +132,13 @@ export const DEFAULT_TEXT: ShipcueText = {
   pinIt: 'Pin this report',
   unpinIt: 'Unpin this report',
   pinHint: 'Pin it: once sent, it stays at the top of Yours and the CueLog',
+  dragPanel: 'Drag to move',
   seeTheFix: 'See the fix on GitHub',
   signIn: 'Sign in',
   sendAnonymously: 'Send anonymously (leave my name off it)',
   buttonSize: 'Button size',
   textSize: 'Text size',
-  resetPosition: 'Reset button position',
+  resetPosition: 'Reset position',
   sizeNames: ['S', 'M', 'L'],
   send: 'Send',
   sending: 'Sending…',

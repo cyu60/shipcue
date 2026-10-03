@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-267%20passing-2E5BFF?style=flat-square" alt="267 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-269%20passing-2E5BFF?style=flat-square" alt="269 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -250,6 +250,7 @@ pnpm build
 
 ## Changelog
 
+- **0.17.1**: drag the panel by its title, as well as the button: it moves on its own, stays on screen, and is remembered in this browser. Reset position (⌃⇧H / Alt+Shift+H, or Display) puts both back; `movable={false}` keeps them still.
 - **0.17.0**: `emailReporter({ send, appName, link, trust })` tells whoever filed a report when it is fixed, with the fix in one line and the PR (bring your own provider; only email reporters you have verified). shipcue Cloud projects can forward their reports to a Slack channel and/or a signed webhook, per event (Setup → Forward reports; `sql/cloud.sql` adds the columns).
 - **0.16.2**: pins replace stars: a small Pin button next to Dictate pins the report you are writing (it stays at the top of Yours and the CueLog, and the form sends `pinned=1` for your own backend; `pin={false}` hides it for apps with their own pin control), and the board and CueLog table pin with Lucide's pin icon. A report's history keeps its order even when two changes share a timestamp (`shipcue_report_events.seq`; run the new line at the end of the 0.12 upgrade block in `sql/schema.sql`).
 - **0.16.1**: `postgresStore(db, table, { project: null })` is an app's own queue in a table that also holds shipcue Cloud projects: it only sees rows with no project. Use it wherever one table serves both, so Cloud projects' reports never show on your board or to your agents.
