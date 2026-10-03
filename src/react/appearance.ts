@@ -34,3 +34,36 @@ export function saveAppearance(a: Appearance): void {
     // Storage blocked: the choice lasts until the page reloads.
   }
 }
+
+// The panel's own size, dragged by its free corner (shipcue report ee970b18). Kept per browser
+// in CSS px before the textSize zoom; the extra height goes to the text box. Reset position
+// forgets it.
+
+/** The resize grip's hit area (px; bigger on touch) and the arrow-key steps (CSS px). */
+export const RESIZE = { grip: 14, gripTouch: 28, step: 8, bigStep: 48 } as const;
+
+export interface PanelSize {
+  width: number;
+  height: number;
+}
+
+const SIZE_KEY = 'shipcue:panel-size';
+const isLength = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+
+export function loadPanelSize(): PanelSize | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SIZE_KEY) ?? 'null') as Record<string, unknown> | null;
+    return raw && isLength(raw.width) && isLength(raw.height) ? { width: raw.width, height: raw.height } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePanelSize(size: PanelSize | null): void {
+  try {
+    if (size) localStorage.setItem(SIZE_KEY, JSON.stringify(size));
+    else localStorage.removeItem(SIZE_KEY);
+  } catch {
+    // Storage blocked: the size lasts until the page reloads.
+  }
+}
