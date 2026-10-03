@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-393%20passing-2E5BFF?style=flat-square" alt="393 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-394%20passing-2E5BFF?style=flat-square" alt="394 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -259,6 +259,7 @@ pnpm build
 
 ## Changelog
 
+- **0.24.2**: when key presses on the resize grip come quicker than the panel redraws, each one now counts (shipcue report ee970b18).
 - **0.24.1**: the Send button keeps its size while sending: "Sending…" no longer wraps it onto two lines or makes it taller.
 - **0.24.0**: resize the panel (shipcue report ee970b18). A small grip on the floating panel's free corner (the one away from the button, so it follows the quadrant) resizes it by drag, or by the arrow keys once focused (Shift for bigger steps); the text box takes the extra height. At least the default size, at most 8px inside the window, scaled with the text size, kept in this browser (`shipcue:panel-size`); Reset position (⌃⇧H or Display) also resets the size, and is now offered with `movable={false}` too. New: prop `resizable` (on by default for the floating panel); text key `resizePanel`.
 - **0.23.0**: adjust before capturing (shipcue report 03de1f12). Letting go of the drag no longer captures at once: the selection stays with eight resize handles, moves when dragged from inside, and has a small dark toolbar with editable width × height, **Capture** (Enter, attaches it as it is), **Capture & annotate** (opens the annotator) and Cancel (Esc); a new drag outside starts over. The same in Select area and on the tint that comes with the panel (there Esc first drops the selection, keeping the tint). The browser's "see this tab?" prompt comes only at Capture, and the granted share is reused for later captures while the panel is open (stopped when it closes, the page hides, or after `captureKeepAlive` ms idle, 120000 by default; an ended share is asked for again). New: prop `captureKeepAlive`; text keys `adjustHint`, `selectionToolbar`, `selectionWidth`, `selectionHeight`, `captureNow`, `captureAnnotate`; exports `tabCapture` and `CAPTURE_KEEP_ALIVE_MS`. **Upgrading:** `AreaSelect`'s `onSelect` now gets `(rect, { annotate })` once the person confirms, not on release; `captureArea` still captures once and stops.

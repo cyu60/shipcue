@@ -1824,7 +1824,17 @@ function ResizeBox({ on, grip, children }: { on: boolean; grip: React.ReactNode;
  * inside the window; kept in this browser. Arrow keys on the focused grip resize it too.
  */
 function usePanelResize(enabled: boolean, panelRef: React.RefObject<HTMLDivElement | null>, zoom: number) {
-  const [size, setSize] = useState<PanelSize | null>(null);
+  const [size, setSizeState] = useState<PanelSize | null>(null);
+  // A size set but not yet drawn, so key presses quicker than a render each build on the one
+  // before; once drawn, the panel itself is measured again.
+  const latest = useRef<PanelSize | null>(null);
+  useEffect(() => {
+    latest.current = null;
+  });
+  const setSize = (next: PanelSize | null) => {
+    latest.current = next;
+    setSizeState(next);
+  };
   const [, setViewport] = useState(0);
   const start = useRef<{ px: number; py: number; w: number; h: number; left: boolean; top: boolean; b: Bounds } | null>(null);
   const [touch, setTouch] = useState(false);
@@ -1859,7 +1869,7 @@ function usePanelResize(enabled: boolean, panelRef: React.RefObject<HTMLDivEleme
       maxW: Math.max(minW, (left ? r.right - EDGE : window.innerWidth - EDGE - r.left) / zoom),
       maxH: Math.max(minH, (top ? r.bottom - EDGE : window.innerHeight - EDGE - r.top) / zoom),
     };
-    return { w: r.width / zoom, h: r.height / zoom, b };
+    return { w: latest.current?.width ?? r.width / zoom, h: latest.current?.height ?? r.height / zoom, b };
   };
   const fit = (w: number, h: number, b: Bounds): PanelSize => ({
     width: Math.round(Math.min(Math.max(w, b.minW), b.maxW)),
