@@ -364,9 +364,77 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
 }
 
 // src/server/handler.ts
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac as createHmac2, timingSafeEqual } from "node:crypto";
 
 // src/server/broadcast.ts
+import { createHmac } from "node:crypto";
+var EVENT_TYPES = [
+  "report.filed",
+  "report.claimed",
+  "report.assigned",
+  "report.released",
+  "report.review",
+  "report.closed",
+  "report.reopened",
+  "report.video"
+];
+function describeEvent(e) {
+  const r = e.report;
+  const kind = r.type === "bug" ? "Bug" : r.type === "feature" ? "Feature request" : "Agent task";
+  const what = r.description.length > 140 ? `${r.description.slice(0, 137)}...` : r.description;
+  switch (e.type) {
+    case "report.filed":
+      return `${kind} filed (${r.priority}): ${what}`;
+    case "report.claimed":
+      return `${r.claimedBy ?? "An agent"} took: ${what}`;
+    case "report.assigned":
+      return r.claimedBy ? `Assigned to ${r.claimedBy}: ${what}` : `Unassigned: ${what}`;
+    case "report.released":
+      return `Back in the queue: ${what}`;
+    case "report.review":
+      return `In review${r.prUrl ? ` (${r.prUrl})` : ""}: ${what}`;
+    case "report.reopened":
+      return `Reopened: ${what}`;
+    case "report.closed":
+      return r.status === "fixed" ? `Fixed: ${r.resolution ?? what}` : `Won't fix: ${what}${r.resolution ? ` (${r.resolution})` : ""}`;
+    case "report.video":
+      return `Video added to: ${what}`;
+  }
+}
+function signBody(secret, body2) {
+  return `sha256=${createHmac("sha256", secret).update(body2).digest("hex")}`;
+}
+function webhook(opts) {
+  return {
+    name: opts.name ?? `webhook ${new URL(opts.url).host}`,
+    events: opts.events,
+    async send(event) {
+      const body2 = JSON.stringify({ ...event, text: describeEvent(event) });
+      const res = await fetch(opts.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-shipcue-event": event.type,
+          ...opts.secret ? { "x-shipcue-signature": signBody(opts.secret, body2) } : {},
+          ...opts.headers
+        },
+        body: body2
+      });
+      if (!res.ok) throw new Error(`${res.status} from ${new URL(opts.url).host}`);
+    }
+  };
+}
+function slack(opts) {
+  return {
+    name: "slack",
+    events: opts.events ?? ["report.filed", "report.closed"],
+    async send(event) {
+      const text = describeEvent(event) + (opts.link ? ` <${opts.link}|Open>` : "");
+      const res = await fetch(opts.webhookUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+      if (!res.ok) throw new Error(`${res.status} from Slack`);
+    }
+  };
+}
 async function broadcast(broadcasters, event, timeoutMs = 4e3) {
   const wanted = (broadcasters ?? []).filter((b) => !b.events || b.events.includes(event.type));
   if (!wanted.length) return;
@@ -458,7 +526,7 @@ function createShipcueHandler(opts) {
   const ipKey = (req) => {
     const ip = (req.headers.get("x-forwarded-for")?.split(",")[0] ?? req.headers.get("x-real-ip") ?? "").trim();
     if (!ip) return null;
-    return createHmac("sha256", opts.clientKeySecret ?? opts.agentToken ?? "shipcue").update(ip).digest("hex").slice(0, 32);
+    return createHmac2("sha256", opts.clientKeySecret ?? opts.agentToken ?? "shipcue").update(ip).digest("hex").slice(0, 32);
   };
   const signInFor = (req) => typeof opts.signInUrl === "function" ? opts.signInUrl(req) : opts.signInUrl;
   async function fileReport(req) {
@@ -1055,6 +1123,10 @@ function createCloudHandler(opts) {
     agentPull: p.agent_pull,
     areas: p.areas,
     publicBoard: p.public_board,
+    // Forwarding: Slack's URL is a secret, so only whether it is set; the webhook's URL shows.
+    slackConnected: !!p.slack_webhook_url,
+    webhookUrl: p.webhook_url ?? null,
+    notifyEvents: p.notify_events ?? ["report.filed", "report.closed"],
     createdAt: new Date(p.created_at).toISOString()
   });
   async function acceptInvites(user) {
@@ -1252,9 +1324,27 @@ function createCloudHandler(opts) {
         if (!ok) return fail2('Areas are { value: "editor", label: "Editor" } (up to 50).');
         set("areas", JSON.stringify(areas.map((a) => ({ value: String(a.value), label: String(a.label).trim() }))));
       }
+      let webhookSecret = null;
+      if (b.slackWebhookUrl !== void 0) {
+        const v = b.slackWebhookUrl === null || b.slackWebhookUrl === "" ? null : String(b.slackWebhookUrl).trim();
+        if (v !== null && !/^https:\/\/hooks\.slack\.com\/[\w/-]+$/.test(v)) return fail2("Use a Slack incoming webhook URL (https://hooks.slack.com/...).");
+        set("slack_webhook_url", v);
+      }
+      if (b.webhookUrl !== void 0) {
+        const v = b.webhookUrl === null || b.webhookUrl === "" ? null : String(b.webhookUrl).trim();
+        if (v !== null && !(/^https:\/\/[^\s]+$/.test(v) && v.length <= 500)) return fail2("Webhooks need an https:// URL.");
+        set("webhook_url", v);
+        webhookSecret = v ? `whsec_${randomBytes(24).toString("hex")}` : null;
+        set("webhook_secret", webhookSecret);
+      }
+      if (b.notifyEvents !== void 0) {
+        const events = Array.isArray(b.notifyEvents) ? b.notifyEvents : null;
+        if (!events || !events.every((e) => EVENT_TYPES.includes(e))) return fail2(`Events are ${EVENT_TYPES.join(", ")}.`);
+        set("notify_events", [...new Set(events)]);
+      }
       if (!sets.length) return fail2("Nothing to change.");
       const [row] = await q(`UPDATE cloud_projects SET ${sets.join(", ")}, updated_at = now() WHERE id = $1 RETURNING *`, params);
-      return json2({ project: publicProject(row) });
+      return json2({ project: publicProject(row), ...webhookSecret ? { webhookSecret } : {} });
     }
     if (section === "invites") {
       if (!owner) return fail2("Only owners can invite.", 403);
@@ -1343,6 +1433,11 @@ function createCloudHandler(opts) {
         return !!(sess && await memberOf(p.id, sess.user.id));
       },
       leaseSeconds: p.lease_seconds ?? void 0,
+      // Each project's own forwarding: a Slack channel and/or a signed webhook.
+      broadcasters: [
+        ...p.slack_webhook_url ? [slack({ webhookUrl: p.slack_webhook_url, events: p.notify_events })] : [],
+        ...p.webhook_url ? [webhook({ url: p.webhook_url, secret: p.webhook_secret ?? void 0, events: p.notify_events })] : []
+      ],
       agents: async (token) => {
         const a = (await q(
           `UPDATE cloud_agents SET last_seen_at = now() WHERE token_hash = $1 AND project_id = $2 AND revoked_at IS NULL RETURNING id, name, pull, types`,

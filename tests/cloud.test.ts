@@ -332,3 +332,37 @@ describe('shipcue Cloud: a new key, and deleting a project', () => {
     expect(rows.rows).toEqual([{ is_deleted: true }]);
   });
 });
+
+describe('forwarding (Slack and a signed webhook)', () => {
+  it('announces a project\'s reports where its owner asked, signed, and never another project\'s', async () => {
+    const posts: { url: string; body: string; sig: string | null }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      posts.push({ url: String(url), body: String(init?.body), sig: new Headers(init?.headers).get('x-shipcue-signature') });
+      return new Response('ok');
+    }) as typeof fetch;
+    try {
+      await signUp('ada@example.com');
+      const { data: made } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Acme' } });
+      const { id, publicKey } = made.project;
+      expect((await call('POST', `/projects/${id}/settings`, { as: 'ada@example.com', body: { slackWebhookUrl: 'https://evil.example.com/x' } })).res.status).toBe(400);
+      const { data } = await call('POST', `/projects/${id}/settings`, {
+        as: 'ada@example.com',
+        body: { slackWebhookUrl: 'https://hooks.slack.com/services/T0/B0/xyz', webhookUrl: 'https://hooks.acme.dev/shipcue', notifyEvents: ['report.filed'] },
+      });
+      expect(data.project).toMatchObject({ slackConnected: true, webhookUrl: 'https://hooks.acme.dev/shipcue', notifyEvents: ['report.filed'] });
+      expect(JSON.stringify(data.project)).not.toContain('hooks.slack.com');
+      expect(data.webhookSecret).toMatch(/^whsec_/);
+
+      const form = new FormData();
+      for (const [k, v] of Object.entries({ type: 'bug', priority: 'high', area: 'other', description: 'Checkout button is grey' })) form.set(k, v);
+      await handle(new Request(`${BASE}/p/${publicKey}/reports`, { method: 'POST', body: form }));
+      expect(posts.map((p) => new URL(p.url).host).sort()).toEqual(['hooks.acme.dev', 'hooks.slack.com']);
+      const hook = posts.find((p) => p.url.includes('acme.dev'))!;
+      const { signBody } = await import('../src/server');
+      expect(hook.sig).toBe(signBody(data.webhookSecret, hook.body));
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});

@@ -364,6 +364,32 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 // src/server/broadcast.ts
+var EMAIL = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+var esc = (t) => t.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function emailReporter(opts) {
+  return {
+    name: "email reporter",
+    events: ["report.closed"],
+    async send(event) {
+      const r = event.report;
+      if (r.status !== "fixed" || !r.reporter || !EMAIL.test(r.reporter)) return;
+      if (opts.trust && !opts.trust(r.reporter, r)) return;
+      const asked = (r.description.trim().split("\n")[0] ?? "").slice(0, 140);
+      const fix = r.resolution?.trim() || "It is fixed.";
+      const subject = `Fixed: ${asked.length > 70 ? `${asked.slice(0, 67)}...` : asked}`;
+      const text = [`What you reported to ${opts.appName} is fixed.`, "", `You asked: ${asked}`, `What changed: ${fix}`, ...r.prUrl ? [`The change: ${r.prUrl}`] : [], ...opts.link ? ["", `See everything that changed: ${opts.link}`] : []].join("\n");
+      const html = [
+        `<p>What you reported to ${esc(opts.appName)} is fixed.</p>`,
+        `<p style="color:#52525b">You asked: ${esc(asked)}</p>`,
+        `<p><strong>What changed:</strong> ${esc(fix)}</p>`,
+        ...r.prUrl && /^https:\/\//.test(r.prUrl) ? [`<p><a href="${esc(r.prUrl)}">See the change</a></p>`] : [],
+        ...opts.link ? [`<p><a href="${esc(opts.link)}">Everything that changed</a></p>`] : [],
+        '<p style="color:#a1a1aa;font-size:12px">Sent because you filed this report. Thanks for telling us.</p>'
+      ].join("\n");
+      await opts.send({ to: r.reporter, subject, html, text });
+    }
+  };
+}
 async function broadcast(broadcasters, event, timeoutMs = 4e3) {
   const wanted = (broadcasters ?? []).filter((b) => !b.events || b.events.includes(event.type));
   if (!wanted.length) return;
@@ -998,12 +1024,22 @@ async function cloudUserFrom(req, auth2) {
 // website/_src/api.mjs
 var auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 var pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+var EMAIL_KEY = process.env.SHIPCUE_EMAIL_API_KEY;
+var sendEmail = async (m) => {
+  const res = await fetch(`${process.env.SHIPCUE_CLOUD_AUTH_URL}/api/email/send-raw`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${EMAIL_KEY}` },
+    body: JSON.stringify({ to: m.to, subject: m.subject, html: m.html, from: "shipcue" })
+  });
+  if (!res.ok) throw new Error(`email: ${res.status} ${(await res.text()).slice(0, 200)}`);
+};
 var handler = createShipcueHandler({
   // Only shipcue's own reports: the same table holds every Cloud project's, which must never show here.
   store: postgresStore(pool, "shipcue_reports", { project: null }),
   // Any file can come along with a report here, not just screenshots (report e8b2dedd).
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: "/api/shipcue",
+  broadcasters: EMAIL_KEY ? [emailReporter({ appName: "shipcue", link: "https://shipcue.ibuildathing.com/cuelog/", send: sendEmail })] : [],
   getReporter: async (req) => (await cloudUserFrom(req, auth))?.email ?? null,
   // Three reports without an account, then sign in (report dce33fd0); signed in, they can still send anonymously.
   anonymousLimit: Number(process.env.SHIPCUE_ANONYMOUS_LIMIT ?? 3),

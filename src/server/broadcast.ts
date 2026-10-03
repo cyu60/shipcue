@@ -122,6 +122,57 @@ export function slack(opts: SlackOptions): Broadcaster {
   };
 }
 
+export interface EmailMessage {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+}
+
+export interface EmailReporterOptions {
+  /** Sends one email: your provider (InsForge emails, Resend, SES…). Throw on failure. */
+  send: (message: EmailMessage) => Promise<void>;
+  /** Your app's name, in the subject and the opening line. */
+  appName: string;
+  /** Where people can see the changelog, linked in the email. */
+  link?: string;
+  /**
+   * Only email reporters you know are real: true when getReporter returns a signed-in user's
+   * own email. Never pass reporter text a browser could make up, or anyone could send mail
+   * through you. Defaults to every reporter that looks like an email.
+   */
+  trust?: (reporter: string, report: Report) => boolean;
+}
+
+const EMAIL = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+const esc = (t: string) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** Tells the person who filed a report when it is fixed, with the fix in one line. */
+export function emailReporter(opts: EmailReporterOptions): Broadcaster {
+  return {
+    name: 'email reporter',
+    events: ['report.closed'],
+    async send(event) {
+      const r = event.report;
+      if (r.status !== 'fixed' || !r.reporter || !EMAIL.test(r.reporter)) return;
+      if (opts.trust && !opts.trust(r.reporter, r)) return;
+      const asked = (r.description.trim().split('\n')[0] ?? '').slice(0, 140);
+      const fix = r.resolution?.trim() || 'It is fixed.';
+      const subject = `Fixed: ${asked.length > 70 ? `${asked.slice(0, 67)}...` : asked}`;
+      const text = [`What you reported to ${opts.appName} is fixed.`, '', `You asked: ${asked}`, `What changed: ${fix}`, ...(r.prUrl ? [`The change: ${r.prUrl}`] : []), ...(opts.link ? ['', `See everything that changed: ${opts.link}`] : [])].join('\n');
+      const html = [
+        `<p>What you reported to ${esc(opts.appName)} is fixed.</p>`,
+        `<p style="color:#52525b">You asked: ${esc(asked)}</p>`,
+        `<p><strong>What changed:</strong> ${esc(fix)}</p>`,
+        ...(r.prUrl && /^https:\/\//.test(r.prUrl) ? [`<p><a href="${esc(r.prUrl)}">See the change</a></p>`] : []),
+        ...(opts.link ? [`<p><a href="${esc(opts.link)}">Everything that changed</a></p>`] : []),
+        '<p style="color:#a1a1aa;font-size:12px">Sent because you filed this report. Thanks for telling us.</p>',
+      ].join('\n');
+      await opts.send({ to: r.reporter, subject, html, text });
+    },
+  };
+}
+
 /**
  * Sends one event to every broadcaster that wants it, side by side, each given up after
  * timeoutMs. A failing broadcaster is logged and never fails the request.

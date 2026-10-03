@@ -80,6 +80,12 @@ CREATE TABLE IF NOT EXISTS cloud_agents (
 CREATE INDEX IF NOT EXISTS cloud_agents_project ON cloud_agents (project_id) WHERE revoked_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS cloud_agents_one_name ON cloud_agents (project_id, name) WHERE revoked_at IS NULL;
 
+-- Forwarding: where a project's reports are announced. Server only, like everything here.
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS slack_webhook_url text CHECK (slack_webhook_url IS NULL OR slack_webhook_url ~ '^https://hooks\.slack\.com/');
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS webhook_url text CHECK (webhook_url IS NULL OR (webhook_url ~ '^https://' AND length(webhook_url) <= 500));
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS webhook_secret text;
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS notify_events text[] NOT NULL DEFAULT '{report.filed,report.closed}';
+
 -- Server only: row-level security on with no policies, and no grants to browser roles.
 ALTER TABLE cloud_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_members ENABLE ROW LEVEL SECURITY;
