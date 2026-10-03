@@ -85,6 +85,11 @@ export interface ShipcueText {
   dragPanel: string;
   // The panel's resize grip (shipcue report ee970b18).
   resizePanel: string;
+  resizeHint: string;
+  cornerTopLeft: string;
+  cornerTopRight: string;
+  cornerBottomLeft: string;
+  cornerBottomRight: string;
   // Copy a prompt that has an agent fill the form out and file it (shipcue report 9f533ece).
   copyAgentPrompt: string;
   copyAgentPromptHint: string;
@@ -215,6 +220,11 @@ export const DEFAULT_TEXT: ShipcueText = {
   pinHint: 'Pin it: once sent, it stays at the top of Yours and the CueLog',
   dragPanel: 'Drag to move',
   resizePanel: 'Drag to resize (or use the arrow keys)',
+  resizeHint: 'Resize the panel by dragging its {corner} corner.',
+  cornerTopLeft: 'top-left',
+  cornerTopRight: 'top-right',
+  cornerBottomLeft: 'bottom-left',
+  cornerBottomRight: 'bottom-right',
   copyAgentPrompt: 'Copy prompt for my agent',
   copyAgentPromptHint: 'For Claude Code or Codex: it asks you what is missing, then files this report for you',
   copied: 'Copied',
