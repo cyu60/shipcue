@@ -47,8 +47,11 @@ describe('launcherIcon (Habitect report 4d0da3e8)', () => {
     expect(container.querySelector('[data-icon="ship"]')).toBeNull();
   });
 
-  it('keeps the sailboat by default', () => {
-    render(<ReportButton areas={[]} submit={async () => ({ id: 'r1' })} />);
+  it("shows shipcue's hard hat by default, and the sailboat with icon=\"ship\" (report 9806af04)", () => {
+    const { unmount } = render(<ReportButton areas={[]} submit={async () => ({ id: 'r1' })} />);
+    expect(screen.getByRole('button', { name: DEFAULT_TEXT.openButton }).querySelector('[data-icon="hat"]')).not.toBeNull();
+    unmount();
+    render(<ReportButton areas={[]} submit={async () => ({ id: 'r1' })} icon="ship" />);
     expect(screen.getByRole('button', { name: DEFAULT_TEXT.openButton }).querySelector('[data-icon="ship"]')).not.toBeNull();
   });
 });

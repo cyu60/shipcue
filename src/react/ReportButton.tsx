@@ -95,6 +95,8 @@ export interface ReportButtonProps {
    * on the floating button, 18px inline). The button keeps its accent background.
    */
   launcherIcon?: React.ReactNode;
+  /** shipcue's own mark on the button: the hard hat (default) or the original sailboat. */
+  icon?: 'hat' | 'ship';
   /**
    * People can drag the floating button anywhere on the page; where they leave it is kept in
    * their browser. On by default; false pins it bottom-right.
@@ -219,6 +221,7 @@ function ReportPanel({
   renderContext,
   trigger = true,
   launcherIcon,
+  icon = 'hat',
   movable = true,
 }: ReportButtonProps) {
   // The app's words over shipcue's (the older pastReportsLabel/seeReportsLabel props still work).
@@ -231,6 +234,8 @@ function ReportPanel({
   const tabs = useMemo(() => (types?.length ? TYPES.filter((x) => types.includes(x.value)) : TYPES), [types, TYPES]);
   const config = useMemo(() => resolveConfig({ areas }), [areas]);
   const [open, setOpen] = useState(false);
+  const openRef = useRef(false);
+  openRef.current = open;
   const [text, setText] = useState('');
   const [context, setContext] = useState<string | null>(null);
   // Preview (an outline) or Raw (the editable text) for the Context box (shipcue report 0fcc360a).
@@ -292,6 +297,18 @@ function ReportPanel({
   const maxVideoBytes = lim.maxVideoBytes;
   const uid = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Dictation (shipcue report 77a47290): the browser's own speech recognition, so no audio leaves
+  // the page through shipcue. Hidden where the browser has none (Firefox).
+  const [speech, setSpeech] = useState(false);
+  useEffect(() => {
+    const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- only known in the browser
+    setSpeech(!!(w.SpeechRecognition || w.webkitSpeechRecognition));
+  }, []);
+  const [listening, setListening] = useState(false);
+  const textRef = useRef('');
+  textRef.current = text;
+  const recognitionRef = useRef<{ stop(): void; abort(): void } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   // While open, the panel never shrinks back (switching tabs, clearing text), so it does not jump.
   const contentRef = useRef<HTMLDivElement>(null);
@@ -341,9 +358,9 @@ function ReportPanel({
   const keys = useMemo<Hotkeys>(() => {
     if (hotkeys === false) return {};
     const all = { ...appKeys, ...userKeys };
-    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id)];
+    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id), ...(speech ? ['dictate'] : [])];
     return Object.fromEntries(ids.map((id) => [id, (all as Hotkeys)[id] ?? []]));
-  }, [hotkeys, appKeys, userKeys, tabs, extraTabs]);
+  }, [hotkeys, appKeys, userKeys, tabs, extraTabs, speech]);
 
   // Open on a tab with what the report is about: the text highlighted on the page (not in
   // the panel), or else what the app says is selected.
@@ -409,6 +426,12 @@ function ReportPanel({
       if (!t) return;
       e.preventDefault();
       e.stopPropagation();
+      if (t === 'dictate') {
+        // Open the panel where it was (or keep it open), then listen.
+        if (!openRef.current) openOnRef.current(undefined, false);
+        setTimeout(() => toggleDictationRef.current(), 0);
+        return;
+      }
       openOnRef.current(t, true);
     };
     const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: string }>).detail?.type, true);
@@ -458,7 +481,49 @@ function ReportPanel({
     }
   };
 
+  const stopDictation = () => {
+    recognitionRef.current?.stop();
+  };
+  // Words go into the text box as you speak, after whatever was there.
+  const startDictation = () => {
+    const w = window as unknown as { SpeechRecognition?: new () => SpeechLike; webkitSpeechRecognition?: new () => SpeechLike };
+    const SR = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+    if (!SR || recognitionRef.current) return;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || 'en-US';
+    const before = textRef.current.trimEnd();
+    rec.onresult = (e) => {
+      let said = '';
+      for (let i = 0; i < e.results.length; i++) said += e.results[i]![0]!.transcript;
+      said = said.trim();
+      setText(before && said ? `${before} ${said}` : before || said);
+    };
+    rec.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') setError(t.micBlocked);
+    };
+    rec.onend = () => {
+      recognitionRef.current = null;
+      setListening(false);
+      textareaRef.current?.focus();
+    };
+    recognitionRef.current = rec;
+    setError(null);
+    setListening(true);
+    try {
+      rec.start();
+    } catch {
+      recognitionRef.current = null;
+      setListening(false);
+    }
+  };
+  const toggleDictation = () => (recognitionRef.current ? stopDictation() : startDictation());
+  const toggleDictationRef = useRef(toggleDictation);
+  toggleDictationRef.current = toggleDictation;
+
   const close = () => {
+    recognitionRef.current?.abort();
     setOpen(false);
     setError(null);
   };
@@ -691,12 +756,13 @@ function ReportPanel({
                 placeholder={current.placeholder}
                 style={s.textarea}
               />
+              <div style={{ ...s.row, alignItems: 'center', marginTop: 6, minHeight: 18 }}>
               {context === null && (
                 // Add context by hand on any tab (Habitect report 17748c25): what the app says is
                 // selected if anything, else an empty box to type or paste into.
                 <button
                   type="button"
-                  style={{ ...s.linkBtn, marginTop: 6, textDecoration: 'none' }}
+                  style={{ ...s.linkBtn, textDecoration: 'none' }}
                   onClick={() => {
                     let picked: string | null = null;
                     try {
@@ -712,6 +778,28 @@ function ReportPanel({
                   {t.addContext}
                 </button>
               )}
+                {context !== null && <span />}
+                {speech && (
+                  <button
+                    type="button"
+                    onClick={toggleDictation}
+                    aria-pressed={listening}
+                    title={`${t.dictate}${keys.dictate?.[0] ? ` (${display(keys.dictate[0]!)})` : ''}`}
+                    style={{ ...s.linkBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, color: listening ? '#be123c' : '#71717a' }}
+                  >
+                    {listening ? (
+                      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: '#e11d48' }} />
+                    ) : (
+                      <svg data-icon="mic" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.8" />
+                        <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                      </svg>
+                    )}
+                    {listening ? t.listening : t.dictate}
+                    {!listening && keys.dictate?.[0] && <span style={{ opacity: 0.7 }}>{display(keys.dictate[0]!)}</span>}
+                  </button>
+                )}
+              </div>
               {context !== null && (() => {
                 // A bulleted outline opens as a Preview; plain text, or anything being edited, as Raw.
                 const showPreview = contextView === 'preview' && (!!renderContext || isOutlineText(context));
@@ -895,7 +983,7 @@ function ReportPanel({
               )}
               {editingKeys && hotkeys !== false && (
                 <div style={s.keysBox} aria-label="Shortcuts">
-                  {[...tabs.map((t) => ({ id: t.value as string, label: t.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label }))].map(({ id, label }) => (
+                  {[...tabs.map((x) => ({ id: x.value as string, label: x.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label })), ...(speech ? [{ id: 'dictate', label: t.dictate }] : [])].map(({ id, label }) => (
                     <div key={id} style={s.keysRow}>
                       <span>{label}</span>
                       <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1005,14 +1093,16 @@ function ReportPanel({
           title={t.openButton}
           style={variant === 'floating' ? { ...s.fab, ...(drag.dragging ? { cursor: 'grabbing' } : null) } : s.inlineBtn}
         >
-          {launcherIcon ?? (
+          {launcherIcon ?? (icon === 'hat' ? (
+            <HatIcon size={variant === 'floating' ? 24 : 19} />
+          ) : (
           <svg data-icon="ship" width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 3v12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             <path d="M12 4.5 18 13h-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
             <path d="M12 7.5 7 13h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
             <path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
           </svg>
-          )}
+          ))}
         </button>
       )}
     </div>
@@ -1020,6 +1110,34 @@ function ReportPanel({
 }
 
 // Inline styles so the button works in any app with no CSS setup.
+/**
+ * shipcue's mark: a builder's hard hat, side on, with its headlamp (shipcue report 9806af04).
+ * Solid in currentColor; the lamp is cut out so the button's colour shows through.
+ */
+export function HatIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg data-icon="hat" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path fillRule="evenodd" d="M6.3 15.2C6.3 10.5 9.4 7.4 13.5 7.4s7.2 3.1 7.2 7.8zM7.1 9.4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" />
+      <path d="M9 9.1c1.3-1.9 2.8-2.8 4.5-2.8s3.3.9 4.6 2.7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <rect x="2.4" y="15.6" width="19.6" height="2.2" rx="1.1" />
+      <circle cx="7.1" cy="11.9" r="1.3" />
+    </svg>
+  );
+}
+
+/** The bit of the Web Speech API the panel uses (SpeechRecognition / webkitSpeechRecognition). */
+interface SpeechLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((e: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+}
+
 const POSITION_KEY = 'shipcue:button-position';
 const FAB = 48;
 const EDGE = 8;

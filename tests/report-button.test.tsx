@@ -322,9 +322,9 @@ describe('ReportButton: three tabs', () => {
     expect(screen.getAllByRole('radio').map((r) => r.textContent)).toEqual(['Bug', 'Feature request']);
   });
 
-  it('shows a ship on the button', () => {
+  it('shows the hard hat on the button', () => {
     render(<ReportButton areas={areas} submit={ok()} />);
-    expect(screen.getByRole('button', { name: 'Report a bug or request a feature' }).querySelector('svg[data-icon="ship"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Report a bug or request a feature' }).querySelector('svg[data-icon="hat"]')).not.toBeNull();
   });
 });
 

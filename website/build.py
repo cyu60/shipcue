@@ -31,7 +31,7 @@ def page(path, title, description, body, current):
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 4.5 18 13h-6z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 7.5 7 13h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 15.5h18l-2.2 3.9a2 2 0 0 1-1.74 1.1H6.94a2 2 0 0 1-1.74-1.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>shipcue</a><nav class="nav" aria-label="Main">{nav}</nav></header>
+<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M6.3 15.2C6.3 10.5 9.4 7.4 13.5 7.4s7.2 3.1 7.2 7.8zM7.1 9.4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/><path d="M9 9.1c1.3-1.9 2.8-2.8 4.5-2.8s3.3.9 4.6 2.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="2.4" y="15.6" width="19.6" height="2.2" rx="1.1"/><circle cx="7.1" cy="11.9" r="2.05" fill="none" stroke="#E5484D" stroke-width="1"/><circle cx="7.1" cy="11.9" r="1.3"/></svg></span>shipcue</a><nav class="nav" aria-label="Main">{nav}</nav></header>
 <main>
 {body}
 </main>

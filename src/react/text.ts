@@ -20,6 +20,9 @@ export interface ShipcueText {
   where: string;
   context: string;
   addContext: string;
+  dictate: string;
+  listening: string;
+  micBlocked: string;
   preview: string;
   raw: string;
   remove: string;
@@ -83,6 +86,9 @@ export const DEFAULT_TEXT: ShipcueText = {
   where: 'Where',
   context: 'Context',
   addContext: '+ Add context',
+  dictate: 'Dictate',
+  listening: 'Listening… click to stop',
+  micBlocked: 'The microphone is blocked for this page. Allow it in the address bar, then try again.',
   preview: 'Preview',
   raw: 'Raw',
   remove: 'remove',

@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-159%20passing-2E5BFF?style=flat-square" alt="159 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-163%20passing-2E5BFF?style=flat-square" alt="163 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -107,7 +107,8 @@ What else the panel does:
 - **Recent errors.** Page errors, unhandled rejections and `console.error` calls from before the report are added to the snapshot as `recentErrors`. Turn off with `captureErrors={false}`.
 - **The page.** The panel shows which page it will attach, with a "don't attach" link.
 - **Move it.** People can drag the floating button anywhere; `movable={false}` keeps it bottom-right.
-- **Your own mark.** `launcherIcon={<YourLogo />}` draws your logo on the floating or inline button instead of shipcue's sailboat.
+- **Your own mark.** The button shows shipcue's hard hat; `icon="ship"` brings back the sailboat, and `launcherIcon={<YourLogo />}` draws your own logo.
+- **Dictate.** A small mic beside the text box (and ⌃M / Alt+Shift+M) types what you say, using the browser's speech recognition; it is listed in Shortcuts and hidden in browsers without it.
 - **Your own words.** Pass `text={{ seeReports: 'See your reports', bugTab: 'Problem', send: 'Submit' }}` to the button or the board: anything you leave out keeps shipcue's wording (`DEFAULT_TEXT` from `shipcue/react` lists every key).
 - **Limits.** Set them once where you create the handler, `config: resolveConfig({ areas, maxScreenshots: 20, maxTotalScreenshotBytes: 4 * 1024 * 1024 })`, and the button follows (it reads them from `{endpoint}/capabilities`). If you send reports yourself with `submit`, pass the same numbers as `limits={{ maxScreenshots: 20 }}`. Defaults: 10 screenshots, 5 MB each, 4 MB together (under Vercel's 4.5 MB request cap), 40 MB and 60 seconds of video.
 - **Videos past 4.5 MB.** Hosts like Vercel cap a request at 4.5 MB, so for longer recordings upload the video from the browser straight to your storage with `uploadVideo`, then post its URL to `{endpoint}/reports/:id/video` as `{ url }`; the handler checks it with `acceptVideoUrl(url, id)`. shipcue's own site does this with Vercel Blob client uploads (`website/_src/button.mjs`, `website/_src/upload.mjs`).
@@ -234,6 +235,8 @@ pnpm build
 
 ## Changelog
 
+- **0.11.0**: shipcue's mark is now a builder's hard hat (with its headlamp) on the button, the site and the extension; `icon="ship"` keeps the sailboat, `launcherIcon` takes your own. Dictate: a small mic beside the text box (⌃M on a Mac, Alt+Shift+M elsewhere, even with the panel closed) speaks into the report with the browser's own speech recognition; hidden where the browser has none.
+- **Extension 0.1.1**: the hard-hat icon.
 - **0.10.5**: a quick drag of the button works too (the pointer is held from the press).
 - **0.10.4**: drag the floating button anywhere on the page; it stays where you leave it (kept in your browser) and the panel opens toward the middle of the screen. `movable={false}` pins it bottom-right.
 - **0.10.3**: in Tabs view only the current tab is underlined (others no longer keep a grey line once visited); shipcue's CueLog opens on the Changelog.

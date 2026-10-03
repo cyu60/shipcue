@@ -17,10 +17,11 @@ export function isMac(): boolean {
  * On a Mac: ⌘J for an agent task, ⌃B for a bug, ⌃F for a feature request (as in Block Outliner).
  * Elsewhere Ctrl+J, Ctrl+B and Ctrl+F belong to the browser and to editors, so Alt+Shift.
  */
-export function defaultHotkeys(mac = isMac()): Required<Hotkeys> {
+export function defaultHotkeys(mac = isMac()): Required<Hotkeys> & { dictate: string[] } {
+  // dictate: speak into the report (shipcue report 77a47290).
   return mac
-    ? { task: ['Mod+J'], bug: ['Ctrl+B'], feature: ['Ctrl+F'] }
-    : { task: ['Alt+Shift+J'], bug: ['Alt+Shift+B'], feature: ['Alt+Shift+F'] };
+    ? { task: ['Mod+J'], bug: ['Ctrl+B'], feature: ['Ctrl+F'], dictate: ['Ctrl+M'] }
+    : { task: ['Alt+Shift+J'], bug: ['Alt+Shift+B'], feature: ['Alt+Shift+F'], dictate: ['Alt+Shift+M'] };
 }
 
 /** The chord a key press is ("Ctrl+B", "Cmd+J"), or null for a lone modifier. */
