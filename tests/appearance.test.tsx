@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { ReportButton } from '../src/react';
 
 beforeEach(() => {
@@ -195,6 +195,17 @@ describe('resizing the panel by its free corner (report ee970b18)', () => {
     fireEvent.keyDown(grip(), { key: 'ArrowRight', shiftKey: true });
     expect(dialog.style.width).toBe('384px');
     expect(JSON.parse(localStorage.getItem(SIZE_KEY)!)).toEqual({ width: 384, height: 508 });
+  });
+
+  it('quick key presses each count, before the panel re-renders', async () => {
+    const { dialog } = await openPanel();
+    // Two presses in one task, as a held key or a script sends them: no render in between.
+    act(() => {
+      fireEvent.keyDown(grip(), { key: 'ArrowUp', shiftKey: true });
+      fireEvent.keyDown(grip(), { key: 'ArrowLeft', shiftKey: true });
+    });
+    expect(dialog.style.width).toBe('432px');
+    expect(JSON.parse(localStorage.getItem(SIZE_KEY)!)).toEqual({ width: 432, height: 548 });
   });
 
   it('Reset position (hotkey or Display) puts the size back too', async () => {
