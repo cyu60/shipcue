@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ReportButton, Lightbox } from '../src/react';
+import { ReportButton, Lightbox, selectArea } from '../src/react';
 import { captureArea } from '../src/react/capture';
 
 // Select an area, capture it, mark it up, attach it with alt text (shipcue report 58b727d9).
@@ -90,6 +90,12 @@ describe('Select area', () => {
     fireEvent.pointerMove(layer, { clientX: 130, clientY: 90, pointerId: 1 });
     expect(screen.getByText('120 × 80')).toBeInTheDocument();
     expect(document.querySelector('[data-shipcue-selection]')).toHaveStyle({ left: '10px', top: '10px', width: '120px', height: '80px' });
+  });
+
+  it('starts from selectArea() in the app, even with the panel closed (a command palette, say)', async () => {
+    render(<ReportButton areas={[]} submit={ok()} hotkeys={false} />);
+    act(() => selectArea());
+    expect(screen.getByRole('dialog', { name: 'Select an area' })).toBeInTheDocument();
   });
 
   it('is in the Shortcuts list, so it can be changed like the others', async () => {

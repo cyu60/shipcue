@@ -96,6 +96,8 @@ export const OPEN_EVENT = 'shipcue:open';
 
 export const CLOSE_EVENT = 'shipcue:close';
 
+export const SELECT_AREA_EVENT = 'shipcue:select-area';
+
 /** Open the report panel from anywhere in your app, on a report type or one of your extraTabs. */
 export function openReport(tab?: ReportType | (string & {})): void {
   window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { type: tab } }));
@@ -104,4 +106,12 @@ export function openReport(tab?: ReportType | (string & {})): void {
 /** Close the report panel from anywhere in your app. */
 export function closeReport(): void {
   window.dispatchEvent(new CustomEvent(CLOSE_EVENT));
+}
+
+/**
+ * Start Select area from anywhere in your app (a command palette, a menu): the page tints and the
+ * person drags out part of it, as the Select area tile does. The panel opens if it was closed.
+ */
+export function selectArea(): void {
+  window.dispatchEvent(new CustomEvent(SELECT_AREA_EVENT));
 }
