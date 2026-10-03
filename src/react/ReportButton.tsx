@@ -146,8 +146,19 @@ export interface ReportButtonProps {
    */
   fields?: () => Record<string, string>;
   /**
-   * Tint the page while the panel is open, so the panel stands out (shipcue report 58b727d9).
-   * The page stays usable underneath (people copy text from it into reports). Off by default.
+   * Area capture comes with the panel (shipcue report 503aa011): while it is open the page is
+   * tinted, and a drag anywhere on the tint captures that part of the page into the annotator, as
+   * Select area does, with no hotkey or button. A plain click (or tap) on the tint, or Esc, lifts
+   * it so the page is usable again (copy text into the report); the Select area tile or its hotkey
+   * brings capture back. The panel and button stay above it, and typing in the panel never
+   * captures. On by default for the floating panel (also with trigger={false}); off for the inline
+   * variant unless set. false keeps the panel as it was before 0.21.
+   */
+  captureOnOpen?: boolean;
+  /**
+   * Deprecated since 0.21 in favour of captureOnOpen. Tints the page while the panel is open,
+   * without blocking it (shipcue report 58b727d9). With captureOnOpen on, this plain tint shows
+   * only once the capture tint is lifted. Off by default.
    */
   dimOnOpen?: boolean;
 }
@@ -275,7 +286,9 @@ function ReportPanel({
   formExtras,
   fields,
   dimOnOpen = false,
+  captureOnOpen: captureOnOpenProp,
 }: ReportButtonProps) {
+  const captureOnOpen = captureOnOpenProp ?? variant === 'floating';
   const endpoint = endpointProp ?? '/api/shipcue';
   // The app's words over shipcue's (the older pastReportsLabel/seeReportsLabel props still work).
   const t = useMemo(
@@ -308,6 +321,13 @@ function ReportPanel({
   const [files, setFiles] = useState<File[]>([]);
   // Select an area, capture it, mark it up (shipcue report 58b727d9). Alt text per screenshot.
   const [selecting, setSelecting] = useState(false);
+  // The capture tint (captureOnOpen) was lifted by a click or Esc; each opening brings it back.
+  const [tintLifted, setTintLifted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset per opening
+    if (open) setTintLifted(false);
+  }, [open]);
+  const ambientRef = useRef(false);
   const [capturing, setCapturing] = useState(false);
   const [annotating, setAnnotating] = useState<{ src: string; index: number | null; alt: string; name: string; own: boolean } | null>(null);
   const [alts, setAlts] = useState<Map<File, string>>(() => new Map());
@@ -663,7 +683,12 @@ function ReportPanel({
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    // Esc lifts the capture tint first; the next one closes the panel.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (ambientRef.current) setTintLifted(true);
+      else close();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
@@ -730,6 +755,7 @@ function ReportPanel({
     }
     recognitionRef.current?.abort();
     if (!openRef.current) setPage(window.location.href);
+    setTintLifted(true);
     setSelecting(true);
   };
   const startSelectRef = useRef(startSelect);
@@ -738,6 +764,8 @@ function ReportPanel({
   // The tint and the panel are gone before the frame is taken, so neither is in the picture.
   const captureSelection = async (rect: Rect) => {
     setSelecting(false);
+    // Back at the panel afterwards with the page usable; Select area captures another.
+    setTintLifted(true);
     setCapturing(true);
     try {
       await afterPaint();
@@ -854,9 +882,17 @@ function ReportPanel({
     }
   };
 
+  // The capture tint: only over the report form, while it can still take a screenshot.
+  const ambient =
+    captureOnOpen && open && !tintLifted && recording === null && !selecting && !capturing && !annotating && !extra && files.length < lim.maxScreenshots && canCaptureTab();
+  ambientRef.current = ambient;
+
   return (
     <div ref={wrapRef} data-shipcue={variant} style={{ ...(variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap), ...(selecting || capturing ? { visibility: 'hidden' } : null) }}>
-      {dimOnOpen && open && !selecting && !capturing && typeof document !== 'undefined' && createPortal(<div data-shipcue-dim="" aria-hidden="true" style={s.dim} />, document.body)}
+      {ambient && typeof document !== 'undefined' && (
+        <AreaSelect ambient hint={t.captureOnOpenHint} onSelect={(r) => void captureSelection(r)} onCancel={() => setTintLifted(true)} onDismiss={() => setTintLifted(true)} />
+      )}
+      {dimOnOpen && open && !ambient && !selecting && !capturing && typeof document !== 'undefined' && createPortal(<div data-shipcue-dim="" aria-hidden="true" style={s.dim} />, document.body)}
       {selecting && <AreaSelect hint={t.selectAreaHint} onSelect={(r) => void captureSelection(r)} onCancel={() => setSelecting(false)} />}
       {annotating && (
         <Annotator

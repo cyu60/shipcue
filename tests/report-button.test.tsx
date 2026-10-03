@@ -274,6 +274,8 @@ describe('ReportButton: video, page, errors and past reports', () => {
     await userEvent.click(record);
     expect(getDisplayMedia).toHaveBeenCalled();
     delete (globalThis as unknown as { MediaRecorder?: unknown }).MediaRecorder;
+    // Capture support also brings the capture tint (captureOnOpen); later tests expect none.
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined });
   });
   it('hides video when there is nowhere to send it', async () => {
     await openPanel(); // submit given, no uploadVideo
