@@ -274,3 +274,38 @@ describe('shipcue Cloud: the sites a project lists', () => {
     expect(data.reports).toHaveLength(2);
   });
 });
+
+describe('shipcue Cloud: a new key, and deleting a project', () => {
+  async function project() {
+    await signUp('ada@example.com');
+    const { data } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Keys' } });
+    await call('POST', `/projects/${data.project.id}/invites`, { as: 'ada@example.com', body: { email: 'bob@example.com', role: 'member' } });
+    await signUp('bob@example.com');
+    await call('GET', '/me', { as: 'bob@example.com' });
+    return data.project as { id: string; publicKey: string };
+  }
+  const board = (key: string) => handle(new Request(`${BASE}/p/${key}/capabilities`));
+
+  it('gives the button a new key and retires the old one (owners only)', async () => {
+    const p = await project();
+    expect((await call('POST', `/projects/${p.id}/rotate-key`, { as: 'bob@example.com', body: {} })).res.status).toBe(403);
+    const { res, data } = await call('POST', `/projects/${p.id}/rotate-key`, { as: 'ada@example.com', body: {} });
+    expect(res.status).toBe(200);
+    expect(data.project.publicKey).toMatch(/^pk_[0-9a-f]{24}$/);
+    expect(data.project.publicKey).not.toBe(p.publicKey);
+    expect((await board(p.publicKey)).status).toBe(404);
+    expect((await board(data.project.publicKey)).status).toBe(200);
+  });
+
+  it('deletes a project for everyone (owners only), keeping the rows', async () => {
+    const p = await project();
+    expect((await call('POST', `/projects/${p.id}/delete`, { as: 'bob@example.com', body: {} })).res.status).toBe(403);
+    expect((await call('POST', `/projects/${p.id}/delete`, { as: 'ada@example.com', body: {} })).res.status).toBe(200);
+    expect((await call('GET', '/me', { as: 'ada@example.com' })).data.projects).toEqual([]);
+    expect((await call('GET', '/me', { as: 'bob@example.com' })).data.projects).toEqual([]);
+    expect((await call('GET', `/projects/${p.id}`, { as: 'ada@example.com' })).res.status).toBe(404);
+    expect((await board(p.publicKey)).status).toBe(404);
+    const rows = await db.query<{ is_deleted: boolean }>('SELECT is_deleted FROM cloud_projects');
+    expect(rows.rows).toEqual([{ is_deleted: true }]);
+  });
+});

@@ -351,6 +351,17 @@ export function createCloudHandler(opts) {
     if (req.method !== 'POST') return fail('Not found', 404);
     const b = await body(req);
 
+    if (section === 'rotate-key') {
+      if (!owner) return fail('Only owners can change the key.', 403);
+      const [row] = await q(`UPDATE cloud_projects SET public_key = $2, updated_at = now() WHERE id = $1 RETURNING *`, [id, `pk_${randomBytes(12).toString('hex')}`]);
+      return json({ project: publicProject(row) });
+    }
+    if (section === 'delete') {
+      if (!owner) return fail('Only owners can delete the project.', 403);
+      await q(`UPDATE cloud_projects SET is_deleted = true, deleted_at = now(), updated_at = now() WHERE id = $1`, [id]);
+      return json({ ok: true });
+    }
+
     if (section === 'settings') {
       if (!owner) return fail('Only owners can change settings.', 403);
       const sets = [];
