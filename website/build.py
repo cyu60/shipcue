@@ -31,7 +31,7 @@ def page(path, title, description, body, current):
 </head>
 <body>
 <div class="wrap">
-<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M6.3 15.2C6.3 10.5 9.4 7.4 13.5 7.4s7.2 3.1 7.2 7.8zM7.1 9.4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/><path d="M9 9.1c1.3-1.9 2.8-2.8 4.5-2.8s3.3.9 4.6 2.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="2.4" y="15.6" width="19.6" height="2.2" rx="1.1"/><circle cx="7.1" cy="11.9" r="2.05" fill="none" stroke="#E5484D" stroke-width="1"/><circle cx="7.1" cy="11.9" r="1.3"/></svg></span>shipcue</a><nav class="nav" aria-label="Main">{nav}</nav></header>
+<header class="site-head"><a class="brand" href="/" aria-label="shipcue home"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5"/><path d="M14 6a6 6 0 0 1 6 6v3"/><path d="M4 15v-3a6 6 0 0 1 6-6"/><rect x="2" y="15" width="20" height="4" rx="1"/></svg></span>shipcue</a><nav class="nav" aria-label="Main">{nav}</nav></header>
 <main>
 {body}
 </main>

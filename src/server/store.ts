@@ -1,6 +1,11 @@
 import { sortQueue, toClaimant, type Claimant, type Priority, type Report, type ReportEvent, type ReportEventAction, type ReportInput, type ReportType, type Status } from '../core';
 
-export type NewReport = ReportInput & { reporter: string | null; screenshots: string[] };
+export type NewReport = ReportInput & {
+  reporter: string | null;
+  screenshots: string[];
+  /** Who sent it while signed out, as a keyed hash (never the address itself), for anonymousLimit. */
+  clientKey?: string | null;
+};
 export type ClosedStatus = Extract<Status, 'fixed' | 'wontfix'>;
 
 export interface ListFilter {
@@ -70,6 +75,8 @@ export interface ReportStore {
   expire?(): Promise<Report[]>;
   /** A report's history, oldest first. */
   events?(id: string): Promise<ReportEvent[]>;
+  /** How many signed-out reports came from this client key (see the handler's anonymousLimit). */
+  countFromClient?(clientKey: string): Promise<number>;
 }
 
 const holds = (r: Report, holder: string | undefined) => holder === undefined || r.claimantId == null || r.claimantId === holder;
@@ -80,6 +87,7 @@ const unclaimed = { claimedBy: null, claimedAt: null, claimantKind: null, claima
 export function memoryStore(): ReportStore {
   const rows = new Map<string, Report>();
   const log: ReportEvent[] = [];
+  const clients = new Map<string, string>();
   // Strictly increasing so reports filed in the same millisecond keep their order.
   let last = 0;
   const now = () => new Date((last = Math.max(Date.now(), last + 1))).toISOString();
@@ -115,6 +123,9 @@ export function memoryStore(): ReportStore {
         video: null,
         prUrl: null,
       };
+      // Kept beside the report, never on it.
+      delete (r as Partial<NewReport>).clientKey;
+      if (input.clientKey) clients.set(r.id, input.clientKey);
       r.updatedAt = r.createdAt;
       rows.set(r.id, r);
       return { ...r };
@@ -200,6 +211,9 @@ export function memoryStore(): ReportStore {
     },
     async events(id) {
       return log.filter((e) => e.reportId === id).map((e) => ({ ...e }));
+    },
+    async countFromClient(clientKey) {
+      return [...clients.entries()].filter(([id, k]) => k === clientKey && rows.has(id)).length;
     },
   };
 }

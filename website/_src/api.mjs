@@ -3,6 +3,10 @@ import pg from 'pg';
 import { createShipcueHandler, postgresStore } from '../../src/server';
 import { resolveConfig } from '../../src/core';
 import { AREAS } from './areas.mjs';
+import { cloudUserFrom, insforgeAuth } from './cloud.mjs';
+
+// Who is signed in: a shipcue Cloud account, from the session cookie /app sets.
+const auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 
@@ -11,6 +15,14 @@ const handler = createShipcueHandler({
   // Any file can come along with a report here, not just screenshots (report e8b2dedd).
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: '/api/shipcue',
+  getReporter: async (req) => (await cloudUserFrom(req, auth))?.email ?? null,
+  // Three reports without an account, then sign in (report dce33fd0); signed in, they can still send anonymously.
+  anonymousLimit: Number(process.env.SHIPCUE_ANONYMOUS_LIMIT ?? 3),
+  signInUrl: (req) => {
+    const from = req.headers.get('referer');
+    const path = from && new URL(from).origin === new URL(req.url).origin ? new URL(from).pathname : '/';
+    return `/app/?next=${encodeURIComponent(path)}`;
+  },
   agentToken: process.env.SHIPCUE_TOKEN,
   // The Changelog page reads the queue and the fixes (no reporters or diagnostics).
   board: true,

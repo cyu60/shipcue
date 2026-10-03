@@ -1,7 +1,8 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { BLOCKED_FILE_TYPES, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateReport, videoExtension, videoType, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
+import { findGitHubLink, publicGitHubLinks } from './links';
 
 const IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -19,6 +20,18 @@ export interface HandlerOptions {
   getReporter?: (req: Request) => Promise<string | null>;
   /** Refuse reports from signed-out people. */
   requireReporter?: boolean;
+  /**
+   * Take this many reports from each signed-out person, then ask them to sign in (they can still
+   * send anonymously once signed in). People are told apart by clientKey; the store keeps only a
+   * keyed hash. Needs the client_key column ("Upgrading from 0.13" in sql/schema.sql).
+   */
+  anonymousLimit?: number;
+  /** Where "Sign in" goes when anonymousLimit is reached. */
+  signInUrl?: string | ((req: Request) => string);
+  /** Tells signed-out people apart. By default a keyed hash of their IP address (x-forwarded-for, x-real-ip). */
+  clientKey?: (req: Request) => string | null | Promise<string | null>;
+  /** The key for that hash. Defaults to agentToken. */
+  clientKeySecret?: string;
   /** Upload a screenshot and return its URL. Without it, screenshots are kept as data URLs. */
   saveScreenshot?: (file: File, key: string) => Promise<string>;
   /**
@@ -67,6 +80,14 @@ export interface HandlerOptions {
    * Data-URL screenshots are served from GET {base}/board/screenshot/:id/:n, as images only.
    */
   boardScreenshots?: boolean;
+  /**
+   * Link each fix on the board: a report's PR, or the first GitHub link in its resolution. By
+   * default only links into public GitHub repositories show (checked once per repository); true
+   * shows every link, false none, or decide per link. Admins (boardAdmin) always see them.
+   */
+  boardLinks?: boolean | ((url: string, req: Request) => boolean | Promise<boolean>);
+  /** Who sees every link on the board, e.g. the project's team. */
+  boardAdmin?: (req: Request) => boolean | Promise<boolean>;
   /**
    * Take a video by URL: the button uploads it straight to your storage (say a presigned or
    * Vercel Blob client upload, past the 4.5 MB request limit), then posts { url } to
@@ -168,9 +189,31 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
   const emit = (type: ShipcueEventType, report: Report | null) =>
     report ? broadcast(opts.broadcasters, { type, at: new Date().toISOString(), report }) : Promise.resolve();
 
+  const ipKey = (req: Request) => {
+    const ip = (req.headers.get('x-forwarded-for')?.split(',')[0] ?? req.headers.get('x-real-ip') ?? '').trim();
+    if (!ip) return null;
+    return createHmac('sha256', opts.clientKeySecret ?? opts.agentToken ?? 'shipcue').update(ip).digest('hex').slice(0, 32);
+  };
+  const signInFor = (req: Request) => (typeof opts.signInUrl === 'function' ? opts.signInUrl(req) : opts.signInUrl);
+
   async function fileReport(req: Request): Promise<Response> {
     const reporter = opts.getReporter ? await opts.getReporter(req) : null;
     if (opts.requireReporter && !reporter) return fail('Sign in to send a report.', 401);
+    // A few reports without signing in, then sign in (shipcue report dce33fd0).
+    let clientKey: string | null = null;
+    if (!reporter && opts.anonymousLimit !== undefined && store.countFromClient) {
+      clientKey = opts.clientKey ? await opts.clientKey(req) : ipKey(req);
+      if (clientKey && (await store.countFromClient(clientKey)) >= opts.anonymousLimit) {
+        const n = opts.anonymousLimit;
+        return json(
+          {
+            error: `You have sent ${n} report${n === 1 ? '' : 's'} without signing in. Sign in to send more; you can still send them anonymously.`,
+            signIn: signInFor(req) ?? null,
+          },
+          401,
+        );
+      }
+    }
 
     let form: FormData;
     try {
@@ -234,7 +277,9 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       screenshots.push(opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f, !IMAGE_TYPES[f.type]));
     }
 
-    const report = await store.create({ ...checked.value, reporter, screenshots });
+    // Signed in, they may still leave their name off it.
+    const anonymous = !!reporter && opts.anonymousLimit !== undefined && form.get('anonymous') === '1';
+    const report = await store.create({ ...checked.value, reporter: anonymous ? null : reporter, screenshots, ...(clientKey ? { clientKey } : {}) });
     if (opts.onReport) {
       try {
         await opts.onReport(report);
@@ -489,6 +534,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
   }
 
   const BOARD_LIMIT = 200;
+  const defaultLinks = publicGitHubLinks();
 
   async function board(req: Request): Promise<Response> {
     const allowed = typeof opts.board === 'function' ? await opts.board(req) : opts.board === true;
@@ -499,13 +545,20 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       store.list({ status: 'in_review' }),
       store.list({ status: 'fixed' }),
     ]);
-    const item = (r: Report) => toBoardItem(r, opts.boardScreenshots ? boardShots(r) : undefined);
+    const admin = opts.boardAdmin ? await opts.boardAdmin(req) : false;
+    const mayLink = async (url: string) => {
+      if (admin || opts.boardLinks === true) return true;
+      if (opts.boardLinks === false) return false;
+      return (opts.boardLinks ?? defaultLinks)(url, req);
+    };
+    const item = async (r: Report) => {
+      const base = toBoardItem(r, opts.boardScreenshots ? boardShots(r) : undefined);
+      const url = r.prUrl ?? findGitHubLink(r.resolution);
+      return url && (await mayLink(url)) ? { ...base, prUrl: url } : base;
+    };
     const result: Board = {
-      queue: [...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item),
-      changelog: fixed
-        .map(item)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .slice(0, BOARD_LIMIT),
+      queue: await Promise.all([...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item)),
+      changelog: (await Promise.all(fixed.map(item))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT),
     };
     return new Response(JSON.stringify(result), {
       headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
@@ -570,6 +623,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         maxScreenshots: config.maxScreenshots,
         maxScreenshotBytes: config.maxScreenshotBytes,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
+        ...(opts.anonymousLimit !== undefined ? { signedIn: !!(opts.getReporter && (await opts.getReporter(req))), anonymous: true } : {}),
       };
       return new Response(JSON.stringify(caps), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }

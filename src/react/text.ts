@@ -36,6 +36,19 @@ export interface ShipcueText {
   dontAttach: string;
   pastReports: string;
   shortcuts: string;
+  display: string;
+  yours: string;
+  yourReports: string;
+  noReportsYet: string;
+  starsHint: string;
+  starred: string;
+  seeTheFix: string;
+  signIn: string;
+  sendAnonymously: string;
+  buttonSize: string;
+  textSize: string;
+  resetPosition: string;
+  sizeNames: [string, string, string];
   send: string;
   sending: string;
   // After sending.
@@ -102,6 +115,19 @@ export const DEFAULT_TEXT: ShipcueText = {
   dontAttach: "don't attach",
   pastReports: 'Past reports',
   shortcuts: 'Shortcuts',
+  display: 'Display',
+  yours: 'Yours',
+  yourReports: 'Your reports',
+  noReportsYet: 'Reports you send from this browser show up here.',
+  starsHint: 'Star one to pin it to the top, here and on the CueLog. Kept in this browser.',
+  starred: 'Starred',
+  seeTheFix: 'See the fix on GitHub',
+  signIn: 'Sign in',
+  sendAnonymously: 'Send anonymously (leave my name off it)',
+  buttonSize: 'Button size',
+  textSize: 'Text size',
+  resetPosition: 'Reset button position',
+  sizeNames: ['S', 'M', 'L'],
   send: 'Send',
   sending: 'Sending…',
   sent: 'Thanks. It is in the queue.',

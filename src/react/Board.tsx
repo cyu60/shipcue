@@ -1,8 +1,10 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { type Board, type BoardItem, type ReportType } from '../core';
 import { fill, resolveText, type ShipcueText } from './text';
+import { useLightbox } from './Lightbox';
+import { STAR_OFF, STAR_ON, starredFirst, useStars } from './stars';
 
-type View = 'open' | 'fixed' | 'all' | 'changelog';
+type View = 'open' | 'fixed' | 'all' | 'changelog' | 'starred';
 export type BoardTabStyle = 'pills' | 'tabs';
 export type BoardLayout = 'cards' | 'list';
 
@@ -68,6 +70,8 @@ export function ShipcueBoard({
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
   const t = resolveText(textProp);
+  const st = useStars();
+  const lb = useLightbox();
   const [view, setView] = useState<View>(initialView === 'queue' ? 'open' : initialView);
   // Each viewer's own pick (shipcue report bf463120), over the app's default.
   const [picked, setPicked] = useState<{ tabStyle?: BoardTabStyle; layout?: BoardLayout }>({});
@@ -149,11 +153,18 @@ export function ShipcueBoard({
     { id: 'all', label: t.all, count: board.queue.length + board.changelog.length },
     { id: 'changelog', label: t.changelog },
   ];
+  // Stars pin reports to the top (shipcue report 013562b6); a Starred tab once there are some.
+  const starredItems = [...board.queue, ...board.changelog].filter((r) => st.isStarred(r.id));
+  if (starredItems.length > 0 || view === 'starred') TABS.push({ id: 'starred', label: t.starred, count: starredItems.length });
+  const itemProps = (r: BoardItem) => ({
+    star: { on: st.isStarred(r.id), mine: st.isMine(r.id), toggle: () => st.toggle(r.id) },
+    onShot: (i: number) => lb.open(r.screenshots ?? [], i),
+  });
   const current: View | 'queue' = show === 'both' ? view : show;
   const list = (items: BoardItem[], done = false) => (
     <ul style={layout === 'list' ? s.listCompact : s.list}>
-      {items.map((r) => (
-        <Item key={r.id} r={r} t={t} accent={accentColor} done={done} compact={layout === 'list'} />
+      {starredFirst(items, st.stars).map((r) => (
+        <Item key={r.id} r={r} t={t} accent={accentColor} done={done || r.status === 'fixed'} compact={layout === 'list'} {...itemProps(r)} />
       ))}
     </ul>
   );
@@ -220,27 +231,29 @@ export function ShipcueBoard({
             {board.changelog.length > 0 ? ` ${t.doneBelow}` : ''}
           </p>
           <ul style={layout === 'list' ? s.listCompact : s.list}>
-            {board.queue.map((r) => (
-              <Item key={r.id} r={r} t={t} accent={accentColor} compact={layout === 'list'} />
+            {starredFirst(board.queue, st.stars).map((r) => (
+              <Item key={r.id} r={r} t={t} accent={accentColor} compact={layout === 'list'} {...itemProps(r)} />
             ))}
             {/* Finished ones stay in the queue, greyed out, so nothing seems to vanish. */}
             {board.changelog.map((r) => (
-              <Item key={r.id} r={r} t={t} accent={accentColor} done compact={layout === 'list'} />
+              <Item key={r.id} r={r} t={t} accent={accentColor} done compact={layout === 'list'} {...itemProps(r)} />
             ))}
           </ul>
         </section>
       )}
+      {current === 'starred' && <section>{starredItems.length === 0 ? <p style={s.muted}>{t.starsHint}</p> : list(starredItems)}</section>}
       {current === 'changelog' && (
         <section>
           {show !== 'both' && <h2 style={{ ...s.h2, color: accentColor }}>{t.changelog}</h2>}
           <p style={s.muted}>{board.changelog.length === 0 ? t.nothingShipped : t.latestFirst}</p>
           <ul style={layout === 'list' ? s.listCompact : s.list}>
-            {board.changelog.map((r) => (
-              <Item key={r.id} r={r} t={t} accent={accentColor} changelog compact={layout === 'list'} />
+            {starredFirst(board.changelog, st.stars).map((r) => (
+              <Item key={r.id} r={r} t={t} accent={accentColor} changelog compact={layout === 'list'} {...itemProps(r)} />
             ))}
           </ul>
         </section>
       )}
+      {lb.box}
     </div>
   );
 }
@@ -272,16 +285,69 @@ function Toggle<T extends string>({ label, value, options, onPick }: { label: st
 
 const typeLabel = (t: ShipcueText, type: ReportType) => (type === 'bug' ? t.bugTab : type === 'feature' ? t.featureTab : t.taskTab);
 
-function Item({ r, t, accent, changelog = false, done = false, compact = false }: { r: BoardItem; t: ShipcueText; accent: string; changelog?: boolean; done?: boolean; compact?: boolean }) {
+interface ItemStar {
+  on: boolean;
+  mine: boolean;
+  toggle: () => void;
+}
+
+function StarButton({ star, label }: { star: ItemStar; label: string }) {
+  return (
+    <button
+      type="button"
+      aria-label={star.on ? `Unstar: ${label}` : `Star: ${label}`}
+      aria-pressed={star.on}
+      title={star.on ? 'Unstar' : 'Star to pin it to the top'}
+      onClick={star.toggle}
+      style={{ ...s.pickBtn, opacity: 1, padding: 0, color: star.on ? '#d97706' : 'inherit', fontSize: '1.05em', lineHeight: 1, flex: 'none' }}
+    >
+      {star.on ? STAR_ON : STAR_OFF}
+    </button>
+  );
+}
+
+/** "PR #12 ↗" (or "commit ↗"), out to the fix on GitHub. */
+function FixLink({ url, t }: { url: string; t: ShipcueText }) {
+  const m = /\/(pull|issues|commit|compare)\/([\w.]+)/.exec(url);
+  const label = m?.[1] === 'pull' ? `PR #${m[2]}` : m?.[1] === 'issues' ? `#${m[2]}` : m?.[1] === 'commit' ? m[2]!.slice(0, 7) : 'GitHub';
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" title={t.seeTheFix} aria-label={`${t.seeTheFix}: ${label}`} style={{ ...s.tag, color: 'inherit', textDecoration: 'none', flex: 'none' }}>
+      {label} ↗
+    </a>
+  );
+}
+
+function Item({
+  r,
+  t,
+  accent,
+  changelog = false,
+  done = false,
+  compact = false,
+  star,
+  onShot,
+}: {
+  r: BoardItem;
+  t: ShipcueText;
+  accent: string;
+  changelog?: boolean;
+  done?: boolean;
+  compact?: boolean;
+  star?: ItemStar;
+  onShot?: (index: number) => void;
+}) {
   if (compact) {
     // One line: type, the fix (or the ask), date. No screenshots.
     const text = changelog && r.resolution ? r.resolution : r.description;
     return (
       <li style={done ? { ...s.row, ...s.done } : s.row}>
+        {star && <StarButton star={star} label={text.slice(0, 60)} />}
         <span style={{ ...s.tag, borderColor: accent, color: accent, flex: 'none' }}>{typeLabel(t, r.type)}</span>
+        {star?.mine && <span style={{ ...s.tag, flex: 'none' }}>{t.yours}</span>}
         <span style={s.rowText} title={text}>
           {text}
         </span>
+        {r.prUrl && <FixLink url={r.prUrl} t={t} />}
         <span style={s.rowDate}>{day(changelog ? r.updatedAt : r.createdAt)}</span>
       </li>
     );
@@ -289,12 +355,15 @@ function Item({ r, t, accent, changelog = false, done = false, compact = false }
   return (
     <li style={done ? { ...s.item, ...s.done } : s.item}>
       <div style={s.meta}>
+        {star && <StarButton star={star} label={r.description.slice(0, 60)} />}
         <span style={{ ...s.tag, borderColor: accent, color: accent }}>{typeLabel(t, r.type)}</span>
+        {star?.mine && <span style={s.tag}>{t.yours}</span>}
         {done && <span style={s.tag}>{t.done}</span>}
         {!changelog && r.status === 'claimed' && <span style={s.tag}>{t.inProgress}</span>}
         {!changelog && r.status === 'in_review' && <span style={s.tag}>{t.inReview}</span>}
         {!changelog && (r.priority === 'high' || r.priority === 'blocking') && <span style={s.tag}>{r.priority}</span>}
         <span>{day(changelog ? r.updatedAt : r.createdAt)}</span>
+        {r.prUrl && <FixLink url={r.prUrl} t={t} />}
       </div>
       {changelog && r.resolution ? (
         <>
@@ -307,9 +376,15 @@ function Item({ r, t, accent, changelog = false, done = false, compact = false }
       {r.screenshots?.length ? (
         <div style={s.shots}>
           {r.screenshots.map((src, i) => (
-            <a key={src} href={src} target="_blank" rel="noopener noreferrer" aria-label={`Screenshot ${i + 1}`}>
+            <button
+              key={src}
+              type="button"
+              aria-label={`Preview screenshot ${i + 1}`}
+              onClick={() => onShot?.(i)}
+              style={{ padding: 0, border: 0, background: 'none', cursor: 'zoom-in' }}
+            >
               <img src={src} alt={`Screenshot ${i + 1}`} loading="lazy" style={s.shot} />
-            </a>
+            </button>
           ))}
         </div>
       ) : null}

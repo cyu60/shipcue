@@ -21,7 +21,7 @@ describe('hotkeys', () => {
   });
 
   it("matches the outliner on a Mac and stays off the browser's keys elsewhere", () => {
-    expect(defaultHotkeys(true)).toEqual({ task: ['Mod+J'], bug: ['Ctrl+B'], feature: ['Ctrl+F'], dictate: ['Ctrl+M'] });
-    expect(defaultHotkeys(false)).toEqual({ task: ['Alt+Shift+J'], bug: ['Alt+Shift+B'], feature: ['Alt+Shift+F'], dictate: ['Alt+Shift+M'] });
+    expect(defaultHotkeys(true)).toEqual({ task: ['Mod+J'], bug: ['Ctrl+B'], feature: ['Ctrl+F'], dictate: ['Ctrl+M'], resetPosition: ['Ctrl+Shift+H'] });
+    expect(defaultHotkeys(false)).toEqual({ task: ['Alt+Shift+J'], bug: ['Alt+Shift+B'], feature: ['Alt+Shift+F'], dictate: ['Alt+Shift+M'], resetPosition: ['Alt+Shift+H'] });
   });
 });

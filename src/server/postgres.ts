@@ -167,12 +167,18 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
         input.reporter,
         input.context ?? null,
       ];
-      if (project !== undefined) params.push(project);
-      const r = await one(
-        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, context${project !== undefined ? ', project_id' : ''})
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10${project !== undefined ? ', $11' : ''}) RETURNING ${COLUMNS}`,
-        params,
-      );
+      const cols = ['type', 'priority', 'area', 'description', 'page_url', 'user_agent', 'diagnostics', 'screenshots', 'reporter', 'context'];
+      if (project !== undefined) {
+        params.push(project);
+        cols.push('project_id');
+      }
+      // Only when the handler limits signed-out reports (needs client_key, "Upgrading from 0.13").
+      if (input.clientKey) {
+        params.push(input.clientKey);
+        cols.push('client_key');
+      }
+      const values = cols.map((c, i) => (c === 'diagnostics' ? `$${i + 1}::jsonb` : `$${i + 1}`)).join(', ');
+      const r = await one(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${values}) RETURNING ${COLUMNS}`, params);
       return r!;
     },
     async get(id) {
@@ -282,6 +288,14 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
         params,
       );
       return rows.map((r) => toReport(r as Row));
+    },
+    async countFromClient(clientKey) {
+      const params: unknown[] = [clientKey];
+      const { rows } = await db.query(
+        `SELECT count(*)::int AS n FROM ${table} WHERE client_key = $1 AND reporter IS NULL AND NOT is_deleted${scope(params)}`,
+        params,
+      );
+      return Number((rows[0] as { n?: number } | undefined)?.n ?? 0);
     },
     async events(id) {
       if (!isUuid(id)) return [];

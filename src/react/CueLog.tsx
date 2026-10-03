@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type DragEvent } from 'react';
+import { useLightbox } from './Lightbox';
+import { STAR_OFF, STAR_ON, starredFirst, useStars } from './stars';
 import { PRIORITIES, PRIORITY_LABEL, TYPE_LABEL, sortQueue, type Claimant, type Priority, type Report, type ReportEvent, type ReportType, type Status } from '../core';
 
 // The CueLog: the team's table of every report, worked by people and agents together.
@@ -10,7 +12,7 @@ export interface CueLogMember {
   role: 'owner' | 'member' | 'viewer';
 }
 
-export type CueLogTab = 'open' | 'mine' | 'in_review' | 'fixed' | 'all';
+export type CueLogTab = 'open' | 'mine' | 'starred' | 'in_review' | 'fixed' | 'all';
 export type CueLogSort = 'queue' | 'waiting' | 'updated' | 'claimant';
 /** '' anyone · 'me' · 'none' nobody yet · 'agents' · 'people' · or "kind:id" for one claimant. */
 export type ClaimantFilter = string;
@@ -25,7 +27,7 @@ export interface CueLogFilter {
 
 export const CUELOG_TEXT = {
   title: 'CueLog',
-  tabs: { open: 'Open', mine: 'Mine', in_review: 'In review', fixed: 'Fixed', all: 'All' } as Record<CueLogTab, string>,
+  tabs: { open: 'Open', mine: 'Mine', starred: 'Starred', in_review: 'In review', fixed: 'Fixed', all: 'All' } as Record<CueLogTab, string>,
   status: { open: 'Open', claimed: 'Claimed', in_review: 'In review', fixed: 'Fixed', wontfix: "Won't fix" } as Record<Status, string>,
   nobody: 'Nobody yet',
   queuedFor: 'Queued for',
@@ -55,12 +57,13 @@ export type CueLogText = typeof CUELOG_TEXT;
 
 const DAY = 86_400_000;
 
-/** Which reports a tab and the filters keep. */
-export function filterReports(reports: readonly Report[], f: CueLogFilter, me: string | null): Report[] {
+/** Which reports a tab and the filters keep. `stars`: the ids starred in this browser. */
+export function filterReports(reports: readonly Report[], f: CueLogFilter, me: string | null, stars: readonly string[] = []): Report[] {
   const q = (f.search ?? '').trim().toLowerCase();
   return reports.filter((r) => {
     if (f.tab === 'open' && !['open', 'claimed'].includes(r.status)) return false;
     if (f.tab === 'mine' && (r.claimantId !== me || ['fixed', 'wontfix'].includes(r.status))) return false;
+    if (f.tab === 'starred' && !stars.includes(r.id)) return false;
     if (f.tab === 'in_review' && r.status !== 'in_review') return false;
     if (f.tab === 'fixed' && !['fixed', 'wontfix'].includes(r.status)) return false;
     if (f.type && r.type !== f.type) return false;
@@ -136,6 +139,7 @@ export function CueLogTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);
   const canEdit = member != null && member.role !== 'viewer';
+  const st = useStars();
 
   const load = useCallback(async () => {
     const [meRes, listRes] = await Promise.all([fetch(`${api}/me`, { credentials }), fetch(`${api}/reports`, { credentials })]);
@@ -201,12 +205,15 @@ export function CueLogTable({
     return act(id, 'assign', { to: to ? { kind: to.kind, id: to.id } : null });
   };
 
-  const shown = useMemo(() => (reports ? sortReports(filterReports(reports, filter, member?.id ?? null), sort) : []), [reports, filter, sort, member]);
+  const shown = useMemo(
+    () => (reports ? starredFirst(sortReports(filterReports(reports, filter, member?.id ?? null, st.stars), sort), st.stars) : []),
+    [reports, filter, sort, member, st.stars],
+  );
   const counts = useMemo(() => {
     const all = reports ?? [];
-    const n = (tab: CueLogTab) => filterReports(all, { tab }, member?.id ?? null).length;
-    return { open: n('open'), mine: n('mine'), in_review: n('in_review'), fixed: n('fixed'), all: all.length } as Record<CueLogTab, number>;
-  }, [reports, member]);
+    const n = (tab: CueLogTab) => filterReports(all, { tab }, member?.id ?? null, st.stars).length;
+    return { open: n('open'), mine: n('mine'), starred: n('starred'), in_review: n('in_review'), fixed: n('fixed'), all: all.length } as Record<CueLogTab, number>;
+  }, [reports, member, st.stars]);
   const areaLabel = (v: string) => areas.find((a) => a.value === v)?.label ?? v;
 
   const bulk = async (fn: (id: string) => Promise<unknown>) => {
@@ -338,6 +345,7 @@ export function CueLogTable({
                       />
                     </th>
                   )}
+                  <th style={s.th} aria-label="Starred" />
                   <th style={s.th}>Report</th>
                   <th style={s.th}>Priority</th>
                   <th style={s.th}>Status</th>
@@ -365,6 +373,17 @@ export function CueLogTable({
                         />
                       </td>
                     )}
+                    <td style={s.td}>
+                      <button
+                        type="button"
+                        aria-label={st.isStarred(r.id) ? `Unstar ${headline(r)}` : `Star ${headline(r)}`}
+                        aria-pressed={st.isStarred(r.id)}
+                        onClick={() => st.toggle(r.id)}
+                        style={{ ...s.link, color: st.isStarred(r.id) ? '#d97706' : 'inherit', opacity: st.isStarred(r.id) ? 1 : 0.45 }}
+                      >
+                        {st.isStarred(r.id) ? STAR_ON : STAR_OFF}
+                      </button>
+                    </td>
                     <td style={{ ...s.td, ...s.headline }}>
                       <button type="button" style={s.link} onClick={() => setOpen(r.id)} title={r.description}>
                         <span style={s.type}>{TYPE_LABEL[r.type]}</span> {headline(r)}
@@ -566,6 +585,7 @@ function Drawer({
   const [resolution, setResolution] = useState('');
   const [pr, setPr] = useState(r.prUrl ?? '');
   const [copied, setCopied] = useState(false);
+  const lb = useLightbox('Attachment');
   useEffect(() => {
     let live = true;
     fetch(`${api}/reports/${encodeURIComponent(r.id)}`, { credentials })
@@ -603,9 +623,9 @@ function Drawer({
       {r.screenshots.length > 0 && (
         <div style={s.shots}>
           {r.screenshots.map((src, i) => (
-            <a key={src} href={src} target="_blank" rel="noopener noreferrer">
+            <button key={src} type="button" aria-label={`Preview attachment ${i + 1}`} onClick={() => lb.open(r.screenshots, i)} style={{ ...s.link, cursor: 'zoom-in' }}>
               <img src={src} alt={`Attachment ${i + 1}`} style={s.shot} />
-            </a>
+            </button>
           ))}
         </div>
       )}
@@ -718,6 +738,7 @@ function Drawer({
           </ol>
         </>
       )}
+      {lb.box}
     </aside>
   );
 }

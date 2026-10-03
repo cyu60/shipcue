@@ -229,12 +229,17 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
         input.reporter,
         input.context ?? null
       ];
-      if (project !== void 0) params.push(project);
-      const r = await one(
-        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, context${project !== void 0 ? ", project_id" : ""})
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10${project !== void 0 ? ", $11" : ""}) RETURNING ${COLUMNS}`,
-        params
-      );
+      const cols = ["type", "priority", "area", "description", "page_url", "user_agent", "diagnostics", "screenshots", "reporter", "context"];
+      if (project !== void 0) {
+        params.push(project);
+        cols.push("project_id");
+      }
+      if (input.clientKey) {
+        params.push(input.clientKey);
+        cols.push("client_key");
+      }
+      const values = cols.map((c, i) => c === "diagnostics" ? `$${i + 1}::jsonb` : `$${i + 1}`).join(", ");
+      const r = await one(`INSERT INTO ${table} (${cols.join(", ")}) VALUES (${values}) RETURNING ${COLUMNS}`, params);
       return r;
     },
     async get(id) {
@@ -337,6 +342,14 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
       );
       return rows.map((r) => toReport(r));
     },
+    async countFromClient(clientKey) {
+      const params = [clientKey];
+      const { rows } = await db.query(
+        `SELECT count(*)::int AS n FROM ${table} WHERE client_key = $1 AND reporter IS NULL AND NOT is_deleted${scope(params)}`,
+        params
+      );
+      return Number(rows[0]?.n ?? 0);
+    },
     async events(id) {
       if (!isUuid(id)) return [];
       const params = [id];
@@ -351,7 +364,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
 }
 
 // src/server/handler.ts
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 // src/server/broadcast.ts
 async function broadcast(broadcasters, event, timeoutMs = 4e3) {
@@ -374,6 +387,38 @@ async function broadcast(broadcasters, event, timeoutMs = 4e3) {
       }
     })
   );
+}
+
+// src/server/links.ts
+var REPO = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)(?:[/?#]|$)/i;
+var FIX_LINK = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:pull|commit|issues|compare)\/[\w.]+/i;
+function findGitHubLink(text) {
+  return text ? FIX_LINK.exec(text)?.[0] ?? null : null;
+}
+function publicGitHubLinks(opts = {}) {
+  const doFetch = opts.fetch ?? ((u, i) => fetch(u, i));
+  const cacheMs = opts.cacheMs ?? 60 * 60 * 1e3;
+  const timeoutMs = opts.timeoutMs ?? 3e3;
+  const known = /* @__PURE__ */ new Map();
+  return async (url) => {
+    const m = REPO.exec(url);
+    if (!m) return false;
+    const repo = `${m[1]}/${m[2]}`.toLowerCase();
+    const hit = known.get(repo);
+    if (hit && Date.now() - hit.at < cacheMs) return hit.open;
+    let open = false;
+    try {
+      const res = await doFetch(`https://api.github.com/repos/${m[1]}/${m[2]}`, {
+        headers: { accept: "application/vnd.github+json", "user-agent": "shipcue" },
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      open = res.ok && !(await res.json().catch(() => ({}))).private;
+    } catch {
+      open = false;
+    }
+    known.set(repo, { open, at: Date.now() });
+    return open;
+  };
 }
 
 // src/server/handler.ts
@@ -410,9 +455,29 @@ function createShipcueHandler(opts) {
   const base = (opts.basePath ?? "/api/shipcue").replace(/\/$/, "");
   const { store } = opts;
   const emit = (type, report) => report ? broadcast(opts.broadcasters, { type, at: (/* @__PURE__ */ new Date()).toISOString(), report }) : Promise.resolve();
+  const ipKey = (req) => {
+    const ip = (req.headers.get("x-forwarded-for")?.split(",")[0] ?? req.headers.get("x-real-ip") ?? "").trim();
+    if (!ip) return null;
+    return createHmac("sha256", opts.clientKeySecret ?? opts.agentToken ?? "shipcue").update(ip).digest("hex").slice(0, 32);
+  };
+  const signInFor = (req) => typeof opts.signInUrl === "function" ? opts.signInUrl(req) : opts.signInUrl;
   async function fileReport(req) {
     const reporter = opts.getReporter ? await opts.getReporter(req) : null;
     if (opts.requireReporter && !reporter) return fail("Sign in to send a report.", 401);
+    let clientKey = null;
+    if (!reporter && opts.anonymousLimit !== void 0 && store.countFromClient) {
+      clientKey = opts.clientKey ? await opts.clientKey(req) : ipKey(req);
+      if (clientKey && await store.countFromClient(clientKey) >= opts.anonymousLimit) {
+        const n = opts.anonymousLimit;
+        return json(
+          {
+            error: `You have sent ${n} report${n === 1 ? "" : "s"} without signing in. Sign in to send more; you can still send them anonymously.`,
+            signIn: signInFor(req) ?? null
+          },
+          401
+        );
+      }
+    }
     let form;
     try {
       form = await req.formData();
@@ -470,7 +535,8 @@ function createShipcueHandler(opts) {
       const key = `${batch}/${i + 1}.${IMAGE_TYPES[f.type]}`;
       screenshots.push(opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f, !IMAGE_TYPES[f.type]));
     }
-    const report = await store.create({ ...checked.value, reporter, screenshots });
+    const anonymous = !!reporter && opts.anonymousLimit !== void 0 && form.get("anonymous") === "1";
+    const report = await store.create({ ...checked.value, reporter: anonymous ? null : reporter, screenshots, ...clientKey ? { clientKey } : {} });
     if (opts.onReport) {
       try {
         await opts.onReport(report);
@@ -702,6 +768,7 @@ function createShipcueHandler(opts) {
     return fail("Not found", 404);
   }
   const BOARD_LIMIT = 200;
+  const defaultLinks = publicGitHubLinks();
   async function board(req) {
     const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
     if (!allowed) return fail("Not found", 404);
@@ -711,10 +778,20 @@ function createShipcueHandler(opts) {
       store.list({ status: "in_review" }),
       store.list({ status: "fixed" })
     ]);
-    const item = (r) => toBoardItem(r, opts.boardScreenshots ? boardShots(r) : void 0);
+    const admin = opts.boardAdmin ? await opts.boardAdmin(req) : false;
+    const mayLink = async (url) => {
+      if (admin || opts.boardLinks === true) return true;
+      if (opts.boardLinks === false) return false;
+      return (opts.boardLinks ?? defaultLinks)(url, req);
+    };
+    const item = async (r) => {
+      const base2 = toBoardItem(r, opts.boardScreenshots ? boardShots(r) : void 0);
+      const url = r.prUrl ?? findGitHubLink(r.resolution);
+      return url && await mayLink(url) ? { ...base2, prUrl: url } : base2;
+    };
     const result = {
-      queue: [...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item),
-      changelog: fixed.map(item).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
+      queue: await Promise.all([...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item)),
+      changelog: (await Promise.all(fixed.map(item))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
     };
     return new Response(JSON.stringify(result), {
       headers: { "content-type": "application/json", "cache-control": "no-store" }
@@ -769,7 +846,8 @@ function createShipcueHandler(opts) {
         maxVideoSeconds: config.maxVideoSeconds,
         maxScreenshots: config.maxScreenshots,
         maxScreenshotBytes: config.maxScreenshotBytes,
-        maxTotalScreenshotBytes: config.maxTotalScreenshotBytes
+        maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
+        ...opts.anonymousLimit !== void 0 ? { signedIn: !!(opts.getReporter && await opts.getReporter(req)), anonymous: true } : {}
       };
       return new Response(JSON.stringify(caps), { headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
@@ -907,7 +985,8 @@ function createCloudHandler(opts) {
   const secure = opts.secureCookies !== false;
   const refreshDays = opts.refreshDays ?? 30;
   const q = async (text, params = []) => (await db.query(text, params)).rows;
-  const cookie = (name, value, maxAge) => `${name}=${encodeURIComponent(value)}; Path=${base}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
+  const cookiePath = opts.cookiePath ?? "/api";
+  const cookie = (name, value, maxAge) => `${name}=${encodeURIComponent(value)}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
   const sessionCookies = (t) => [cookie(ACCESS_COOKIE, t.accessToken, 60 * 60 * 24), cookie(REFRESH_COOKIE, t.refreshToken ?? "", 60 * 60 * 24 * refreshDays)];
   const clearCookies = () => [cookie(ACCESS_COOKIE, "", 0), cookie(REFRESH_COOKIE, "", 0)];
   const withCookies = (res, set) => {
@@ -1186,6 +1265,11 @@ function createCloudHandler(opts) {
       basePath: `${base}/p/${key}`,
       cors: p.allowed_origins,
       board: p.public_board,
+      // The team sees every fix link on the public board, private repositories included.
+      boardAdmin: async (r) => {
+        const sess = await session(r);
+        return !!(sess && await memberOf(p.id, sess.user.id));
+      },
       leaseSeconds: p.lease_seconds ?? void 0,
       agents: async (token) => {
         const a = (await q(
