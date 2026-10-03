@@ -32,6 +32,31 @@ export interface ShipcueText {
   attachHint: string;
   recordScreen: string;
   attachVideo: string;
+  // Select an area and mark it up (shipcue report 58b727d9).
+  selectArea: string;
+  selectAreaHint: string;
+  captureDeclined: string;
+  captureUnsupported: string;
+  captureFailed: string;
+  editScreenshot: string;
+  annotateTitle: string;
+  toolPen: string;
+  toolArrow: string;
+  toolRect: string;
+  toolHighlight: string;
+  toolText: string;
+  toolBlur: string;
+  toolCrop: string;
+  undo: string;
+  redo: string;
+  clear: string;
+  color: string;
+  strokeWidth: string;
+  altText: string;
+  altPlaceholder: string;
+  altHint: string;
+  addToReport: string;
+  cancel: string;
   page: string;
   dontAttach: string;
   pastReports: string;
@@ -117,6 +142,30 @@ export const DEFAULT_TEXT: ShipcueText = {
   attachHint: 'Paste or drop {what} into the text box, or add up to {max}.',
   recordScreen: 'Record screen',
   attachVideo: 'or attach a video',
+  selectArea: 'Select area',
+  selectAreaHint: 'Drag to select an area · Enter captures · Esc cancels',
+  captureDeclined: 'Screen capture was not allowed. Paste a screenshot instead.',
+  captureUnsupported: 'This browser cannot capture the page. Paste a screenshot instead.',
+  captureFailed: 'Could not capture that area. Paste a screenshot instead.',
+  editScreenshot: 'Edit',
+  annotateTitle: 'Mark up the screenshot',
+  toolPen: 'Draw',
+  toolArrow: 'Arrow',
+  toolRect: 'Box',
+  toolHighlight: 'Highlight',
+  toolText: 'Text',
+  toolBlur: 'Blur',
+  toolCrop: 'Crop',
+  undo: 'Undo',
+  redo: 'Redo',
+  clear: 'Clear',
+  color: 'Colour',
+  strokeWidth: 'Line width',
+  altText: 'Alt text',
+  altPlaceholder: 'What it shows, for screen readers and agents',
+  altHint: 'Saved with the image.',
+  addToReport: 'Add to report',
+  cancel: 'Cancel',
   page: 'Page:',
   dontAttach: "don't attach",
   pastReports: 'Past reports',

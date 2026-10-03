@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type Dra
 import { useLightbox } from './Lightbox';
 import { PinIcon } from './PinIcon';
 import { starredFirst, useStars } from './stars';
-import { PRIORITIES, PRIORITY_LABEL, TYPE_LABEL, sortQueue, type Claimant, type Priority, type Report, type ReportEvent, type ReportType, type Status } from '../core';
+import { PRIORITIES, shotAlt, PRIORITY_LABEL, TYPE_LABEL, sortQueue, type Claimant, type Priority, type Report, type ReportEvent, type ReportType, type Status } from '../core';
 
 // The CueLog: the team's table of every report, worked by people and agents together.
 // Reads and writes the handler's team API ({endpoint}/team/...), so it needs the `team` option.
@@ -625,7 +625,7 @@ function Drawer({
         <div style={s.shots}>
           {r.screenshots.map((src, i) => (
             <button key={src} type="button" aria-label={`Preview attachment ${i + 1}`} onClick={() => lb.open(r.screenshots, i)} style={{ ...s.link, cursor: 'zoom-in' }}>
-              <img src={src} alt={`Attachment ${i + 1}`} style={s.shot} />
+              <img src={src} alt={shotAlt(src) ?? `Attachment ${i + 1}`} style={s.shot} />
             </button>
           ))}
         </div>

@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { BLOCKED_FILE_TYPES, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateReport, videoExtension, videoType, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
+import { altFragment, BLOCKED_FILE_TYPES, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 import { findGitHubLink, publicGitHubLinks } from './links';
@@ -145,7 +145,8 @@ function sameToken(given: string, expected: string): boolean {
 
 const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** A screenshot the board may show: an https/relative link, or the board's own route. */
-const isImageLink = (u: string) => u.startsWith('/') || (u.startsWith('https://') && !/\.(?!png|jpe?g|webp|gif)[a-z0-9]{2,5}(?:[?#]|$)/i.test(u));
+// The #alt= fragment is not part of the file name.
+const isImageLink = (u: string) => u.startsWith('/') || (u.startsWith('https://') && !/\.(?!png|jpe?g|webp|gif)[a-z0-9]{2,5}(?:[?#]|$)/i.test(u.replace(/#.*$/, '')));
 
 async function toDataUrl(file: File, withName = false): Promise<string> {
   const base64 = Buffer.from(await file.arrayBuffer()).toString('base64');
@@ -272,9 +273,12 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     // The key folder groups one report's screenshots; it is not the report id.
     const batch = crypto.randomUUID();
     const screenshots: string[] = [];
+    // Alt text per screenshot, in the same order (shipcue report 58b727d9).
+    const alts = form.getAll('screenshotAlt').map((a) => (typeof a === 'string' ? a.slice(0, config.maxAltText) : ''));
     for (const [i, f] of files.entries()) {
       const key = `${batch}/${i + 1}.${IMAGE_TYPES[f.type]}`;
-      screenshots.push(opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f, !IMAGE_TYPES[f.type]));
+      const src = opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f, !IMAGE_TYPES[f.type]);
+      screenshots.push(i < shots.length && alts[i] ? withShotAlt(src, alts[i]!) : src);
     }
 
     // Signed in, they may still leave their name off it.
@@ -431,7 +435,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
   }
 
   // Data-URL attachments become links on the team API, so the list stays small.
-  const teamShots = (r: Report) => r.screenshots.map((src, n) => (src.startsWith('data:') ? `${base}/team/screenshot/${r.id}/${n}` : src));
+  const teamShots = (r: Report) => r.screenshots.map((src, n) => (src.startsWith('data:') ? `${base}/team/screenshot/${r.id}/${n}${altFragment(src)}` : src));
   const forTeam = (r: Report) => ({ ...r, screenshots: teamShots(r) });
 
   async function teamApi(req: Request, parts: string[]): Promise<Response> {
@@ -568,7 +572,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
   // Stored URLs pass through; data URLs become short links, so the board stays small.
   const boardShots = (r: Report) =>
     r.screenshots
-      .map((src, n) => (src.startsWith('data:') ? (/^data:image\/(png|jpeg|webp|gif)[;,]/.test(src) ? `${base}/board/screenshot/${r.id}/${n}` : '') : src))
+      .map((src, n) => (src.startsWith('data:') ? (/^data:image\/(png|jpeg|webp|gif)[;,]/.test(src) ? `${base}/board/screenshot/${r.id}/${n}${altFragment(src)}` : '') : src))
       .filter(isImageLink);
 
   async function boardScreenshot(req: Request, id: string, n: number): Promise<Response> {
@@ -577,7 +581,8 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     const r = await store.get(id);
     // Only what the board lists: open, claimed, in review or fixed.
     if (!r || !['open', 'claimed', 'in_review', 'fixed'].includes(r.status)) return fail('Not found', 404);
-    const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/.exec(r.screenshots[n] ?? '');
+    // Parameters (;alt=) may sit between the type and the data.
+    const m = /^data:(image\/(?:png|jpeg|webp|gif))(?:;[^;,]+)*;base64,(.+)$/.exec(r.screenshots[n] ?? '');
     if (!m) return fail('Not found', 404);
     return new Response(Buffer.from(m[2] ?? '', 'base64'), {
       headers: {
@@ -623,6 +628,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         maxScreenshots: config.maxScreenshots,
         maxScreenshotBytes: config.maxScreenshotBytes,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
+        maxAltText: config.maxAltText,
         ...(opts.anonymousLimit !== undefined ? { signedIn: !!(opts.getReporter && (await opts.getReporter(req))), anonymous: true } : {}),
       };
       return new Response(JSON.stringify(caps), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
