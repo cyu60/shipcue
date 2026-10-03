@@ -299,14 +299,14 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
       );
       return Number((rows[0] as { n?: number } | undefined)?.n ?? 0);
     },
-    async note(id, text, by) {
+    async note(id, text, by, extra) {
       if (!isUuid(id)) return null;
       // The report only gets a new updated_at, so live tables re-read it (shipcue report 3d2dded6).
       const params: unknown[] = [id];
       const proj = project == null ? 'NULL::uuid' : `${p(params, project)}::uuid`;
       const a = by ?? null;
       const where = `id = $1 AND NOT is_deleted${scope(params)}`;
-      const values = [proj, `'note'`, p(params, a?.kind ?? null), p(params, a?.id ?? null), p(params, a?.name ?? null), `${p(params, JSON.stringify({ text }))}::jsonb`].join(', ');
+      const values = [proj, `'note'`, p(params, a?.kind ?? null), p(params, a?.id ?? null), p(params, a?.name ?? null), `${p(params, JSON.stringify({ ...extra, text }))}::jsonb`].join(', ');
       const { rows } = await db.query(
         `WITH r AS (UPDATE ${table} SET updated_at = now() WHERE ${where} RETURNING id),
               e AS (INSERT INTO ${events} (report_id, project_id, action, actor_kind, actor_id, actor_name, detail) SELECT id, ${values} FROM r

@@ -102,6 +102,10 @@ export function createAgentClient(opts: AgentClientOptions) {
     async note(id: string, text: string): Promise<ReportEvent> {
       return (await post<{ event: ReportEvent }>(`/${encodeURIComponent(id)}/note`, { text, agent }))!.event;
     },
+    /** Closes this report as a duplicate of `into`, with a note on both (shipcue report 1c0bf5be). */
+    async merge(id: string, into: string): Promise<Report> {
+      return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/merge`, { into, agent }))!.report;
+    },
     /** A PR is up: the report goes to in review. */
     async review(id: string, prUrl: string): Promise<Report> {
       return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/review`, { prUrl }))!.report;

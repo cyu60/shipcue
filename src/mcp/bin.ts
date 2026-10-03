@@ -135,6 +135,19 @@ server.registerTool(
 );
 
 server.registerTool(
+  'merge_report',
+  {
+    description:
+      "Close a report as a duplicate of another (into): it closes as won't fix with \"Duplicate of #<id>\", and both get a note in the CueLog.",
+    inputSchema: { id: z.string(), into: z.string() },
+  },
+  async ({ id, into }) => {
+    const r = await client.merge(id, into);
+    return text(`Closed: ${r.resolution}.`);
+  },
+);
+
+server.registerTool(
   'list_my_reports',
   { description: 'Reports you hold or that someone assigned to you.' },
   async () => {

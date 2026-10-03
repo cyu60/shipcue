@@ -216,6 +216,7 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
  *   POST {base}/reports/:id/review      agent: { prUrl }: a PR is up, the report is in review
  *   GET  {base}/reports/:id/events      agent: the report's history
  *   POST {base}/reports/:id/note        agent: { text }: a note on the report's history
+ *   POST {base}/reports/:id/merge       agent: { into }: close it as a duplicate of another report
  *   GET  {base}/reports?mine=1          agent: what it holds or has queued
  *   GET|POST {base}/team/...            the CueLog table for signed-in members (see the team option)
  *   POST {base}/github                  a GitHub pull_request webhook (see the github option)
@@ -395,6 +396,7 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
     return { text };
   };
 
+  const DUPLICATE_OF = 'Duplicate of #';
   const isPrUrl = (v: unknown): v is string => typeof v === 'string' && v.length <= 500 && /^https?:\/\/[^\s]+$/i.test(v);
 
   /** 409 naming the holder when there is one, else 404. */
@@ -402,6 +404,33 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
     const r = await store.get(id);
     if (!r) return fail('No such report', 404);
     return fail(r.claimedBy ? `${r.claimedBy} has it now.` : verb, 409);
+  }
+
+  /**
+   * Folds a duplicate into the original (shipcue report 1c0bf5be): the duplicate closes as won't fix
+   * with "Duplicate of #<id8>", both get a note, and the original's note counts the duplicate's
+   * reporters (never who they are). `into` must be a report this store can see, so a Cloud project
+   * can never merge into another project's report. Works with any store; notes need store.note.
+   */
+  async function merge(id: string, into: unknown, by: Claimant | null, holder?: string): Promise<{ report: Report; into: Report } | Response> {
+    if (typeof into !== 'string' || !into) return fail('Say which report it duplicates (into).');
+    if (into === id) return fail('A report cannot be a duplicate of itself.');
+    const [dup, original] = await Promise.all([store.get(id), store.get(into)]);
+    if (!dup) return fail('No such report', 404);
+    if (!original) return fail('No such report to merge into', 404);
+    if (dup.status === 'fixed' || dup.status === 'wontfix') return fail('This report is already closed.', 409);
+    if (original.status === 'wontfix' && original.resolution?.startsWith(DUPLICATE_OF)) return fail('That report is itself a duplicate; merge into the one it points to.', 409);
+    // Its own filer, plus anyone whose report was merged into it before.
+    const earlier = store.events ? await store.events(id) : [];
+    const reporters = 1 + earlier.reduce((n, e) => n + (e.action === 'note' && e.detail.mergedFrom && typeof e.detail.reporters === 'number' ? e.detail.reporters : 0), 0);
+    const closed = await store.close(id, 'wontfix', `${DUPLICATE_OF}${into.slice(0, 8)}`, { holder, by });
+    if (!closed) return holder ? lost(id) : fail('No such report', 404);
+    await emit('report.closed', closed);
+    if (store.note) {
+      await store.note(id, `Merged into #${into.slice(0, 8)} as a duplicate.`, by, { mergedInto: into });
+      await store.note(into, `#${id.slice(0, 8)} was merged into this as a duplicate (${reporters} more reporter${reporters === 1 ? '' : 's'}).`, by, { mergedFrom: id, reporters });
+    }
+    return { report: closed, into: (await store.get(into)) ?? original };
   }
 
   /** The bearer token's agent, the shared token's 'shared', or null. */
@@ -518,6 +547,10 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
       if ('error' in n) return fail(n.error);
       const event = await store.note(id, n.text, me);
       return event ? json({ event }, 201) : fail('No such report', 404);
+    }
+    if (action === 'merge') {
+      const m = await merge(id, body.into, by ?? me, holder);
+      return m instanceof Response ? m : json(m);
     }
     return fail('Not found', 404);
   }
@@ -644,6 +677,11 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
         if (!priority) return fail('Pick a priority.');
         const r = await store.setPriority(id, priority, me);
         return r ? json({ report: forTeam(r) }) : fail('No such report', 404);
+      }
+      case 'merge': {
+        // Merge into #id8, from the hosted agent's suggestion or by hand (shipcue report 1c0bf5be).
+        const m = await merge(id, body.into, me);
+        return m instanceof Response ? m : json({ report: forTeam(m.report), into: forTeam(m.into) });
       }
     }
     return fail('Not found', 404);

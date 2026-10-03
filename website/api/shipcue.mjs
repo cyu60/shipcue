@@ -403,13 +403,13 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
       );
       return Number(rows[0]?.n ?? 0);
     },
-    async note(id, text, by) {
+    async note(id, text, by, extra) {
       if (!isUuid(id)) return null;
       const params = [id];
       const proj = project == null ? "NULL::uuid" : `${p(params, project)}::uuid`;
       const a = by ?? null;
       const where = `id = $1 AND NOT is_deleted${scope(params)}`;
-      const values = [proj, `'note'`, p(params, a?.kind ?? null), p(params, a?.id ?? null), p(params, a?.name ?? null), `${p(params, JSON.stringify({ text }))}::jsonb`].join(", ");
+      const values = [proj, `'note'`, p(params, a?.kind ?? null), p(params, a?.id ?? null), p(params, a?.name ?? null), `${p(params, JSON.stringify({ ...extra, text }))}::jsonb`].join(", ");
       const { rows } = await db.query(
         `WITH r AS (UPDATE ${table} SET updated_at = now() WHERE ${where} RETURNING id),
               e AS (INSERT INTO ${events} (report_id, project_id, action, actor_kind, actor_id, actor_name, detail) SELECT id, ${values} FROM r
@@ -974,11 +974,31 @@ function createShipcueHandler(opts) {
     if (text.length > config.maxNote) return { error: `Notes can be up to ${config.maxNote} characters.` };
     return { text };
   };
+  const DUPLICATE_OF = "Duplicate of #";
   const isPrUrl = (v) => typeof v === "string" && v.length <= 500 && /^https?:\/\/[^\s]+$/i.test(v);
   async function lost(id, verb = "Someone else has it") {
     const r = await store.get(id);
     if (!r) return fail("No such report", 404);
     return fail(r.claimedBy ? `${r.claimedBy} has it now.` : verb, 409);
+  }
+  async function merge(id, into, by, holder) {
+    if (typeof into !== "string" || !into) return fail("Say which report it duplicates (into).");
+    if (into === id) return fail("A report cannot be a duplicate of itself.");
+    const [dup, original] = await Promise.all([store.get(id), store.get(into)]);
+    if (!dup) return fail("No such report", 404);
+    if (!original) return fail("No such report to merge into", 404);
+    if (dup.status === "fixed" || dup.status === "wontfix") return fail("This report is already closed.", 409);
+    if (original.status === "wontfix" && original.resolution?.startsWith(DUPLICATE_OF)) return fail("That report is itself a duplicate; merge into the one it points to.", 409);
+    const earlier = store.events ? await store.events(id) : [];
+    const reporters = 1 + earlier.reduce((n, e) => n + (e.action === "note" && e.detail.mergedFrom && typeof e.detail.reporters === "number" ? e.detail.reporters : 0), 0);
+    const closed = await store.close(id, "wontfix", `${DUPLICATE_OF}${into.slice(0, 8)}`, { holder, by });
+    if (!closed) return holder ? lost(id) : fail("No such report", 404);
+    await emit("report.closed", closed);
+    if (store.note) {
+      await store.note(id, `Merged into #${into.slice(0, 8)} as a duplicate.`, by, { mergedInto: into });
+      await store.note(into, `#${id.slice(0, 8)} was merged into this as a duplicate (${reporters} more reporter${reporters === 1 ? "" : "s"}).`, by, { mergedFrom: id, reporters });
+    }
+    return { report: closed, into: await store.get(into) ?? original };
   }
   async function agentAuth(req) {
     const auth2 = req.headers.get("authorization") ?? "";
@@ -1085,6 +1105,10 @@ function createShipcueHandler(opts) {
       if ("error" in n) return fail(n.error);
       const event = await store.note(id, n.text, me);
       return event ? json({ event }, 201) : fail("No such report", 404);
+    }
+    if (action === "merge") {
+      const m = await merge(id, body.into, by ?? me, holder);
+      return m instanceof Response ? m : json(m);
     }
     return fail("Not found", 404);
   }
@@ -1203,6 +1227,10 @@ function createShipcueHandler(opts) {
         if (!priority) return fail("Pick a priority.");
         const r = await store.setPriority(id, priority, me);
         return r ? json({ report: forTeam(r) }) : fail("No such report", 404);
+      }
+      case "merge": {
+        const m = await merge(id, body.into, me);
+        return m instanceof Response ? m : json({ report: forTeam(m.report), into: forTeam(m.into) });
       }
     }
     return fail("Not found", 404);
