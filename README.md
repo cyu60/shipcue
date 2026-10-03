@@ -297,13 +297,30 @@ pnpm build
 - **0.2.0**: screen recording and video attachments, recent errors in the snapshot, a don't-attach-page link, Past reports links, `attachVideo` on stores. Brought over from the report buttons in the Stanford Founders dashboard and Block Outliner.
 - **0.1.0**: first release.
 
+## Staying small
+
+shipcue is a report button, a queue, and the tools to work it. A new feature earns a place only if it:
+
+1. **Solves something people already do by hand,** and the report says what that is.
+2. **Ships as its smallest useful version first.** Every backlog item names that version and what is out of scope.
+3. **Is opt-in when it costs anything:** a prop, a handler option or a project setting, off unless it is the obvious default. The core button, handler and store stay as they are.
+4. **Never runs code or hosts runners itself.** Agents do the work over the agent API and listeners; shipcue coordinates.
+5. **Adds no runtime dependency** unless it truly can't be done without one.
+
+If an idea fails these, it belongs in your app (through `formExtras`, `fields`, broadcasters or `onReport`) rather than in shipcue.
+
 ## Roadmap
 
-- Sinks: GitHub Issues, Linear, Slack, email
-- Row-level security preset for apps that read the table from the browser
-- Notify the reporter when their report is fixed
-- Public board with voting for feature requests (optional)
-- Comments on a report between the reporter and whoever claimed it
+The backlog lives on [shipcue's own CueLog](https://shipcue.ibuildathing.com/cuelog/) as low-priority reports, each with its smallest version and what it leaves out:
+
+- Close the loop with GitHub: an open PR moves the report to In review, and merge plus a verified deploy marks it Fixed
+- One view of every queue, with waiting time and installed versions
+- Hosted agent: one-click suggestions and duplicate detection
+- Setup without the traps: publish to npm and add `shipcue doctor`
+- Activity digest broadcaster
+- Reporter portal: your reports on any device
+- Swarm mode with work-area claims (needs a design first)
+- Isolation regression suite for Cloud
 
 ## License
 
