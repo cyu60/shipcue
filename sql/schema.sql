@@ -83,10 +83,12 @@ ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS client_key text CHECK (leng
 CREATE INDEX IF NOT EXISTS shipcue_reports_client ON shipcue_reports (client_key) WHERE client_key IS NOT NULL AND NOT is_deleted;
 
 -- Upgrading from 0.18: notes on a report's history, from people, agents (add_note) and shipcue
--- Cloud's hosted agent. Widens the action check to take 'note'.
+-- Cloud's hosted agent. Widens the action check to take 'note'. It sets the full current list
+-- (as the block below does) so re-running this file never narrows the check over rows that use
+-- a newer action ('edited').
 ALTER TABLE shipcue_report_events DROP CONSTRAINT IF EXISTS shipcue_report_events_action_check;
 ALTER TABLE shipcue_report_events ADD CONSTRAINT shipcue_report_events_action_check
-  CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note'));
+  CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note', 'edited'));
 
 -- Upgrading from 0.20/0.21: editing a filed report from the CueLog (shipcue report 5c54da74).
 -- No new columns; the history's action check widens to take 'edited'. Until this runs, an edit

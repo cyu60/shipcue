@@ -90,9 +90,11 @@ export function checkLockfiles(files: { name: string; text: string }[], version?
   };
 }
 
-export const ROUTE_CANDIDATES = ['ts', 'js', 'tsx', 'mjs'].flatMap((ext) =>
-  ['app', 'src/app'].map((dir) => `${dir}/api/shipcue/[...path]/route.${ext}`),
-);
+// The App Router's route file, then the Pages Router's API route (ai-me uses the Pages Router).
+export const ROUTE_CANDIDATES = ['ts', 'js', 'tsx', 'mjs'].flatMap((ext) => [
+  ...['app', 'src/app'].map((dir) => `${dir}/api/shipcue/[...path]/route.${ext}`),
+  ...['pages', 'src/pages'].map((dir) => `${dir}/api/shipcue/[...path].${ext}`),
+]);
 
 export function checkRoute(exists: (path: string) => boolean, configured?: string): CheckResult {
   const found = configured ? (exists(configured) ? configured : undefined) : ROUTE_CANDIDATES.find(exists);
