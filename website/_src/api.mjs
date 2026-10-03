@@ -11,7 +11,8 @@ const auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 
 const handler = createShipcueHandler({
-  store: postgresStore(pool),
+  // Only shipcue's own reports: the same table holds every Cloud project's, which must never show here.
+  store: postgresStore(pool, 'shipcue_reports', { project: null }),
   // Any file can come along with a report here, not just screenshots (report e8b2dedd).
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: '/api/shipcue',

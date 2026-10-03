@@ -45,6 +45,24 @@ describe('postgres store, projects', () => {
     expect(await a.version!()).not.toBe(await b.version!());
   });
 
+  it("project: null is the app's own queue: it never sees, claims or counts a Cloud project's reports", async () => {
+    const db = new PGlite();
+    await db.exec(schema);
+    await db.exec(cloud);
+    const q = { query: (text: string, params?: unknown[]) => db.query(text, params) };
+    const cloudProject = postgresStore(q, 'shipcue_reports', { project: A });
+    const own = postgresStore(q, 'shipcue_reports', { project: null });
+    const input = { type: 'bug' as const, priority: 'blocking' as const, area: 'other', description: 'A Cloud customer report', pageUrl: '', userAgent: '', diagnostics: {}, screenshots: [], reporter: null };
+    const theirs = await cloudProject.create(input);
+    await cloudProject.close(theirs.id, 'fixed', 'private fix');
+    const mine = await own.create({ ...input, description: 'Our own report' });
+    expect((await own.list()).map((r) => r.id)).toEqual([mine.id]);
+    expect(await own.get(theirs.id)).toBeNull();
+    expect(await own.close(theirs.id, 'wontfix', 'not ours')).toBeNull();
+    expect((await own.claimNext('agent'))?.id).toBe(mine.id);
+    expect(await own.version!()).not.toBe(await cloudProject.version!());
+  });
+
   it('refuses a project that is not a uuid', () => {
     expect(() => postgresStore({ query: async () => ({ rows: [] }) }, 'shipcue_reports', { project: "x' OR 1=1" })).toThrow();
   });

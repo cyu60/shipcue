@@ -177,7 +177,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
   if (!NAME.test(table)) throw new Error(`Bad table name: ${table}`);
   if (!NAME.test(events)) throw new Error(`Bad table name: ${events}`);
   const project = opts.project;
-  if (project !== void 0 && !/^[0-9a-f-]{36}$/i.test(project)) throw new Error("project must be a uuid");
+  if (project != null && !/^[0-9a-f-]{36}$/i.test(project)) throw new Error("project must be a uuid");
   const one = async (text, params) => {
     const { rows } = await db.query(text, params);
     return rows[0] ? toReport(rows[0]) : null;
@@ -188,7 +188,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
     params.push(v);
     return `$${params.length}`;
   };
-  const scope = (params) => project === void 0 ? "" : ` AND project_id = ${p(params, project)}`;
+  const scope = (params) => project === void 0 ? "" : project === null ? " AND project_id IS NULL" : ` AND project_id = ${p(params, project)}`;
   const holds = (params, holder) => holder === void 0 ? "" : ` AND (claimant_id IS NULL OR claimant_id = ${p(params, holder)})`;
   const lease = (params, seconds) => seconds === void 0 ? "NULL" : `now() + (${p(params, seconds)}::float8 * interval '1 second')`;
   const claimSet = (params, c, seconds) => `status = 'claimed', claimed_by = ${p(params, c.name)}, claimed_at = now(), claimant_kind = ${p(params, c.kind)}, claimant_id = ${p(params, c.id)}, lease_expires_at = ${lease(params, seconds)}`;
@@ -198,7 +198,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
     const a = event.actor ?? null;
     const values = [
       "id",
-      project === void 0 ? "NULL::uuid" : `${p(params, project)}::uuid`,
+      project == null ? "NULL::uuid" : `${p(params, project)}::uuid`,
       p(params, event.action),
       p(params, a?.kind ?? null),
       p(params, a?.id ?? null),
@@ -227,7 +227,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
         input.context ?? null
       ];
       const cols = ["type", "priority", "area", "description", "page_url", "user_agent", "diagnostics", "screenshots", "reporter", "context"];
-      if (project !== void 0) {
+      if (project != null) {
         params.push(project);
         cols.push("project_id");
       }
@@ -326,7 +326,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
     },
     async expire() {
       const params = [];
-      const proj = project === void 0 ? "NULL::uuid" : `${p(params, project)}::uuid`;
+      const proj = project == null ? "NULL::uuid" : `${p(params, project)}::uuid`;
       const { rows } = await db.query(
         `WITH old AS (SELECT id, claimant_kind, claimant_id, claimed_by FROM ${table}
                        WHERE status = 'claimed' AND lease_expires_at < now() AND NOT is_deleted${scope(params)} FOR UPDATE SKIP LOCKED),
@@ -350,7 +350,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
     async events(id) {
       if (!isUuid(id)) return [];
       const params = [id];
-      const where = project === void 0 ? "" : ` AND project_id = ${p(params, project)}`;
+      const where = project === void 0 ? "" : project === null ? " AND project_id IS NULL" : ` AND project_id = ${p(params, project)}`;
       const { rows } = await db.query(
         `SELECT id, report_id, action, actor_kind, actor_id, actor_name, detail, at FROM ${events} WHERE report_id = $1${where} ORDER BY at, id`,
         params
@@ -999,7 +999,8 @@ async function cloudUserFrom(req, auth2) {
 var auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 var pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 var handler = createShipcueHandler({
-  store: postgresStore(pool),
+  // Only shipcue's own reports: the same table holds every Cloud project's, which must never show here.
+  store: postgresStore(pool, "shipcue_reports", { project: null }),
   // Any file can come along with a report here, not just screenshots (report e8b2dedd).
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: "/api/shipcue",

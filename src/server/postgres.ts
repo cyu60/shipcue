@@ -93,8 +93,10 @@ export interface PostgresStoreOptions {
    * Keep to one project's reports: every read and write is limited to rows with this
    * project_id, and new reports get it. For a hosted queue serving many apps from one table
    * (shipcue Cloud); needs the project_id column from sql/cloud.sql. Leave out for one app.
+   * null: the table also holds Cloud projects' reports, and this store is the app's own queue,
+   * so it only ever sees rows with no project.
    */
-  project?: string;
+  project?: string | null;
   /** Where each report's history goes (sql/schema.sql makes it). */
   eventsTable?: string;
 }
@@ -105,7 +107,7 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
   if (!NAME.test(table)) throw new Error(`Bad table name: ${table}`);
   if (!NAME.test(events)) throw new Error(`Bad table name: ${events}`);
   const project = opts.project;
-  if (project !== undefined && !/^[0-9a-f-]{36}$/i.test(project)) throw new Error('project must be a uuid');
+  if (project != null && !/^[0-9a-f-]{36}$/i.test(project)) throw new Error('project must be a uuid');
   const one = async (text: string, params: unknown[]) => {
     const { rows } = await db.query(text, params);
     return rows[0] ? toReport(rows[0] as Row) : null;
@@ -117,7 +119,7 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
     return `$${params.length}`;
   };
   /** " AND project_id = $n" with the project added to params, or nothing for a one-app store. */
-  const scope = (params: unknown[]) => (project === undefined ? '' : ` AND project_id = ${p(params, project)}`);
+  const scope = (params: unknown[]) => (project === undefined ? '' : project === null ? ' AND project_id IS NULL' : ` AND project_id = ${p(params, project)}`);
   /** " AND (nobody or this claimant holds it)", when a holder is given. */
   const holds = (params: unknown[], holder: string | undefined) =>
     holder === undefined ? '' : ` AND (claimant_id IS NULL OR claimant_id = ${p(params, holder)})`;
@@ -138,7 +140,7 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
     const a = event.actor ?? null;
     const values = [
       'id',
-      project === undefined ? 'NULL::uuid' : `${p(params, project)}::uuid`,
+      project == null ? 'NULL::uuid' : `${p(params, project)}::uuid`,
       p(params, event.action),
       p(params, a?.kind ?? null),
       p(params, a?.id ?? null),
@@ -168,7 +170,7 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
         input.context ?? null,
       ];
       const cols = ['type', 'priority', 'area', 'description', 'page_url', 'user_agent', 'diagnostics', 'screenshots', 'reporter', 'context'];
-      if (project !== undefined) {
+      if (project != null) {
         params.push(project);
         cols.push('project_id');
       }
@@ -276,7 +278,7 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
     async expire() {
       // The holder whose lease ran out is kept on the history line.
       const params: unknown[] = [];
-      const proj = project === undefined ? 'NULL::uuid' : `${p(params, project)}::uuid`;
+      const proj = project == null ? 'NULL::uuid' : `${p(params, project)}::uuid`;
       const { rows } = await db.query(
         `WITH old AS (SELECT id, claimant_kind, claimant_id, claimed_by FROM ${table}
                        WHERE status = 'claimed' AND lease_expires_at < now() AND NOT is_deleted${scope(params)} FOR UPDATE SKIP LOCKED),
@@ -300,7 +302,7 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
     async events(id) {
       if (!isUuid(id)) return [];
       const params: unknown[] = [id];
-      const where = project === undefined ? '' : ` AND project_id = ${p(params, project)}`;
+      const where = project === undefined ? '' : project === null ? ' AND project_id IS NULL' : ` AND project_id = ${p(params, project)}`;
       const { rows } = await db.query(
         `SELECT id, report_id, action, actor_kind, actor_id, actor_name, detail, at FROM ${events} WHERE report_id = $1${where} ORDER BY at, id`,
         params,

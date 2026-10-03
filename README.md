@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-245%20passing-2E5BFF?style=flat-square" alt="245 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-261%20passing-2E5BFF?style=flat-square" alt="261 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -250,6 +250,7 @@ pnpm build
 
 ## Changelog
 
+- **0.16.1**: `postgresStore(db, table, { project: null })` is an app's own queue in a table that also holds shipcue Cloud projects: it only sees rows with no project. Use it wherever one table serves both, so Cloud projects' reports never show on your board or to your agents.
 - **0.16.0**: `formExtras` draws an app's own small controls (e.g. a "Pin it" checkbox) under the text box in the Bug and Feature request forms, and `fields` (read at send time) adds their values to the report, never over shipcue's own fields.
 - **0.15.0**: `ReportButton` takes `reporter` (who is signed in on your site, e.g. `reporter={user.email}`) and sends it in the `x-shipcue-user` header with the report and its video, so shipcue Cloud's CueLog shows who filed each report. Your own handler can read it in `getReporter`. shipcue Cloud also gains Continue with Google and GitHub, enforces each project's list of sites, and lets owners rename a project, give the button a new key, or delete the project.
 - **0.14.0**: the CueLog gets stars (pin any report to the top in the panel, the board and the CueLog table; the panel's new Yours list shows what you sent from this browser), an in-page image preview for screenshots everywhere (click to zoom, arrows, Esc), GitHub links on the changelog when the repository is public or the viewer is an admin (`boardLinks`, `boardAdmin`), `anonymousLimit` (a few reports without signing in, then `signInUrl`; signed in, people can still send anonymously), button and text sizes with a Display panel (`buttonSize`, `textSize`) and a hotkey to reset a dragged button (⌃⇧H / Alt+Shift+H). The hat is now Lucide's hard-hat. **Upgrading:** for `anonymousLimit`, run the "Upgrading from 0.13" lines in `sql/schema.sql`.
