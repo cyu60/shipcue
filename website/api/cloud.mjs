@@ -925,9 +925,15 @@ var ACCESS_COOKIE = "sc_at";
 var REFRESH_COOKIE = "sc_rt";
 var PKCE_COOKIE = "sc_pkce";
 var OAUTH_PROVIDERS = ["google", "github"];
+var REPORTER_HEADER = "x-shipcue-user";
+var MAX_REPORTER = 200;
 var json2 = (body2, status = 200, headers = {}) => new Response(JSON.stringify(body2), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...headers } });
 var fail2 = (error, status = 400) => json2({ error }, status);
 var sha256 = (t) => createHash("sha256").update(t).digest("hex");
+var reporterFrom = (req) => {
+  const raw = (req.headers.get(REPORTER_HEADER) ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return raw ? raw.slice(0, MAX_REPORTER) : null;
+};
 var nameFromEmail = (email) => email.split("@")[0].slice(0, 80) || email.slice(0, 80);
 function cookies(req) {
   const out = {};
@@ -1328,6 +1334,8 @@ function createCloudHandler(opts) {
       config: resolveConfig({ areas: Array.isArray(p.areas) ? p.areas : [] }),
       basePath: `${base}/p/${key}`,
       cors: p.allowed_origins,
+      // The site vouches for who is signed in there; Cloud cannot check it.
+      getReporter: async (r) => reporterFrom(r),
       board: p.public_board,
       // The team sees every fix link on the public board, private repositories included.
       boardAdmin: async (r) => {

@@ -17,11 +17,18 @@ const REFRESH_COOKIE = 'sc_rt';
 // The PKCE verifier between "Continue with Google" and the way back.
 const PKCE_COOKIE = 'sc_pkce';
 const OAUTH_PROVIDERS = ['google', 'github'];
+// Who is filing, as the site's button says (ReportButton's `reporter`): printable text, capped.
+const REPORTER_HEADER = 'x-shipcue-user';
+const MAX_REPORTER = 200;
 
 const json = (body, status = 200, headers = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
 const fail = (error, status = 400) => json({ error }, status);
 const sha256 = (t) => createHash('sha256').update(t).digest('hex');
+const reporterFrom = (req) => {
+  const raw = (req.headers.get(REPORTER_HEADER) ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  return raw ? raw.slice(0, MAX_REPORTER) : null;
+};
 const nameFromEmail = (email) => email.split('@')[0].slice(0, 80) || email.slice(0, 80);
 
 function cookies(req) {
@@ -491,6 +498,8 @@ export function createCloudHandler(opts) {
       config: resolveConfig({ areas: Array.isArray(p.areas) ? p.areas : [] }),
       basePath: `${base}/p/${key}`,
       cors: p.allowed_origins,
+      // The site vouches for who is signed in there; Cloud cannot check it.
+      getReporter: async (r) => reporterFrom(r),
       board: p.public_board,
       // The team sees every fix link on the public board, private repositories included.
       boardAdmin: async (r) => {

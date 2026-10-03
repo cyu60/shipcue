@@ -275,6 +275,29 @@ describe('shipcue Cloud: the sites a project lists', () => {
   });
 });
 
+describe('shipcue Cloud: who filed it', () => {
+  it('keeps the person the site says is signed in, cleaned and capped', async () => {
+    await signUp('ada@example.com');
+    const { data: made } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Who' } });
+    const file = (user?: string) => {
+      const form = new FormData();
+      form.set('type', 'bug');
+      form.set('description', 'The save button does nothing at all');
+      return handle(new Request(`${BASE}/p/${made.project.publicKey}/reports`, { method: 'POST', body: form, headers: user === undefined ? {} : { 'x-shipcue-user': user } }));
+    };
+    expect((await file('  grace@example.com  ')).status).toBe(201);
+    expect((await file()).status).toBe(201);
+    expect((await file('x'.repeat(500))).status).toBe(201);
+    expect((await file('bad\tname')).status).toBe(201);
+    const { data } = await call('GET', `/p/${made.project.publicKey}/team/reports`, { as: 'ada@example.com' });
+    const reporters = data.reports.map((r: { reporter: string | null }) => r.reporter).sort();
+    expect(reporters).toContain('grace@example.com');
+    expect(reporters).toContain(null);
+    expect(reporters.find((r: string | null) => r?.startsWith('xxx'))).toHaveLength(200);
+    expect(reporters).toContain('badname');
+  });
+});
+
 describe('shipcue Cloud: a new key, and deleting a project', () => {
   async function project() {
     await signUp('ada@example.com');

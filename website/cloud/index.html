@@ -35,7 +35,7 @@
 <h2>Set up</h2>
 <ol>
   <li><a href="/app/">Sign in</a> and create a project.</li>
-  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" /&gt;</code> to your app, and list the sites it runs on.</li>
+  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app, and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report.</li>
   <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
 </ol>
 <h2>What stays the same</h2>

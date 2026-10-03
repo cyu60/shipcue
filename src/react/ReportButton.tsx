@@ -22,6 +22,12 @@ export interface ReportButtonProps {
   endpoint?: string;
   /** Send the form yourself, e.g. through a Next.js server action. */
   submit?: (form: FormData) => Promise<SubmitResult>;
+  /**
+   * Who is signed in on your site (an email or a name), sent with each report in the
+   * `x-shipcue-user` header. shipcue Cloud shows it as the reporter; your own handler can read it
+   * in `getReporter`. Your site vouches for it: shipcue cannot check it.
+   */
+  reporter?: string;
   /** A snapshot of app state attached to every report, for whoever fixes it. Keep it under 64 KB. */
   diagnostics?: () => Record<string, unknown>;
   /** `floating`: bottom-right bubble. `inline`: a small button for a header or toolbar. */
@@ -164,8 +170,11 @@ const headingFor = (t: ShipcueText): Record<ReportType, [string, string]> => ({
 
 const ACCEPT = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
-async function postTo(endpoint: string, form: FormData): Promise<SubmitResult> {
-  const res = await fetch(`${endpoint.replace(/\/$/, '')}/reports`, { method: 'POST', body: form });
+/** The header that says who is filing, when the app told us. */
+const reporterHeaders = (reporter: string | undefined): Record<string, string> => (reporter ? { 'x-shipcue-user': reporter } : {});
+
+async function postTo(endpoint: string, form: FormData, reporter?: string): Promise<SubmitResult> {
+  const res = await fetch(`${endpoint.replace(/\/$/, '')}/reports`, { method: 'POST', body: form, headers: reporterHeaders(reporter) });
   const body = (await res.json().catch(() => ({}))) as Partial<{ id: string; error: string; signIn: string | null }>;
   if (res.ok && body.id) return { id: body.id };
   return { error: body.error ?? 'Could not send the report. Please try again.', signIn: body.signIn ?? null };
@@ -191,10 +200,10 @@ export function videoError(e: unknown, size: number, max: number): string {
   return msg || 'Could not upload the video. The report itself was sent.';
 }
 
-async function postVideo(endpoint: string, reportId: string, video: Blob): Promise<void> {
+async function postVideo(endpoint: string, reportId: string, video: Blob, reporter?: string): Promise<void> {
   const form = new FormData();
   form.set('video', video, `video.${videoType(video.type) === 'video/mp4' ? 'mp4' : videoType(video.type) === 'video/quicktime' ? 'mov' : 'webm'}`);
-  const res = await fetch(`${endpoint.replace(/\/$/, '')}/reports/${reportId}/video`, { method: 'POST', body: form });
+  const res = await fetch(`${endpoint.replace(/\/$/, '')}/reports/${reportId}/video`, { method: 'POST', body: form, headers: reporterHeaders(reporter) });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     // A host's own limit (Vercel: 4.5 MB per request) answers before the handler does.
@@ -207,6 +216,7 @@ function ReportPanel({
   areas,
   endpoint = '/api/shipcue',
   submit,
+  reporter,
   diagnostics,
   variant = 'floating',
   accentColor = '#18181b',
@@ -670,7 +680,7 @@ function ReportPanel({
       form.set('userAgent', navigator.userAgent);
       form.set('diagnostics', snapshot(diagnostics, captureErrors));
       files.forEach((f) => form.append(ACCEPT.includes(f.type) ? 'screenshot' : 'file', f, f.name));
-      const result = submit ? await submit(form) : await postTo(endpoint, form);
+      const result = submit ? await submit(form) : await postTo(endpoint, form, reporter);
       if ('error' in result) {
         if (result.signIn) setSignInHref(result.signIn);
         throw new Error(result.error);
@@ -679,7 +689,7 @@ function ReportPanel({
       let videoFailed: string | null = null;
       if (video && videoOn) {
         try {
-          await (uploadVideo ? uploadVideo(result.id, video.blob) : postVideo(endpoint, result.id, video.blob));
+          await (uploadVideo ? uploadVideo(result.id, video.blob) : postVideo(endpoint, result.id, video.blob, reporter));
         } catch (e) {
           videoFailed = videoError(e, video.blob.size, maxVideoBytes);
         }
