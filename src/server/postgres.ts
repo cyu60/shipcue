@@ -304,7 +304,7 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
       const params: unknown[] = [id];
       const where = project === undefined ? '' : project === null ? ' AND project_id IS NULL' : ` AND project_id = ${p(params, project)}`;
       const { rows } = await db.query(
-        `SELECT id, report_id, action, actor_kind, actor_id, actor_name, detail, at FROM ${events} WHERE report_id = $1${where} ORDER BY at, id`,
+        `SELECT id, report_id, action, actor_kind, actor_id, actor_name, detail, at FROM ${events} WHERE report_id = $1${where} ORDER BY at, seq`,
         params,
       );
       return rows.map((e) => toEvent(e as EventRow));

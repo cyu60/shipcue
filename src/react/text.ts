@@ -42,6 +42,11 @@ export interface ShipcueText {
   noReportsYet: string;
   starsHint: string;
   starred: string;
+  pin: string;
+  pinned: string;
+  pinIt: string;
+  unpinIt: string;
+  pinHint: string;
   seeTheFix: string;
   signIn: string;
   sendAnonymously: string;
@@ -119,8 +124,13 @@ export const DEFAULT_TEXT: ShipcueText = {
   yours: 'Yours',
   yourReports: 'Your reports',
   noReportsYet: 'Reports you send from this browser show up here.',
-  starsHint: 'Star one to pin it to the top, here and on the CueLog. Kept in this browser.',
-  starred: 'Starred',
+  starsHint: 'Pin one to keep it at the top, here and on the CueLog. Kept in this browser.',
+  starred: 'Pinned',
+  pin: 'Pin',
+  pinned: 'Pinned',
+  pinIt: 'Pin this report',
+  unpinIt: 'Unpin this report',
+  pinHint: 'Pin it: once sent, it stays at the top of Yours and the CueLog',
   seeTheFix: 'See the fix on GitHub',
   signIn: 'Sign in',
   sendAnonymously: 'Send anonymously (leave my name off it)',

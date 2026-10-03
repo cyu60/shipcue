@@ -11,3 +11,4 @@ export { CueLogTable, CUELOG_TEXT, filterReports, sortReports, type CueLogTableP
 export { Lightbox, useLightbox, type LightboxProps } from './Lightbox';
 export { useStars, toggleStar, loadStars, loadMine, starredFirst, type MyReport } from './stars';
 export { BUTTON_PX, TEXT_ZOOM, type Size as ShipcueSize } from './appearance';
+export { PinIcon } from './PinIcon';

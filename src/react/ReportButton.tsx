@@ -3,7 +3,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, type Hotkeys } from './hotkeys';
 import { useLightbox } from './Lightbox';
-import { STAR_OFF, STAR_ON, rememberMine, starredFirst, useStars } from './stars';
+import { PinIcon } from './PinIcon';
+import { loadStars, rememberMine, starredFirst, toggleStar, useStars } from './stars';
 import { BUTTON_PX, SIZES, TEXT_ZOOM, loadAppearance, saveAppearance, type Appearance, type Size } from './appearance';
 import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
@@ -62,6 +63,12 @@ export interface ReportButtonProps {
    * opens shipcue (hotkeys={false}). Without it, the link edits shipcue's own hotkeys in place.
    */
   onEditShortcuts?: () => void;
+  /**
+   * The small Pin button next to Dictate: a pinned report stays at the top of Yours and the
+   * CueLog, and the form sends pinned=1 so your own backend can keep it too. On by default; turn
+   * it off if your app has its own pin control (say through formExtras).
+   */
+  pin?: boolean;
   /** The floating button's size; each person can change it in the panel's Display settings. */
   buttonSize?: Size;
   /** How big the panel's text is; each person can change it in the panel's Display settings. */
@@ -240,6 +247,7 @@ function ReportPanel({
   seeReportsLabel,
   limits,
   onEditShortcuts,
+  pin = true,
   buttonSize: buttonSizeProp = 'medium',
   textSize: textSizeProp = 'medium',
   watermark = true,
@@ -388,6 +396,8 @@ function ReportPanel({
   const textZoom = TEXT_ZOOM[appearance.textSize ?? textSizeProp];
   const [editingDisplay, setEditingDisplay] = useState(false);
   const [anonymous, setAnonymous] = useState(false);
+  // Pin the report being written, so it stays at the top of Yours and the CueLog (report a346d199).
+  const [pinNext, setPinNext] = useState(false);
   const [signInHref, setSignInHref] = useState<string | null>(null);
   const lightbox = useLightbox();
   const starState = useStars();
@@ -683,6 +693,7 @@ function ReportPanel({
     try {
       const form = new FormData();
       if (anonymous && known?.signedIn) form.set('anonymous', '1');
+      if (pin && pinNext) form.set('pinned', '1');
       form.set('type', type);
       form.set('description', text);
       form.set('context', context ?? '');
@@ -709,6 +720,8 @@ function ReportPanel({
       }
       setVideo(null);
       rememberMine({ id: result.id, type: extra ? extra.id : type, title: (text.trim().split('\n')[0] ?? '').slice(0, 120), at: new Date().toISOString() });
+      if (pin && pinNext && !loadStars().includes(result.id)) toggleStar(result.id);
+      setPinNext(false);
       setOpen(false);
       setSent({ warning: videoFailed });
       setText('');
@@ -843,26 +856,41 @@ function ReportPanel({
                 </button>
               )}
                 {context !== null && <span />}
-                {speech && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                  {pin && (
                   <button
                     type="button"
-                    onClick={toggleDictation}
-                    aria-pressed={listening}
-                    title={`${t.dictate}${keys.dictate?.[0] ? ` (${display(keys.dictate[0]!)})` : ''}`}
-                    style={{ ...s.linkBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, color: listening ? '#be123c' : '#71717a' }}
+                    onClick={() => setPinNext((v) => !v)}
+                    aria-pressed={pinNext}
+                    aria-label={pinNext ? t.unpinIt : t.pinIt}
+                    title={t.pinHint}
+                    style={{ ...s.linkBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, color: pinNext ? '#18181b' : '#71717a', fontWeight: pinNext ? 600 : undefined }}
                   >
-                    {listening ? (
-                      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: '#e11d48' }} />
-                    ) : (
-                      <svg data-icon="mic" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.8" />
-                        <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                      </svg>
-                    )}
-                    {listening ? t.listening : t.dictate}
-                    {!listening && keys.dictate?.[0] && <span style={{ opacity: 0.7 }}>{display(keys.dictate[0]!)}</span>}
+                    <PinIcon on={pinNext} size={12} />
+                    {pinNext ? t.pinned : t.pin}
                   </button>
-                )}
+                  )}
+                  {speech && (
+                    <button
+                      type="button"
+                      onClick={toggleDictation}
+                      aria-pressed={listening}
+                      title={`${t.dictate}${keys.dictate?.[0] ? ` (${display(keys.dictate[0]!)})` : ''}`}
+                      style={{ ...s.linkBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, color: listening ? '#be123c' : '#71717a' }}
+                    >
+                      {listening ? (
+                        <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: '#e11d48' }} />
+                      ) : (
+                        <svg data-icon="mic" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                          <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.8" />
+                          <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                        </svg>
+                      )}
+                      {listening ? t.listening : t.dictate}
+                      {!listening && keys.dictate?.[0] && <span style={{ opacity: 0.7 }}>{display(keys.dictate[0]!)}</span>}
+                    </button>
+                  )}
+                </span>
               </div>
               {context !== null && (() => {
                 // A bulleted outline opens as a Preview; plain text, or anything being edited, as Raw.
@@ -1072,12 +1100,12 @@ function ReportPanel({
                       <div key={m.id} style={{ ...s.keysRow, gap: 8 }}>
                         <button
                           type="button"
-                          aria-label={starState.isStarred(m.id) ? `Unstar ${m.title}` : `Star ${m.title}`}
+                          aria-label={starState.isStarred(m.id) ? `Unpin ${m.title}` : `Pin ${m.title}`}
                           aria-pressed={starState.isStarred(m.id)}
                           onClick={() => starState.toggle(m.id)}
-                          style={{ ...s.linkBtn, textDecoration: 'none', fontSize: 13, color: starState.isStarred(m.id) ? '#d97706' : '#a1a1aa' }}
+                          style={{ ...s.linkBtn, textDecoration: 'none', color: starState.isStarred(m.id) ? '#18181b' : '#a1a1aa' }}
                         >
-                          {starState.isStarred(m.id) ? STAR_ON : STAR_OFF}
+                          <PinIcon on={starState.isStarred(m.id)} size={12} />
                         </button>
                         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.title}>
                           {m.title}
