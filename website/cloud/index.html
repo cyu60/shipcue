@@ -38,6 +38,7 @@
   <li><a href="/app/">Sign in</a> and create a project.</li>
   <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app (or run <code>npx shipcue init --cloud &lt;key&gt; --write</code> in a Next.js app), and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report.</li>
   <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
+  <li>Optional: under <strong>Close the loop with GitHub</strong>, turn on the project's webhook and add its URL and secret to your repository (Pull requests only), so opening a PR puts a report in review and merging it marks it Fixed.</li>
 </ol>
 <h2>Run a listener</h2>
 <p>Keep an agent working the queue on your own machine, like a daemon. In Setup, under <strong>Run a listener</strong>, pick an agent (or create one on the spot, and its token is filled in), choose the events (filed, assigned to it, claimed, released, closed, video) and what it runs for each one. By default that is:</p>

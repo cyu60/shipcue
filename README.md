@@ -217,6 +217,7 @@ One ✓ or ✗ line per check, with the exact fix under each ✗ (exit code 1 if
 | `GET` | `/board` | anyone, only with `board` on: the queue and the changelog |
 | `GET` | `/board/version` | anyone, only with `board` on: a short string that changes when any report does |
 | `GET` | `/capabilities` | the button: what this handler takes (video, files, limits) |
+| `POST` | `/github` | a GitHub `pull_request` webhook, only with `github` on (signed with its secret) |
 
 ## Queue and changelog pages
 
@@ -269,6 +270,32 @@ createShipcueHandler({ /* ... */ digest: { every: 'day', send: slackDigest({ web
 // curl -X POST https://app.example.com/api/shipcue/digest -H "Authorization: Bearer $SHIPCUE_TOKEN"   (body: { since?, until?, every? })
 ```
 
+## Close the loop with GitHub
+
+Let pull requests move reports instead of calling `review` and `close` by hand. Give the handler a secret:
+
+```ts
+createShipcueHandler({
+  // ...
+  github: {
+    secret: process.env.SHIPCUE_GITHUB_SECRET!,
+    // Optional: close only once production serves the merge commit.
+    liveCheck: { url: 'https://app.example.com/api/version' },
+  },
+});
+```
+
+Then in the repository: **Settings → Webhooks → Add webhook**, Payload URL `https://your.app/api/shipcue/github`, Content type `application/json`, the same Secret, and **Let me select individual events → Pull requests** only. Name the report in the PR's title, body or branch, by its full id or its first 8 characters (`fix/919f5ca2-github-loop`); ids that are not reports in this store are ignored.
+
+| Pull request | Report |
+|---|---|
+| opened, reopened, edited, synchronize, ready for review | open or claimed → In review with the PR link (a claimant keeps it) |
+| merged | → Fixed, "Merged in #N", with the PR link (closed reports stay as they are) |
+| merged, with `liveCheck` | stays In review until `url` serves the merge sha (its first 7 characters, or your `match(body, sha)`), then Fixed, "Merged in #N, live in abc1234" |
+| closed without merging | In review under this PR → back in the queue, unassigned |
+
+The history names `github (@login)` as an agent. shipcue runs no timers: `liveCheck` is checked when the board, the CueLog or an agent reads the queue (at most once per `everyMs`, a minute by default), or call `handler.checkLive()` from a cron. On shipcue Cloud, Setup → Close the loop with GitHub gives the project's webhook URL (`/api/cloud/p/<key>/github`) and its secret, shown once.
+
 ## Try it locally
 
 ```bash
@@ -297,6 +324,7 @@ Release tarballs for GitHub: `npm run pack:release` (builds, then `npm pack`).
 
 ## Changelog
 
+- **next**: close the loop with GitHub (shipcue report 919f5ca2). The opt-in handler option `github: { secret, liveCheck? }` turns on `POST {base}/github` for a repository webhook (signed, `X-Hub-Signature-256`): a pull request whose title, body or branch names a report (full id or its first 8 characters, only reports in this store) moves it to In review with the PR link, merging it closes it as fixed ("Merged in #N"), and closing it unmerged puts reports in review under it back in the queue. With `liveCheck: { url, match? }` a merged report waits in review until that URL serves the merge commit, then closes as "Merged in #N, live in <sha7>"; it is checked on board, CueLog and agent reads (at most once a minute) or by `handler.checkLive()` from your cron. History events name `github (@login)` as an agent. shipcue Cloud: Setup → Close the loop with GitHub gives each project a webhook URL and a secret shown once (`sql/cloud.sql` adds `cloud_projects.github_secret`). New exports: `verifyGitHubSignature`, `reportIdsIn`, type `ShipcueHandler`.
 - **next**: isolation regression suite for Cloud (shipcue report 407a5d6d). `tests/isolation.test.ts` runs every read and write path (store methods, the public board, its version and screenshots, the team API, the agent API, the button's video route, and Cloud's per-project queue at `/api/cloud/p/<key>/`) with two Cloud projects and an own-rows store (`project: null`) on one database, and checks nothing crosses over in any direction, so the 0.16.1 leak (the site's own queue reading every Cloud project's reports) cannot come back unnoticed. No leak found; tests only.
 - **next**: setup without the traps (shipcue report 5fdbd60f). `npx shipcue doctor` checks the install and version, the signed-URL lockfile trap, the handler route and the env vars it reads (Vercel's too), and with `--url` the live endpoint, the agent token and the tables (RLS, columns, history actions), printing the fix or the "Upgrading from" block for each ✗. `npx shipcue init --cloud <pk_…>` wires the button to a Cloud project. Ready for npm: `prepare` became `prepublishOnly` (nothing builds on install), plus `publishConfig` and a `./package.json` export; see Publishing.
 - **next**: activity digest (shipcue report 5f4d339b): one batched summary per hour or day instead of a message per event. `digest(store, { since, until, format })` builds it from the report history (filed, fixed with fix lines and PRs, reopened, claims stuck past their lease, still open, oldest waiting) as Slack, email or Markdown, never with reporters or diagnostics; the handler's opt-in `digest` option adds `POST {base}/digest` (agent token) for a cron, sending with `slackDigest` / `emailDigest` or returning Markdown. shipcue Cloud: Setup → Digest (off / hourly / daily, to the project's Slack or the owner's email), sent by a cron at `/api/cloud/digest`. **Upgrading (Cloud):** run the new digest lines in `sql/cloud.sql`.

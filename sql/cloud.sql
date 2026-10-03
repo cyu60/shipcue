@@ -105,6 +105,10 @@ ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS digest_every text NOT NULL D
 ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS digest_to text NOT NULL DEFAULT 'slack' CHECK (digest_to IN ('slack', 'email'));
 ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS digest_sent_at timestamptz;
 
+-- The GitHub webhook (shipcue report 919f5ca2): a pull_request webhook at /api/cloud/p/<key>/github,
+-- signed with this secret (shown once). Null: off.
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS github_secret text;
+
 -- Server only: row-level security on with no policies, and no grants to browser roles.
 ALTER TABLE cloud_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_members ENABLE ROW LEVEL SECURITY;

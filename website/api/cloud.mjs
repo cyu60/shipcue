@@ -3,7 +3,7 @@ import pg from "pg";
 import { waitUntil } from "@vercel/functions";
 
 // website/_src/cloud.mjs
-import { createHash, randomBytes, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 
 // src/core/index.ts
 var REPORT_TYPES = ["bug", "feature", "task"];
@@ -445,7 +445,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
 }
 
 // src/server/handler.ts
-import { createHmac as createHmac2, timingSafeEqual } from "node:crypto";
+import { createHmac as createHmac3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 
 // src/server/broadcast.ts
 import { createHmac } from "node:crypto";
@@ -737,6 +737,131 @@ function emailDigest(opts) {
   };
 }
 
+// src/server/github.ts
+import { createHmac as createHmac2, timingSafeEqual } from "node:crypto";
+function verifyGitHubSignature(secret, body2, signature) {
+  if (!signature?.startsWith("sha256=")) return false;
+  const given = Buffer.from(signature.slice(7), "hex");
+  const expected = createHmac2("sha256", secret).update(body2).digest();
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+var FULL_ID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+var PREFIX = /(?<![0-9a-z])[0-9a-f]{8}(?![0-9a-z])/gi;
+function reportIdsIn(text) {
+  const lower = text.toLowerCase();
+  const full = [...new Set(lower.match(FULL_ID) ?? [])];
+  const prefixes = [...new Set(lower.match(PREFIX) ?? [])];
+  return { full, prefixes };
+}
+var PENDING = /^Merged in #(\d+) \(([0-9a-f]{40})\), waiting to go live$/;
+var pendingLine = (n, sha) => `Merged in #${n} (${sha}), waiting to go live`;
+function githubLoop(store, opts, emit) {
+  const live = opts.liveCheck;
+  const robot = (login) => ({ kind: "agent", id: "github", name: login ? `github (@${login})` : "github" });
+  async function named(pr) {
+    const { full, prefixes } = reportIdsIn([pr.title, pr.body, pr.head?.ref].filter(Boolean).join("\n"));
+    if (!full.length && !prefixes.length) return [];
+    const found = /* @__PURE__ */ new Map();
+    for (const id of full) {
+      const r = await store.get(id);
+      if (r) found.set(r.id, r);
+    }
+    const rest = prefixes.filter((p) => ![...found.keys()].some((id) => id.startsWith(p)));
+    if (rest.length) {
+      const all = await store.list();
+      for (const p of rest) {
+        const hits = all.filter((r) => r.id.toLowerCase().startsWith(p));
+        if (hits.length === 1) found.set(hits[0].id, hits[0]);
+      }
+    }
+    return [...found.values()];
+  }
+  let lastCheck = 0;
+  async function webhook2(req) {
+    const raw = await req.text();
+    if (!verifyGitHubSignature(opts.secret, raw, req.headers.get("x-hub-signature-256"))) return reply({ error: "Bad signature" }, 401);
+    const event = req.headers.get("x-github-event");
+    if (event === "ping") return reply({ ok: true });
+    if (event !== "pull_request") return reply({ ignored: event }, 202);
+    let payload;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return reply({ error: "Send JSON (Content type: application/json)." }, 400);
+    }
+    const pr = payload.pull_request;
+    const prUrl = pr?.html_url;
+    if (!pr || typeof prUrl !== "string" || !/^https:\/\/\S+$/.test(prUrl) || typeof pr.number !== "number") return reply({ error: "Not a pull request event." }, 400);
+    const by = robot(payload.sender?.login);
+    const moved = [];
+    const note = (r) => r && moved.push({ id: r.id, status: r.status });
+    const action = payload.action ?? "";
+    for (const r of await named(pr)) {
+      if (["opened", "reopened", "edited", "synchronize", "ready_for_review"].includes(action)) {
+        if (!store.review || !["open", "claimed"].includes(r.status)) continue;
+        const next = await store.review(r.id, prUrl, { by });
+        await emit("report.review", next);
+        note(next);
+      } else if (action === "closed" && pr.merged) {
+        if (r.status === "fixed" || r.status === "wontfix") continue;
+        const sha = pr.merge_commit_sha ?? "";
+        if (live && store.edit && /^[0-9a-f]{40}$/.test(sha)) {
+          if (r.status !== "in_review" && store.review) await emit("report.review", await store.review(r.id, prUrl, { by }));
+          note(await store.edit(r.id, { resolution: pendingLine(pr.number, sha) }, by));
+          lastCheck = 0;
+        } else {
+          const next = await store.close(r.id, "fixed", `Merged in #${pr.number}`, { by, prUrl });
+          await emit("report.closed", next);
+          note(next);
+        }
+      } else if (action === "closed") {
+        if (r.status !== "in_review" || r.prUrl !== prUrl) continue;
+        const next = await store.release(r.id, { by });
+        await emit("report.released", next);
+        note(next);
+      }
+    }
+    return reply({ ok: true, moved });
+  }
+  async function checkLive() {
+    if (!live) return [];
+    lastCheck = Date.now();
+    const waiting = (await store.list({ status: "in_review" })).flatMap((r) => {
+      const m = PENDING.exec(r.resolution ?? "");
+      return m ? [{ r, n: m[1], sha: m[2] }] : [];
+    });
+    if (!waiting.length) return [];
+    let body2;
+    try {
+      const res = await (live.fetch ?? fetch)(live.url, { signal: AbortSignal.timeout(live.timeoutMs ?? 5e3), headers: { "cache-control": "no-cache" } });
+      if (!res.ok) return [];
+      body2 = await res.text();
+    } catch (err) {
+      console.error("shipcue: liveCheck failed", err);
+      return [];
+    }
+    const match = live.match ?? ((text, sha) => text.includes(sha.slice(0, 7)));
+    const closed = [];
+    for (const { r, n, sha } of waiting) {
+      if (!match(body2, sha)) continue;
+      const next = await store.close(r.id, "fixed", `Merged in #${n}, live in ${sha.slice(0, 7)}`, { by: robot(), prUrl: r.prUrl });
+      await emit("report.closed", next);
+      if (next) closed.push(next);
+    }
+    return closed;
+  }
+  async function maybeCheckLive() {
+    if (!live || Date.now() - lastCheck < (live.everyMs ?? 6e4)) return;
+    try {
+      await checkLive();
+    } catch (err) {
+      console.error("shipcue: liveCheck failed", err);
+    }
+  }
+  return { webhook: webhook2, checkLive, maybeCheckLive };
+}
+var reply = (body2, status = 200) => new Response(JSON.stringify(body2), { status, headers: { "content-type": "application/json" } });
+
 // src/server/handler.ts
 var IMAGE_TYPES = {
   "image/png": "png",
@@ -749,7 +874,7 @@ var fail = (error, status = 400) => json({ error }, status);
 function sameToken(given, expected) {
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+  return a.length === b.length && timingSafeEqual2(a, b);
 }
 var escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var isImageLink = (u) => u.startsWith("/") || u.startsWith("https://") && !/\.(?!png|jpe?g|webp|gif)[a-z0-9]{2,5}(?:[?#]|$)/i.test(u.replace(/#.*$/, ""));
@@ -771,10 +896,12 @@ function createShipcueHandler(opts) {
   const base = (opts.basePath ?? "/api/shipcue").replace(/\/$/, "");
   const { store } = opts;
   const emit = (type, report) => report ? broadcast(opts.broadcasters, { type, at: (/* @__PURE__ */ new Date()).toISOString(), report }) : Promise.resolve();
+  const gh = opts.github ? githubLoop(store, opts.github, emit) : null;
+  const checkLiveLazily = () => gh?.maybeCheckLive() ?? Promise.resolve();
   const ipKey = (req) => {
     const ip = (req.headers.get("x-forwarded-for")?.split(",")[0] ?? req.headers.get("x-real-ip") ?? "").trim();
     if (!ip) return null;
-    return createHmac2("sha256", opts.clientKeySecret ?? opts.agentToken ?? "shipcue").update(ip).digest("hex").slice(0, 32);
+    return createHmac3("sha256", opts.clientKeySecret ?? opts.agentToken ?? "shipcue").update(ip).digest("hex").slice(0, 32);
   };
   const signInFor = (req) => typeof opts.signInUrl === "function" ? opts.signInUrl(req) : opts.signInUrl;
   async function fileReport(req) {
@@ -958,6 +1085,7 @@ function createShipcueHandler(opts) {
     const leaseSeconds = identity?.leaseSeconds ?? opts.leaseSeconds;
     if (req.method === "GET" && !id) {
       await expireLeases();
+      await checkLiveLazily();
       const params = new URL(req.url).searchParams;
       const filter = ["open", "claimed", "in_review", "fixed", "wontfix"].find((s) => s === params.get("status"));
       const mine = params.get("mine") === "1" ? me.id : void 0;
@@ -1040,6 +1168,7 @@ function createShipcueHandler(opts) {
     const [section, id, action] = parts;
     if (req.method === "GET" && section === "me") return json({ member, claimants: await claimants(), areas: config.areas });
     if (req.method === "GET" && section === "version") {
+      await checkLiveLazily();
       const version = store.version ? await store.version() : String((await store.list()).length);
       return new Response(JSON.stringify({ version }), { headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
@@ -1062,6 +1191,7 @@ function createShipcueHandler(opts) {
     if (section !== "reports") return fail("Not found", 404);
     if (req.method === "GET" && !id) {
       await expireLeases();
+      await checkLiveLazily();
       const status = ["open", "claimed", "in_review", "fixed", "wontfix"].find((s) => s === new URL(req.url).searchParams.get("status"));
       return json({ reports: (await store.list(status ? { status } : {})).map(forTeamList) });
     }
@@ -1147,6 +1277,7 @@ function createShipcueHandler(opts) {
   async function board(req) {
     const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
     if (!allowed) return fail("Not found", 404);
+    await checkLiveLazily();
     const [open, claimed, inReview, fixed] = await Promise.all([
       store.list({ status: "open" }),
       store.list({ status: "claimed" }),
@@ -1231,6 +1362,7 @@ function createShipcueHandler(opts) {
       try {
         const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
         if (!allowed) return fail("Not found", 404);
+        await checkLiveLazily();
         let version;
         if (store.version) version = await store.version();
         else {
@@ -1248,6 +1380,15 @@ function createShipcueHandler(opts) {
         return await board(req);
       } catch (err) {
         console.error("shipcue: board failed", err);
+        return fail("Something went wrong. Please try again.", 500);
+      }
+    }
+    if (req.method === "POST" && path === `${base}/github`) {
+      if (!gh) return fail("Not found", 404);
+      try {
+        return await gh.webhook(req);
+      } catch (err) {
+        console.error("shipcue: github webhook failed", err);
         return fail("Something went wrong. Please try again.", 500);
       }
     }
@@ -1278,7 +1419,7 @@ function createShipcueHandler(opts) {
       return fail("Something went wrong. Please try again.", 500);
     }
   };
-  return async function handler2(req) {
+  const handler2 = async function handler3(req) {
     const origin = opts.cors ? await corsAllows(req) : null;
     if (req.method === "OPTIONS") {
       if (!origin) return new Response(null, { status: 404 });
@@ -1296,6 +1437,7 @@ function createShipcueHandler(opts) {
     const res = await route(req);
     return origin ? withCors(res, origin) : res;
   };
+  return Object.assign(handler2, { checkLive: () => gh?.checkLive() ?? Promise.resolve([]) });
 }
 
 // website/_src/hosted.mjs
@@ -1629,6 +1771,8 @@ function createCloudHandler(opts) {
     digestEvery: p.digest_every ?? "off",
     digestTo: p.digest_to ?? "slack",
     digestSentAt: p.digest_sent_at ? new Date(p.digest_sent_at).toISOString() : null,
+    // The GitHub webhook (shipcue report 919f5ca2): only whether it is on; its secret is shown once.
+    githubConnected: !!p.github_secret,
     createdAt: new Date(p.created_at).toISOString()
   });
   async function acceptInvites(user) {
@@ -1843,6 +1987,11 @@ function createCloudHandler(opts) {
         webhookSecret = v ? `whsec_${randomBytes(24).toString("hex")}` : null;
         set("webhook_secret", webhookSecret);
       }
+      let githubSecret = null;
+      if (b.githubWebhook !== void 0) {
+        githubSecret = b.githubWebhook === true ? `ghsec_${randomBytes(24).toString("hex")}` : null;
+        set("github_secret", githubSecret);
+      }
       if (b.notifyEvents !== void 0) {
         const events = Array.isArray(b.notifyEvents) ? b.notifyEvents : null;
         if (!events || !events.every((e) => EVENT_TYPES.includes(e))) return fail2(`Events are ${EVENT_TYPES.join(", ")}.`);
@@ -1881,7 +2030,7 @@ function createCloudHandler(opts) {
         const by = { kind: "person", id: user.id, name: m.name };
         for (const a of gone) for (const r of await store.list({ claimant: a.id })) await store.release(r.id, { by });
       }
-      return json2({ project: publicProject(row), ...webhookSecret ? { webhookSecret } : {} });
+      return json2({ project: publicProject(row), ...webhookSecret ? { webhookSecret } : {}, ...githubSecret ? { githubSecret } : {} });
     }
     if (section === "invites") {
       if (!owner) return fail2("Only owners can invite.", 403);
@@ -2012,6 +2161,8 @@ function createCloudHandler(opts) {
       },
       leaseSeconds: p.lease_seconds ?? void 0,
       broadcasters: [...forwarders, ...await hostedBroadcaster(p, store, config, forwarders)],
+      // POST {base}/p/<key>/github: PRs naming this project's reports move them (shipcue report 919f5ca2).
+      github: p.github_secret ? { secret: p.github_secret } : void 0,
       agents: async (token) => {
         const a = (await q(
           `UPDATE cloud_agents SET last_seen_at = now() WHERE token_hash = $1 AND project_id = $2 AND revoked_at IS NULL AND NOT hosted RETURNING id, name, pull, types`,
@@ -2048,7 +2199,7 @@ function createCloudHandler(opts) {
     if (!opts.cronSecret) return fail2("Not found", 404);
     const given = Buffer.from(req.headers.get("authorization") ?? "");
     const expected = Buffer.from(`Bearer ${opts.cronSecret}`);
-    if (given.length !== expected.length || !timingSafeEqual2(given, expected)) return fail2("Unauthorized", 401);
+    if (given.length !== expected.length || !timingSafeEqual3(given, expected)) return fail2("Unauthorized", 401);
     const now = /* @__PURE__ */ new Date();
     const link = new URL(appPath, req.url).toString();
     const results = [];

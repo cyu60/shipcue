@@ -634,3 +634,47 @@ describe('shipcue Cloud: the activity digest (shipcue report 5f4d339b)', () => {
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ to: 'a@example.com', subject: 's', html: '<p>h</p>', from: 'shipcue' });
   });
 });
+
+describe('shipcue Cloud: the GitHub webhook (shipcue report 919f5ca2)', () => {
+  it('owners turn it on with a secret shown once, and a PR moves only this project\'s reports', async () => {
+    const { createHmac } = await import('node:crypto');
+    await signUp('ada@example.com');
+    const { data: a } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Acme' } });
+    const { data: b } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Other' } });
+    const fileIn = async (key: string) => {
+      const form = new FormData();
+      for (const [k, v] of Object.entries({ type: 'bug', priority: 'high', area: 'other', description: 'Checkout button is grey' })) form.set(k, v);
+      return (await (await handle(new Request(`${BASE}/p/${key}/reports`, { method: 'POST', body: form }))).json()).id as string;
+    };
+    const mine = await fileIn(a.project.publicKey);
+    const theirs = await fileIn(b.project.publicKey);
+    const send = (key: string, secret: string, prBody: string) => {
+      const body = JSON.stringify({ action: 'opened', sender: { login: 'ada' }, pull_request: { number: 7, html_url: 'https://github.com/acme/app/pull/7', title: 'Fix', body: prBody, head: { ref: 'fix' } } });
+      return handle(
+        new Request(`${BASE}/p/${key}/github`, {
+          method: 'POST',
+          body,
+          headers: { 'content-type': 'application/json', 'x-github-event': 'pull_request', 'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(body).digest('hex')}` },
+        }),
+      );
+    };
+
+    // Off until an owner turns it on.
+    expect((await send(a.project.publicKey, 'x', mine)).status).toBe(404);
+    const { data } = await call('POST', `/projects/${a.project.id}/settings`, { as: 'ada@example.com', body: { githubWebhook: true } });
+    expect(data.githubSecret).toMatch(/^ghsec_[0-9a-f]{48}$/);
+    expect(data.project.githubConnected).toBe(true);
+    const { data: again } = await call('GET', `/projects/${a.project.id}`, { as: 'ada@example.com' });
+    expect(JSON.stringify(again)).not.toContain(data.githubSecret);
+
+    expect((await send(a.project.publicKey, 'wrong', mine)).status).toBe(401);
+    // Another project's report id, even in full, moves nothing here.
+    const res = await send(a.project.publicKey, data.githubSecret, `Fixes ${theirs} and ${mine.slice(0, 8)}`);
+    expect((await res.json()).moved).toEqual([{ id: mine, status: 'in_review' }]);
+    const { data: list } = await call('GET', `/p/${b.project.publicKey}/team/reports`, { as: 'ada@example.com' });
+    expect(list.reports[0]).toMatchObject({ id: theirs, status: 'open' });
+
+    await call('POST', `/projects/${a.project.id}/settings`, { as: 'ada@example.com', body: { githubWebhook: false } });
+    expect((await send(a.project.publicKey, data.githubSecret, mine)).status).toBe(404);
+  });
+});

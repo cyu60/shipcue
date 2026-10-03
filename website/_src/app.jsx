@@ -361,6 +361,7 @@ function Setup({ detail, reload, onProjects }) {
   const [slackUrl, setSlackUrl] = useState('');
   const [hookUrl, setHookUrl] = useState(p.webhookUrl ?? '');
   const [hookSecret, setHookSecret] = useState(null);
+  const [ghSecret, setGhSecret] = useState(null);
   const run = async (fn) => {
     setError(null);
     try {
@@ -489,6 +490,47 @@ function Setup({ detail, reload, onProjects }) {
       )}
 
       {owner && <Digest detail={detail} save={save} />}
+
+      {owner && (
+        <section style={s.card}>
+          <h3 style={{ margin: 0 }}>7. Close the loop with GitHub</h3>
+          <p style={s.small}>
+            A pull request whose title, body or branch names a report (its id or first 8 characters) moves it to In review; merging it marks it Fixed. In your repository: Settings → Webhooks → Add
+            webhook, this Payload URL, content type application/json, the secret below, and only the Pull requests event.
+          </p>
+          <Copy text={`${endpoint}/github`} />
+          <div style={s.row}>
+            <Button
+              onClick={() =>
+                run(async () => {
+                  const r = await api(`/projects/${p.id}/settings`, { githubWebhook: true });
+                  setGhSecret(r.githubSecret ?? null);
+                })
+              }
+            >
+              {p.githubConnected ? 'New secret' : 'Turn on'}
+            </Button>
+            {p.githubConnected && (
+              <Button
+                onClick={() =>
+                  run(async () => {
+                    await api(`/projects/${p.id}/settings`, { githubWebhook: false });
+                    setGhSecret(null);
+                  })
+                }
+              >
+                Turn off
+              </Button>
+            )}
+          </div>
+          {ghSecret && (
+            <>
+              <p style={s.small}>Webhook secret, shown once. Paste it into GitHub's Secret field.</p>
+              <Copy text={ghSecret} />
+            </>
+          )}
+        </section>
+      )}
 
       {owner && (
         <section style={s.card}>

@@ -250,6 +250,8 @@ export function createCloudHandler(opts) {
     digestEvery: p.digest_every ?? 'off',
     digestTo: p.digest_to ?? 'slack',
     digestSentAt: p.digest_sent_at ? new Date(p.digest_sent_at).toISOString() : null,
+    // The GitHub webhook (shipcue report 919f5ca2): only whether it is on; its secret is shown once.
+    githubConnected: !!p.github_secret,
     createdAt: new Date(p.created_at).toISOString(),
   });
 
@@ -481,6 +483,12 @@ export function createCloudHandler(opts) {
         webhookSecret = v ? `whsec_${randomBytes(24).toString('hex')}` : null;
         set('webhook_secret', webhookSecret);
       }
+      // The GitHub webhook's secret (shipcue report 919f5ca2): turning it on (again) makes a new one, shown once.
+      let githubSecret = null;
+      if (b.githubWebhook !== undefined) {
+        githubSecret = b.githubWebhook === true ? `ghsec_${randomBytes(24).toString('hex')}` : null;
+        set('github_secret', githubSecret);
+      }
       if (b.notifyEvents !== undefined) {
         const events = Array.isArray(b.notifyEvents) ? b.notifyEvents : null;
         if (!events || !events.every((e) => EVENT_TYPES.includes(e))) return fail(`Events are ${EVENT_TYPES.join(', ')}.`);
@@ -522,7 +530,7 @@ export function createCloudHandler(opts) {
         const by = { kind: 'person', id: user.id, name: m.name };
         for (const a of gone) for (const r of await store.list({ claimant: a.id })) await store.release(r.id, { by });
       }
-      return json({ project: publicProject(row), ...(webhookSecret ? { webhookSecret } : {}) });
+      return json({ project: publicProject(row), ...(webhookSecret ? { webhookSecret } : {}), ...(githubSecret ? { githubSecret } : {}) });
     }
 
     if (section === 'invites') {
@@ -670,6 +678,8 @@ export function createCloudHandler(opts) {
       },
       leaseSeconds: p.lease_seconds ?? undefined,
       broadcasters: [...forwarders, ...(await hostedBroadcaster(p, store, config, forwarders))],
+      // POST {base}/p/<key>/github: PRs naming this project's reports move them (shipcue report 919f5ca2).
+      github: p.github_secret ? { secret: p.github_secret } : undefined,
       agents: async (token) => {
         const a = (
           await q(
