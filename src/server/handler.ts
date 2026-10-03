@@ -63,6 +63,12 @@ export interface HandlerOptions {
    * slack() and the shipcue-listen command for agents that would rather poll.
    */
   broadcasters?: Broadcaster[];
+  /**
+   * Take reports from other sites: the origins allowed to call this handler from a browser
+   * (e.g. ['https://app.example.com']), or a function deciding per origin. For a hosted queue
+   * like shipcue Cloud; off by default, so a self-hosted handler answers its own site only.
+   */
+  cors?: string[] | ((origin: string, req: Request) => boolean | Promise<boolean>);
 }
 
 const json = (body: unknown, status = 200) =>
@@ -331,7 +337,20 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     });
   }
 
-  return async function handler(req: Request): Promise<Response> {
+  const corsAllows = async (req: Request): Promise<string | null> => {
+    const origin = req.headers.get('origin');
+    if (!origin || !opts.cors) return null;
+    const ok = typeof opts.cors === 'function' ? await opts.cors(origin, req) : opts.cors.includes(origin);
+    return ok ? origin : null;
+  };
+  const withCors = (res: Response, origin: string) => {
+    const headers = new Headers(res.headers);
+    headers.set('access-control-allow-origin', origin);
+    headers.append('vary', 'Origin');
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  };
+
+  const route = async (req: Request): Promise<Response> => {
     const path = new URL(req.url).pathname;
     const shot = req.method === 'GET' ? new RegExp(`^${escapeRe(base)}/board/screenshot/([^/]+)/(\\d{1,2})$`).exec(path) : null;
     if (shot) {
@@ -390,5 +409,24 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       console.error('shipcue: handler failed', err);
       return fail('Something went wrong. Please try again.', 500);
     }
+  };
+
+  return async function handler(req: Request): Promise<Response> {
+    const origin = opts.cors ? await corsAllows(req) : null;
+    if (req.method === 'OPTIONS') {
+      if (!origin) return new Response(null, { status: 404 });
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'access-control-allow-origin': origin,
+          'access-control-allow-methods': 'GET, POST, OPTIONS',
+          'access-control-allow-headers': 'content-type, authorization, x-shipcue-user',
+          'access-control-max-age': '600',
+          vary: 'Origin',
+        },
+      });
+    }
+    const res = await route(req);
+    return origin ? withCors(res, origin) : res;
   };
 }

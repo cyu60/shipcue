@@ -333,3 +333,34 @@ describe('the public board', () => {
     expect((await handle(new Request(BASE + '/board', { headers: { cookie: 'admin=1' } }))).status).toBe(200);
   });
 });
+
+describe('taking reports from other sites (cors, for a hosted queue)', () => {
+  const from = (origin: string, init: RequestInit = {}, path = '/capabilities') =>
+    new Request(BASE + path, { ...init, headers: { ...(init.headers as Record<string, string>), origin } });
+
+  it('answers an allowed site with CORS headers and a preflight', async () => {
+    const { handle } = setup({ cors: ['https://app.example.org'] });
+    const res = await handle(from('https://app.example.org'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://app.example.org');
+    const pre = await handle(from('https://app.example.org', { method: 'OPTIONS' }, '/reports/r1/video'));
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('access-control-allow-methods')).toContain('POST');
+    const filed = await handle(from('https://app.example.org', { method: 'POST', body: reportForm() }, '/reports'));
+    expect(filed.status).toBe(201);
+    expect(filed.headers.get('access-control-allow-origin')).toBe('https://app.example.org');
+  });
+
+  it('gives an unknown site nothing to read', async () => {
+    const { handle } = setup({ cors: ['https://app.example.org'] });
+    expect((await handle(from('https://evil.example'))).headers.get('access-control-allow-origin')).toBeNull();
+    expect((await handle(from('https://evil.example', { method: 'OPTIONS' }))).status).toBe(404);
+  });
+
+  it('can decide per origin, and is off by default', async () => {
+    const { handle } = setup({ cors: (o) => o.endsWith('.example.org') });
+    expect((await handle(from('https://a.example.org'))).headers.get('access-control-allow-origin')).toBe('https://a.example.org');
+    const plain = setup();
+    expect((await plain.handle(from('https://a.example.org'))).headers.get('access-control-allow-origin')).toBeNull();
+  });
+});

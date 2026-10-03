@@ -153,84 +153,105 @@ function toReport(r) {
 }
 var COLUMNS = "id, type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, status, claimed_by, claimed_at, resolution, video, context, created_at, updated_at";
 var QUEUE_ORDER = "ORDER BY priority_rank DESC, created_at, id";
-function postgresStore(db, table = "shipcue_reports") {
+function postgresStore(db, table = "shipcue_reports", opts = {}) {
   if (!/^[a-z_][a-z0-9_.]*$/i.test(table)) throw new Error(`Bad table name: ${table}`);
+  const project = opts.project;
+  if (project !== void 0 && !/^[0-9a-f-]{36}$/i.test(project)) throw new Error("project must be a uuid");
   const one = async (text, params) => {
     const { rows } = await db.query(text, params);
     return rows[0] ? toReport(rows[0]) : null;
   };
   const many = async (text, params) => (await db.query(text, params)).rows.map((r) => toReport(r));
   const isUuid = (id) => /^[0-9a-f-]{36}$/i.test(id);
+  const scope = (params) => {
+    if (project === void 0) return "";
+    params.push(project);
+    return ` AND project_id = $${params.length}`;
+  };
   return {
     async create(input) {
+      const params = [
+        input.type,
+        input.priority,
+        input.area,
+        input.description,
+        input.pageUrl,
+        input.userAgent,
+        JSON.stringify(input.diagnostics),
+        input.screenshots,
+        input.reporter,
+        input.context ?? null
+      ];
+      if (project !== void 0) params.push(project);
       const r = await one(
-        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, context)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10) RETURNING ${COLUMNS}`,
-        [
-          input.type,
-          input.priority,
-          input.area,
-          input.description,
-          input.pageUrl,
-          input.userAgent,
-          JSON.stringify(input.diagnostics),
-          input.screenshots,
-          input.reporter,
-          input.context ?? null
-        ]
+        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, context${project !== void 0 ? ", project_id" : ""})
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10${project !== void 0 ? ", $11" : ""}) RETURNING ${COLUMNS}`,
+        params
       );
       return r;
     },
     async get(id) {
       if (!isUuid(id)) return null;
-      return one(`SELECT ${COLUMNS} FROM ${table} WHERE id = $1 AND NOT is_deleted`, [id]);
+      const params = [id];
+      return one(`SELECT ${COLUMNS} FROM ${table} WHERE id = $1 AND NOT is_deleted${scope(params)}`, params);
     },
     async list(filter = {}) {
-      return filter.status ? many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted AND status = $1 ${QUEUE_ORDER}`, [filter.status]) : many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted ${QUEUE_ORDER}`, []);
+      const params = filter.status ? [filter.status] : [];
+      const where = filter.status ? "AND status = $1" : "";
+      return many(`SELECT ${COLUMNS} FROM ${table} WHERE NOT is_deleted ${where}${scope(params)} ${QUEUE_ORDER}`, params);
     },
     async version() {
-      const { rows } = await db.query(`SELECT count(*)::text AS n, coalesce(max(updated_at), max(created_at))::text AS at FROM ${table} WHERE NOT is_deleted`, []);
+      const params = [];
+      const { rows } = await db.query(
+        `SELECT count(*)::text AS n, coalesce(max(updated_at), max(created_at))::text AS at FROM ${table} WHERE NOT is_deleted${scope(params)}`,
+        params
+      );
       const r = rows[0] ?? {};
       return `${r.n ?? 0}:${r.at ?? ""}`;
     },
     async claimNext(agent) {
+      const params = [agent];
       return one(
         `UPDATE ${table} SET status = 'claimed', claimed_by = $1, claimed_at = now(), updated_at = now()
-          WHERE id = (SELECT id FROM ${table} WHERE status = 'open' AND NOT is_deleted ${QUEUE_ORDER} LIMIT 1 FOR UPDATE SKIP LOCKED)
+          WHERE id = (SELECT id FROM ${table} WHERE status = 'open' AND NOT is_deleted${scope(params)} ${QUEUE_ORDER} LIMIT 1 FOR UPDATE SKIP LOCKED)
           RETURNING ${COLUMNS}`,
-        [agent]
+        params
       );
     },
     async claim(id, agent) {
       if (!isUuid(id)) return null;
+      const params = [id, agent];
       return one(
         `UPDATE ${table} SET status = 'claimed', claimed_by = $2, claimed_at = now(), updated_at = now()
-          WHERE id = $1 AND status = 'open' AND NOT is_deleted RETURNING ${COLUMNS}`,
-        [id, agent]
+          WHERE id = $1 AND status = 'open' AND NOT is_deleted${scope(params)} RETURNING ${COLUMNS}`,
+        params
       );
     },
     async release(id) {
       if (!isUuid(id)) return null;
+      const params = [id];
       return one(
         `UPDATE ${table} SET status = 'open', claimed_by = NULL, claimed_at = NULL, updated_at = now()
-          WHERE id = $1 AND status = 'claimed' AND NOT is_deleted RETURNING ${COLUMNS}`,
-        [id]
+          WHERE id = $1 AND status = 'claimed' AND NOT is_deleted${scope(params)} RETURNING ${COLUMNS}`,
+        params
       );
     },
     async close(id, status, resolution) {
       if (!isUuid(id)) return null;
+      const params = [id, status, resolution];
       return one(
         `UPDATE ${table} SET status = $2, resolution = $3, updated_at = now()
-          WHERE id = $1 AND NOT is_deleted RETURNING ${COLUMNS}`,
-        [id, status, resolution]
+          WHERE id = $1 AND NOT is_deleted${scope(params)} RETURNING ${COLUMNS}`,
+        params
       );
     },
     async attachVideo(id, url) {
       if (!isUuid(id)) return null;
+      const params = [id, url];
       return one(
         `UPDATE ${table} SET video = $2, updated_at = now()
-          WHERE id = $1 AND video IS NULL AND NOT is_deleted RETURNING ${COLUMNS}`,
-        [id, url]
+          WHERE id = $1 AND video IS NULL AND NOT is_deleted${scope(params)} RETURNING ${COLUMNS}`,
+        params
       );
     }
   };
@@ -482,7 +503,19 @@ function createShipcueHandler(opts) {
       }
     });
   }
-  return async function handler2(req) {
+  const corsAllows = async (req) => {
+    const origin = req.headers.get("origin");
+    if (!origin || !opts.cors) return null;
+    const ok = typeof opts.cors === "function" ? await opts.cors(origin, req) : opts.cors.includes(origin);
+    return ok ? origin : null;
+  };
+  const withCors = (res, origin) => {
+    const headers = new Headers(res.headers);
+    headers.set("access-control-allow-origin", origin);
+    headers.append("vary", "Origin");
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  };
+  const route = async (req) => {
     const path = new URL(req.url).pathname;
     const shot = req.method === "GET" ? new RegExp(`^${escapeRe(base)}/board/screenshot/([^/]+)/(\\d{1,2})$`).exec(path) : null;
     if (shot) {
@@ -540,6 +573,24 @@ function createShipcueHandler(opts) {
       console.error("shipcue: handler failed", err);
       return fail("Something went wrong. Please try again.", 500);
     }
+  };
+  return async function handler2(req) {
+    const origin = opts.cors ? await corsAllows(req) : null;
+    if (req.method === "OPTIONS") {
+      if (!origin) return new Response(null, { status: 404 });
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "access-control-allow-origin": origin,
+          "access-control-allow-methods": "GET, POST, OPTIONS",
+          "access-control-allow-headers": "content-type, authorization, x-shipcue-user",
+          "access-control-max-age": "600",
+          vary: "Origin"
+        }
+      });
+    }
+    const res = await route(req);
+    return origin ? withCors(res, origin) : res;
   };
 }
 

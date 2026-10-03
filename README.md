@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-163%20passing-2E5BFF?style=flat-square" alt="163 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-177%20passing-2E5BFF?style=flat-square" alt="177 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -235,6 +235,7 @@ pnpm build
 
 ## Changelog
 
+- **0.12.0**: building blocks for a hosted queue (shipcue Cloud): `postgresStore(db, table, { project })` keeps every read and write to one project in a shared table (`sql/cloud.sql` adds `project_id`), and the handler's `cors` option takes reports from listed origins. Both are opt-in; self-hosted apps don't change.
 - **0.11.0**: shipcue's mark is now a builder's hard hat (with its headlamp) on the button, the site and the extension; `icon="ship"` keeps the sailboat, `launcherIcon` takes your own. Dictate: a small mic beside the text box (⌃M on a Mac, Alt+Shift+M elsewhere, even with the panel closed) speaks into the report with the browser's own speech recognition; hidden where the browser has none.
 - **Extension 0.1.1**: the hard-hat icon.
 - **0.10.5**: a quick drag of the button works too (the pointer is held from the press).
