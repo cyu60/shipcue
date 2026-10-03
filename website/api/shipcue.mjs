@@ -963,6 +963,16 @@ function insforgeAuth(baseUrl, fetchImpl = fetch) {
     },
     async refresh(refreshToken) {
       return tokens(await call("/api/auth/refresh?client_type=server", { refreshToken }));
+    },
+    /** The provider's sign-in page (Google, GitHub) for a PKCE challenge; it comes back to redirectUri with ?insforge_code. */
+    async oauthUrl(provider, redirectUri, codeChallenge) {
+      const qs = new URLSearchParams({ redirect_uri: redirectUri, code_challenge: codeChallenge });
+      const d = await call(`/api/auth/oauth/${encodeURIComponent(provider)}?${qs}`);
+      if (typeof d.authUrl !== "string" || !d.authUrl.startsWith("https://")) throw new Error("The sign-in service gave no sign-in page.");
+      return d.authUrl;
+    },
+    async exchange(code, codeVerifier) {
+      return tokens(await call("/api/auth/oauth/exchange?client_type=server", { code, code_verifier: codeVerifier }));
     }
   };
 }

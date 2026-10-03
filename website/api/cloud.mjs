@@ -923,6 +923,8 @@ var AGENT_NAME = /^[a-z0-9][a-z0-9._@-]{0,59}$/;
 var UUID = /^[0-9a-f-]{36}$/i;
 var ACCESS_COOKIE = "sc_at";
 var REFRESH_COOKIE = "sc_rt";
+var PKCE_COOKIE = "sc_pkce";
+var OAUTH_PROVIDERS = ["google", "github"];
 var json2 = (body2, status = 200, headers = {}) => new Response(JSON.stringify(body2), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...headers } });
 var fail2 = (error, status = 400) => json2({ error }, status);
 var sha256 = (t) => createHash("sha256").update(t).digest("hex");
@@ -975,6 +977,16 @@ function insforgeAuth(baseUrl, fetchImpl = fetch) {
     },
     async refresh(refreshToken) {
       return tokens(await call("/api/auth/refresh?client_type=server", { refreshToken }));
+    },
+    /** The provider's sign-in page (Google, GitHub) for a PKCE challenge; it comes back to redirectUri with ?insforge_code. */
+    async oauthUrl(provider, redirectUri, codeChallenge) {
+      const qs = new URLSearchParams({ redirect_uri: redirectUri, code_challenge: codeChallenge });
+      const d = await call(`/api/auth/oauth/${encodeURIComponent(provider)}?${qs}`);
+      if (typeof d.authUrl !== "string" || !d.authUrl.startsWith("https://")) throw new Error("The sign-in service gave no sign-in page.");
+      return d.authUrl;
+    },
+    async exchange(code, codeVerifier) {
+      return tokens(await call("/api/auth/oauth/exchange?client_type=server", { code, code_verifier: codeVerifier }));
     }
   };
 }
@@ -1062,7 +1074,46 @@ function createCloudHandler(opts) {
     if (beta.has(user.email.toLowerCase())) return true;
     return (await q(`SELECT 1 FROM cloud_members WHERE user_id = $1 AND role = 'owner' AND NOT is_deleted LIMIT 1`, [user.id])).length > 0;
   }
-  async function authRoutes(req, action) {
+  const appPath = opts.appPath ?? "/app/";
+  const pkceCookie = (value, maxAge) => `${PKCE_COOKIE}=${encodeURIComponent(value)}; Path=${base}/auth/oauth; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
+  const redirect = (location, set = []) => {
+    const headers = new Headers({ location, "cache-control": "no-store" });
+    for (const c of set) headers.append("set-cookie", c);
+    return new Response(null, { status: 302, headers });
+  };
+  const toApp = (req, error, set = []) => {
+    const url = new URL(appPath, req.url);
+    if (error) url.searchParams.set("error", error);
+    return redirect(url.toString(), set);
+  };
+  async function oauth(req, step) {
+    if (OAUTH_PROVIDERS.includes(step)) {
+      const verifier2 = randomBytes(32).toString("base64url");
+      const challenge = createHash("sha256").update(verifier2).digest("base64url");
+      try {
+        const url = await auth.oauthUrl(step, new URL(`${base}/auth/oauth/callback`, req.url).toString(), challenge);
+        return redirect(url, [pkceCookie(verifier2, 600)]);
+      } catch (err) {
+        return toApp(req, err.message || "Could not reach the sign-in service.");
+      }
+    }
+    if (step !== "callback") return fail2("Not found", 404);
+    const params = new URL(req.url).searchParams;
+    const clear = [pkceCookie("", 0)];
+    const code = params.get("insforge_code");
+    if (params.get("error") || !code) return toApp(req, params.get("error_description") || params.get("error") || "Sign-in was cancelled.", clear);
+    const verifier = cookies(req)[PKCE_COOKIE];
+    if (!verifier) return toApp(req, "That sign-in took too long or started in another browser. Please try again.", clear);
+    try {
+      const t = await auth.exchange(code, verifier);
+      if (!t) return toApp(req, "Could not sign in.", clear);
+      return toApp(req, null, [...clear, ...sessionCookies(t)]);
+    } catch (err) {
+      return toApp(req, err.message || "Could not sign in.", clear);
+    }
+  }
+  async function authRoutes(req, action, step) {
+    if (action === "oauth" && req.method === "GET") return oauth(req, step);
     if (req.method !== "POST") return fail2("Not found", 404);
     const b = await body(req);
     const email = String(b.email ?? "").trim().toLowerCase();
@@ -1149,6 +1200,16 @@ function createCloudHandler(opts) {
     }
     if (req.method !== "POST") return fail2("Not found", 404);
     const b = await body(req);
+    if (section === "rotate-key") {
+      if (!owner) return fail2("Only owners can change the key.", 403);
+      const [row] = await q(`UPDATE cloud_projects SET public_key = $2, updated_at = now() WHERE id = $1 RETURNING *`, [id, `pk_${randomBytes(12).toString("hex")}`]);
+      return json2({ project: publicProject(row) });
+    }
+    if (section === "delete") {
+      if (!owner) return fail2("Only owners can delete the project.", 403);
+      await q(`UPDATE cloud_projects SET is_deleted = true, deleted_at = now(), updated_at = now() WHERE id = $1`, [id]);
+      return json2({ ok: true });
+    }
     if (section === "settings") {
       if (!owner) return fail2("Only owners can change settings.", 403);
       const sets = [];
@@ -1258,6 +1319,9 @@ function createCloudHandler(opts) {
     const path = new URL(req.url).pathname;
     const teamPath = path.startsWith(`${base}/p/${key}/team/`);
     if (teamPath && !jsonWrite(req)) return fail2("Send JSON.", 415);
+    const origin = req.headers.get("origin");
+    const filing = req.method === "POST" && (path === `${base}/p/${key}/reports` || /^\/reports\/[^/]+\/video$/.test(path.slice(`${base}/p/${key}`.length)));
+    if (filing && origin && !p.allowed_origins.includes(origin)) return fail2("This site is not on the project's list of sites.", 403);
     const s = teamPath ? await session(req) : null;
     const handler2 = createShipcueHandler({
       store: postgresStore(db, "shipcue_reports", { project: p.id }),
@@ -1302,7 +1366,7 @@ function createCloudHandler(opts) {
     const [head, ...rest] = parts;
     if (head === "p" && rest[0]) return projectQueue(req, rest[0]);
     if (!jsonWrite(req)) return fail2("Send JSON.", 415);
-    if (head === "auth") return authRoutes(req, rest[0]);
+    if (head === "auth") return authRoutes(req, rest[0], rest[1]);
     const s = await session(req);
     if (!s) return fail2("Sign in first.", 401);
     if (head === "me" && req.method === "GET") return withCookies(await me(s.user), s.set);

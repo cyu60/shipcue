@@ -14,6 +14,9 @@ const AGENT_NAME = /^[a-z0-9][a-z0-9._@-]{0,59}$/;
 const UUID = /^[0-9a-f-]{36}$/i;
 const ACCESS_COOKIE = 'sc_at';
 const REFRESH_COOKIE = 'sc_rt';
+// The PKCE verifier between "Continue with Google" and the way back.
+const PKCE_COOKIE = 'sc_pkce';
+const OAUTH_PROVIDERS = ['google', 'github'];
 
 const json = (body, status = 200, headers = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
@@ -73,6 +76,16 @@ export function insforgeAuth(baseUrl, fetchImpl = fetch) {
     async refresh(refreshToken) {
       return tokens(await call('/api/auth/refresh?client_type=server', { refreshToken }));
     },
+    /** The provider's sign-in page (Google, GitHub) for a PKCE challenge; it comes back to redirectUri with ?insforge_code. */
+    async oauthUrl(provider, redirectUri, codeChallenge) {
+      const qs = new URLSearchParams({ redirect_uri: redirectUri, code_challenge: codeChallenge });
+      const d = await call(`/api/auth/oauth/${encodeURIComponent(provider)}?${qs}`);
+      if (typeof d.authUrl !== 'string' || !d.authUrl.startsWith('https://')) throw new Error('The sign-in service gave no sign-in page.');
+      return d.authUrl;
+    },
+    async exchange(code, codeVerifier) {
+      return tokens(await call('/api/auth/oauth/exchange?client_type=server', { code, code_verifier: codeVerifier }));
+    },
   };
 }
 
@@ -100,7 +113,8 @@ export async function cloudUserFrom(req, auth) {
 
 /**
  * @param {{ db: { query(text: string, params?: unknown[]): Promise<{ rows: any[] }> }, auth: ReturnType<typeof insforgeAuth>,
- *   base?: string, beta?: string[], secureCookies?: boolean, refreshDays?: number }} opts
+ *   base?: string, beta?: string[], secureCookies?: boolean, refreshDays?: number, cookiePath?: string, appPath?: string }} opts
+ *   appPath: where Continue with Google lands, signed in or with ?error= (default /app/).
  *   beta: emails that may create projects during the invite-only beta. Everyone else joins by invite.
  */
 export function createCloudHandler(opts) {
@@ -204,7 +218,49 @@ export function createCloudHandler(opts) {
     return (await q(`SELECT 1 FROM cloud_members WHERE user_id = $1 AND role = 'owner' AND NOT is_deleted LIMIT 1`, [user.id])).length > 0;
   }
 
-  async function authRoutes(req, action) {
+  // Continue with Google (or GitHub): off to the provider with a PKCE challenge, back to /callback, then /app/.
+  const appPath = opts.appPath ?? '/app/';
+  const pkceCookie = (value, maxAge) =>
+    `${PKCE_COOKIE}=${encodeURIComponent(value)}; Path=${base}/auth/oauth; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+  const redirect = (location, set = []) => {
+    const headers = new Headers({ location, 'cache-control': 'no-store' });
+    for (const c of set) headers.append('set-cookie', c);
+    return new Response(null, { status: 302, headers });
+  };
+  const toApp = (req, error, set = []) => {
+    const url = new URL(appPath, req.url);
+    if (error) url.searchParams.set('error', error);
+    return redirect(url.toString(), set);
+  };
+  async function oauth(req, step) {
+    if (OAUTH_PROVIDERS.includes(step)) {
+      const verifier = randomBytes(32).toString('base64url');
+      const challenge = createHash('sha256').update(verifier).digest('base64url');
+      try {
+        const url = await auth.oauthUrl(step, new URL(`${base}/auth/oauth/callback`, req.url).toString(), challenge);
+        return redirect(url, [pkceCookie(verifier, 600)]);
+      } catch (err) {
+        return toApp(req, err.message || 'Could not reach the sign-in service.');
+      }
+    }
+    if (step !== 'callback') return fail('Not found', 404);
+    const params = new URL(req.url).searchParams;
+    const clear = [pkceCookie('', 0)];
+    const code = params.get('insforge_code');
+    if (params.get('error') || !code) return toApp(req, params.get('error_description') || params.get('error') || 'Sign-in was cancelled.', clear);
+    const verifier = cookies(req)[PKCE_COOKIE];
+    if (!verifier) return toApp(req, 'That sign-in took too long or started in another browser. Please try again.', clear);
+    try {
+      const t = await auth.exchange(code, verifier);
+      if (!t) return toApp(req, 'Could not sign in.', clear);
+      return toApp(req, null, [...clear, ...sessionCookies(t)]);
+    } catch (err) {
+      return toApp(req, err.message || 'Could not sign in.', clear);
+    }
+  }
+
+  async function authRoutes(req, action, step) {
+    if (action === 'oauth' && req.method === 'GET') return oauth(req, step);
     if (req.method !== 'POST') return fail('Not found', 404);
     const b = await body(req);
     const email = String(b.email ?? '').trim().toLowerCase();
@@ -294,6 +350,17 @@ export function createCloudHandler(opts) {
     }
     if (req.method !== 'POST') return fail('Not found', 404);
     const b = await body(req);
+
+    if (section === 'rotate-key') {
+      if (!owner) return fail('Only owners can change the key.', 403);
+      const [row] = await q(`UPDATE cloud_projects SET public_key = $2, updated_at = now() WHERE id = $1 RETURNING *`, [id, `pk_${randomBytes(12).toString('hex')}`]);
+      return json({ project: publicProject(row) });
+    }
+    if (section === 'delete') {
+      if (!owner) return fail('Only owners can delete the project.', 403);
+      await q(`UPDATE cloud_projects SET is_deleted = true, deleted_at = now(), updated_at = now() WHERE id = $1`, [id]);
+      return json({ ok: true });
+    }
 
     if (section === 'settings') {
       if (!owner) return fail('Only owners can change settings.', 403);
@@ -413,6 +480,11 @@ export function createCloudHandler(opts) {
     const path = new URL(req.url).pathname;
     const teamPath = path.startsWith(`${base}/p/${key}/team/`);
     if (teamPath && !jsonWrite(req)) return fail('Send JSON.', 415);
+    // The button files a form, which browsers send cross-site without asking (no preflight), so CORS alone
+    // would let any page file into the queue. A browser always names its page's origin: hold it to the list.
+    const origin = req.headers.get('origin');
+    const filing = req.method === 'POST' && (path === `${base}/p/${key}/reports` || /^\/reports\/[^/]+\/video$/.test(path.slice(`${base}/p/${key}`.length)));
+    if (filing && origin && !p.allowed_origins.includes(origin)) return fail("This site is not on the project's list of sites.", 403);
     const s = teamPath ? await session(req) : null;
     const handler = createShipcueHandler({
       store: postgresStore(db, 'shipcue_reports', { project: p.id }),
@@ -460,7 +532,7 @@ export function createCloudHandler(opts) {
     const [head, ...rest] = parts;
     if (head === 'p' && rest[0]) return projectQueue(req, rest[0]);
     if (!jsonWrite(req)) return fail('Send JSON.', 415);
-    if (head === 'auth') return authRoutes(req, rest[0]);
+    if (head === 'auth') return authRoutes(req, rest[0], rest[1]);
     const s = await session(req);
     if (!s) return fail('Sign in first.', 401);
     if (head === 'me' && req.method === 'GET') return withCookies(await me(s.user), s.set);

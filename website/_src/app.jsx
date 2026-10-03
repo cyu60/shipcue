@@ -35,6 +35,7 @@ const s = {
   pre: { margin: 0, fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-all' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 15 },
   td: { padding: '6px 4px', borderBottom: '1px solid var(--line)' },
+  oauth: { display: 'block', textAlign: 'center', textDecoration: 'none', fontSize: 15, padding: '8px 12px' },
 };
 
 function Button({ ink, ...props }) {
@@ -58,8 +59,15 @@ function Auth({ onIn }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
-  const [error, setError] = useState(null);
+  // Continue with Google comes back to /app/?error=... when it could not finish.
+  const [error, setError] = useState(() => new URLSearchParams(window.location.search).get('error'));
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('error')) return;
+    url.searchParams.delete('error');
+    window.history.replaceState(null, '', url);
+  }, []);
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -83,6 +91,17 @@ function Auth({ onIn }) {
   return (
     <form onSubmit={submit} style={{ ...s.card, maxWidth: 420 }}>
       <h2 style={{ margin: 0 }}>{mode === 'sign-up' ? 'Make an account' : mode === 'verify' ? 'Check your email' : 'Sign in'}</h2>
+      {mode !== 'verify' && (
+        <>
+          <a href={`${API}/auth/oauth/google`} style={{ ...s.btn, ...s.ink, ...s.oauth }}>
+            Continue with Google
+          </a>
+          <a href={`${API}/auth/oauth/github`} style={{ ...s.btn, ...s.oauth }}>
+            Continue with GitHub
+          </a>
+          <p style={{ ...s.small, textAlign: 'center' }}>or with email</p>
+        </>
+      )}
       {mode === 'verify' ? (
         <>
           <p style={s.small}>We sent a 6-digit code to {email}.</p>
@@ -151,7 +170,7 @@ function NewProject({ onMade }) {
   );
 }
 
-function Setup({ detail, reload }) {
+function Setup({ detail, reload, onProjects }) {
   const p = detail.project;
   const owner = detail.role === 'owner';
   const endpoint = `${ORIGIN}${API}/p/${p.publicKey}`;
@@ -162,6 +181,7 @@ function Setup({ detail, reload }) {
   const [origins, setOrigins] = useState(p.allowedOrigins.join('\n'));
   const [lease, setLease] = useState(p.leaseSeconds == null ? '' : String(Math.round(p.leaseSeconds / 60)));
   const [stale, setStale] = useState(String(p.staleDays));
+  const [name, setName] = useState(p.name);
   const [areas, setAreas] = useState(p.areas.map((a) => `${a.value}: ${a.label}`).join('\n'));
   const [saved, setSaved] = useState(false);
   const run = async (fn) => {
@@ -176,6 +196,7 @@ function Setup({ detail, reload }) {
   const save = (patch) =>
     run(async () => {
       await api(`/projects/${p.id}/settings`, patch);
+      if (patch.name !== undefined && patch.name !== p.name) await onProjects();
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     });
@@ -244,6 +265,9 @@ function Setup({ detail, reload }) {
       {owner && (
         <section style={s.card}>
           <h3 style={{ margin: 0 }}>Settings</h3>
+          <label style={s.small}>
+            Name <input style={s.input} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} aria-label="Project name" />
+          </label>
           <div style={s.row}>
             <label style={s.small}>
               Agent claims run out after{' '}
@@ -269,6 +293,7 @@ function Setup({ detail, reload }) {
             <Button
               onClick={() =>
                 save({
+                  name,
                   leaseSeconds: lease.trim() ? Math.round(Number(lease) * 60) : null,
                   staleDays: Number(stale),
                   areas: areas
@@ -283,6 +308,34 @@ function Setup({ detail, reload }) {
               }
             >
               {saved ? 'Saved' : 'Save settings'}
+            </Button>
+          </div>
+        </section>
+      )}
+
+      {owner && (
+        <section style={s.card}>
+          <h3 style={{ margin: 0 }}>Key and project</h3>
+          <p style={s.small}>A new key retires the old one at once: the button files nothing until your app has the new endpoint.</p>
+          <div style={s.row}>
+            <Button
+              onClick={() => {
+                if (window.confirm('Make a new key? The button stops working until you deploy the new endpoint.')) run(() => api(`/projects/${p.id}/rotate-key`, {}));
+              }}
+            >
+              New key
+            </Button>
+            <Button
+              style={{ color: '#B91C1C' }}
+              onClick={() => {
+                if (!window.confirm(`Delete ${p.name} for the whole team? Its queue, button key and agent tokens stop working.`)) return;
+                setError(null);
+                api(`/projects/${p.id}/delete`, {})
+                  .then(() => onProjects())
+                  .catch((err) => setError(err.message));
+              }}
+            >
+              Delete project
             </Button>
           </div>
         </section>
@@ -381,7 +434,7 @@ function Team({ detail, reload }) {
   );
 }
 
-function Project({ id, me }) {
+function Project({ id, me, onProjects }) {
   const [detail, setDetail] = useState(null);
   const [tab, setTab] = useState('cuelog');
   const [error, setError] = useState(null);
@@ -412,7 +465,7 @@ function Project({ id, me }) {
           <CueLogTable endpoint={`${API}/p/${detail.project.publicKey}`} staleDays={detail.project.staleDays} areas={detail.project.areas} />
         </div>
       )}
-      {tab === 'setup' && <Setup detail={detail} reload={reload} />}
+      {tab === 'setup' && <Setup detail={detail} reload={reload} onProjects={onProjects} />}
       {tab === 'team' && <Team detail={detail} reload={reload} />}
     </div>
   );
@@ -480,7 +533,7 @@ function App() {
           }}
         />
       ) : project ? (
-        <Project key={project.id} id={project.id} me={me} />
+        <Project key={project.id} id={project.id} me={me} onProjects={load} />
       ) : (
         <div style={{ ...s.card, maxWidth: 520 }}>
           <h2 style={{ margin: 0 }}>No projects yet</h2>
