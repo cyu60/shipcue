@@ -6,7 +6,7 @@ import { waitUntil } from "@vercel/functions";
 import { createHash, randomBytes, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 
 // src/core/version.ts
-var SHIPCUE_VERSION = true ? "0.26.2" : "0.0.0";
+var SHIPCUE_VERSION = true ? "0.27.0" : "0.0.0";
 var SEMVER = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/;
 function parseVersion(v) {
   const m = typeof v === "string" ? SEMVER.exec(v.trim()) : null;
@@ -290,6 +290,10 @@ function validateReport(raw, config) {
     }
   };
 }
+var IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,100}$/;
+function cleanIdempotencyKey(v) {
+  return typeof v === "string" && IDEMPOTENCY_KEY.test(v) ? v : null;
+}
 var MAX_RESOLUTION = 2e3;
 var EDIT_FIELDS = ["description", "type", "area", "resolution"];
 function validateEdit(raw, config) {
@@ -433,32 +437,69 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
       params
     );
   }
+  let keyColumn = true;
+  const missingKeyColumn = (err) => {
+    const e = err;
+    return /idempotency_key/.test(e?.message ?? "") && (e?.code === "42703" || /does not exist/i.test(e?.message ?? ""));
+  };
+  async function insert(input, key) {
+    const params = [
+      input.type,
+      input.priority,
+      input.area,
+      input.description,
+      input.pageUrl,
+      input.userAgent,
+      JSON.stringify(input.diagnostics),
+      input.screenshots,
+      input.reporter,
+      input.context ?? null
+    ];
+    const cols = ["type", "priority", "area", "description", "page_url", "user_agent", "diagnostics", "screenshots", "reporter", "context"];
+    if (project != null) {
+      params.push(project);
+      cols.push("project_id");
+    }
+    if (input.clientKey) {
+      params.push(input.clientKey);
+      cols.push("client_key");
+    }
+    if (key) {
+      params.push(key);
+      cols.push("idempotency_key");
+    }
+    const values = cols.map((c, i) => c === "diagnostics" ? `$${i + 1}::jsonb` : `$${i + 1}`).join(", ");
+    const sql = `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${values})`;
+    if (!key) return await one2(`${sql} RETURNING ${COLUMNS}`, params);
+    const k = `$${cols.indexOf("idempotency_key") + 1}`;
+    const filed = () => {
+      const ps = [key];
+      return one2(`SELECT ${COLUMNS} FROM ${table} WHERE idempotency_key = $1${scope(ps)} ORDER BY created_at LIMIT 1`, ps);
+    };
+    const { rows } = await db.query(
+      `WITH ins AS (${sql} ON CONFLICT DO NOTHING RETURNING ${COLUMNS})
+       SELECT ${COLUMNS}, false AS replayed FROM ins
+       UNION ALL
+       SELECT ${COLUMNS}, true AS replayed FROM ${table} WHERE idempotency_key = ${k}${scope(params)} AND NOT EXISTS (SELECT 1 FROM ins)
+       LIMIT 1`,
+      params
+    );
+    const row = rows[0];
+    if (row) return row.replayed ? { ...toReport(row), replayed: true } : toReport(row);
+    const first = await filed();
+    if (first) return { ...first, replayed: true };
+    throw new Error("shipcue: could not file the report");
+  }
   return {
     async create(input) {
-      const params = [
-        input.type,
-        input.priority,
-        input.area,
-        input.description,
-        input.pageUrl,
-        input.userAgent,
-        JSON.stringify(input.diagnostics),
-        input.screenshots,
-        input.reporter,
-        input.context ?? null
-      ];
-      const cols = ["type", "priority", "area", "description", "page_url", "user_agent", "diagnostics", "screenshots", "reporter", "context"];
-      if (project != null) {
-        params.push(project);
-        cols.push("project_id");
+      const key = !keyColumn ? null : input.idempotencyKey ?? null;
+      try {
+        return await insert(input, key);
+      } catch (err) {
+        if (!key || !missingKeyColumn(err)) throw err;
+        keyColumn = false;
+        return insert(input, null);
       }
-      if (input.clientKey) {
-        params.push(input.clientKey);
-        cols.push("client_key");
-      }
-      const values = cols.map((c, i) => c === "diagnostics" ? `$${i + 1}::jsonb` : `$${i + 1}`).join(", ");
-      const r = await one2(`INSERT INTO ${table} (${cols.join(", ")}) VALUES (${values}) RETURNING ${COLUMNS}`, params);
-      return r;
     },
     async get(id) {
       if (!isUuid(id)) return null;
@@ -1182,7 +1223,15 @@ function createShipcueHandler(opts) {
       screenshots.push(i < shots.length && alts[i] ? withShotAlt(src, alts[i]) : src);
     }
     const anonymous = !!reporter && opts.anonymousLimit !== void 0 && form.get("anonymous") === "1";
-    const report = await store.create({ ...checked.value, reporter: anonymous ? null : reporter, screenshots, ...clientKey ? { clientKey } : {} });
+    const idempotencyKey = cleanIdempotencyKey(form.get("idempotencyKey"));
+    const { replayed, ...report } = await store.create({
+      ...checked.value,
+      reporter: anonymous ? null : reporter,
+      screenshots,
+      ...clientKey ? { clientKey } : {},
+      ...idempotencyKey ? { idempotencyKey } : {}
+    });
+    if (replayed) return json({ id: report.id, replayed: true }, 200);
     if (opts.onReport) {
       try {
         await opts.onReport(report);

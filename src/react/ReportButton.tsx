@@ -8,7 +8,7 @@ import { PinIcon } from './PinIcon';
 import { loadStars, mergeMine, rememberMine, starredFirst, toggleStar, useStars } from './stars';
 import { fixLabel } from './fixLink';
 import { BUTTON_PX, RESIZE, SIZES, TEXT_ZOOM, loadAppearance, loadPanelSize, saveAppearance, savePanelSize, type Appearance, type PanelSize, type Size } from './appearance';
-import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type MineItem, type Status, type Priority, type ReportType } from '../core';
+import { BLOCKED_FILE_TYPES, formatBytes, newIdempotencyKey, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type MineItem, type Status, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
 import { isOutlineText, OutlinePreview } from './outline';
@@ -27,7 +27,12 @@ export interface ReportButtonProps {
   areas?: Area[];
   /** Where createShipcueHandler is mounted. Ignored when `submit` is given. */
   endpoint?: string;
-  /** Send the form yourself, e.g. through a Next.js server action. */
+  /**
+   * Send the form yourself, e.g. through a Next.js server action. The form carries
+   * `idempotencyKey`: one per draft, the same on every retry of it (a failed send, a timeout), new
+   * after a successful send or for a new report. File a key once and answer a repeat with the
+   * report already filed, and a stalled database can't leave copies (shipcue report 9833fd28).
+   */
   submit?: (form: FormData) => Promise<SubmitResult>;
   /**
    * Who is signed in on your site (an email or a name), sent with each report in the
@@ -413,6 +418,14 @@ function ReportPanel({
   const [listening, setListening] = useState(false);
   const textRef = useRef('');
   textRef.current = text;
+  // Retry-safe filing (shipcue report 9833fd28): one key per draft, kept while that draft is
+  // re-sent after a failure, so a send that landed but timed out is never filed twice. A new
+  // draft (after a successful send, a fresh open, or once the text is cleared) gets a new one.
+  const draftKeyRef = useRef<string | null>(null);
+  const draftKey = () => (draftKeyRef.current ??= newIdempotencyKey());
+  useEffect(() => {
+    if (!text.trim()) draftKeyRef.current = null;
+  }, [text]);
   const recognitionRef = useRef<{ stop(): void; abort(): void } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -534,6 +547,7 @@ function ReportPanel({
     }
     const picked = pickContext();
     if (fresh) {
+      draftKeyRef.current = null;
       setText('');
       setFiles([]);
       setVideo(null);
@@ -890,12 +904,14 @@ function ReportPanel({
       // Alt text, one per screenshot in the same order, when any has some (shipcue report 58b727d9).
       const shots = files.filter((f) => ACCEPT.includes(f.type));
       if (shots.some((f) => alts.get(f)?.trim())) shots.forEach((f) => form.append('screenshotAlt', alts.get(f)?.trim() ?? ''));
+      form.set('idempotencyKey', draftKey());
       for (const [key, value] of Object.entries(fields?.() ?? {})) if (!form.has(key)) form.set(key, value);
       const result = submit ? await submit(form) : await postTo(endpoint, form, reporter);
       if ('error' in result) {
         if (result.signIn) setSignInHref(result.signIn);
         throw new Error(result.error);
       }
+      draftKeyRef.current = null;
       // The report is filed either way; a failed video upload is said on the thanks screen.
       let videoFailed: string | null = null;
       if (video && videoOn) {

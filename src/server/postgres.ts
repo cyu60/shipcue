@@ -1,5 +1,5 @@
 import { describeScope, SCOPE_RESETS, toClaimant, type Claimant, type WorkScope, type ClaimantKind, type Report, type ReportEvent, type ReportEventAction } from '../core';
-import { editedFields, type ReportStore } from './store';
+import { editedFields, type CreatedReport, type NewReport, type ReportStore } from './store';
 
 /** Anything with a pg-style query: node-postgres Pool/Client, PGlite, Neon, Vercel Postgres. */
 export interface Queryable {
@@ -155,33 +155,79 @@ export function postgresStore(db: Queryable, table = 'shipcue_reports', opts: Po
     );
   }
 
+  // False once the table turned out to have no idempotency_key column (older schema).
+  let keyColumn = true;
+  const missingKeyColumn = (err: unknown) => {
+    const e = err as { code?: string; message?: string };
+    return /idempotency_key/.test(e?.message ?? '') && (e?.code === '42703' || /does not exist/i.test(e?.message ?? ''));
+  };
+
+  async function insert(input: NewReport, key: string | null): Promise<CreatedReport> {
+    const params: unknown[] = [
+      input.type,
+      input.priority,
+      input.area,
+      input.description,
+      input.pageUrl,
+      input.userAgent,
+      JSON.stringify(input.diagnostics),
+      input.screenshots,
+      input.reporter,
+      input.context ?? null,
+    ];
+    const cols = ['type', 'priority', 'area', 'description', 'page_url', 'user_agent', 'diagnostics', 'screenshots', 'reporter', 'context'];
+    if (project != null) {
+      params.push(project);
+      cols.push('project_id');
+    }
+    // Only when the handler limits signed-out reports (needs client_key, "Upgrading from 0.13").
+    if (input.clientKey) {
+      params.push(input.clientKey);
+      cols.push('client_key');
+    }
+    // Only when the panel sent one (needs idempotency_key, "Upgrading from 0.26").
+    if (key) {
+      params.push(key);
+      cols.push('idempotency_key');
+    }
+    const values = cols.map((c, i) => (c === 'diagnostics' ? `$${i + 1}::jsonb` : `$${i + 1}`)).join(', ');
+    const sql = `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${values})`;
+    if (!key) return (await one(`${sql} RETURNING ${COLUMNS}`, params))!;
+    // Retry-safe filing (shipcue report 9833fd28): the unique index on (project, key) turns a
+    // repeat into DO NOTHING, and the report already filed under the key is returned instead.
+    const k = `$${cols.indexOf('idempotency_key') + 1}`;
+    const filed = () => {
+      const ps: unknown[] = [key];
+      return one(`SELECT ${COLUMNS} FROM ${table} WHERE idempotency_key = $1${scope(ps)} ORDER BY created_at LIMIT 1`, ps);
+    };
+    const { rows } = await db.query(
+      `WITH ins AS (${sql} ON CONFLICT DO NOTHING RETURNING ${COLUMNS})
+       SELECT ${COLUMNS}, false AS replayed FROM ins
+       UNION ALL
+       SELECT ${COLUMNS}, true AS replayed FROM ${table} WHERE idempotency_key = ${k}${scope(params)} AND NOT EXISTS (SELECT 1 FROM ins)
+       LIMIT 1`,
+      params,
+    );
+    const row = rows[0] as (Row & { replayed: boolean }) | undefined;
+    if (row) return row.replayed ? { ...toReport(row), replayed: true } : toReport(row);
+    // The first copy committed while this statement ran, after its snapshot: read it now.
+    const first = await filed();
+    if (first) return { ...first, replayed: true };
+    // Only reached when the insert hit some other unique constraint.
+    throw new Error('shipcue: could not file the report');
+  }
+
   return {
     async create(input) {
-      const params: unknown[] = [
-        input.type,
-        input.priority,
-        input.area,
-        input.description,
-        input.pageUrl,
-        input.userAgent,
-        JSON.stringify(input.diagnostics),
-        input.screenshots,
-        input.reporter,
-        input.context ?? null,
-      ];
-      const cols = ['type', 'priority', 'area', 'description', 'page_url', 'user_agent', 'diagnostics', 'screenshots', 'reporter', 'context'];
-      if (project != null) {
-        params.push(project);
-        cols.push('project_id');
+      const key = !keyColumn ? null : (input.idempotencyKey ?? null);
+      try {
+        return await insert(input, key);
+      } catch (err) {
+        // A table not yet upgraded ("Upgrading from 0.26"): file it as before, without the protection.
+        if (!key || !missingKeyColumn(err)) throw err;
+        keyColumn = false;
+        return insert(input, null);
       }
-      // Only when the handler limits signed-out reports (needs client_key, "Upgrading from 0.13").
-      if (input.clientKey) {
-        params.push(input.clientKey);
-        cols.push('client_key');
-      }
-      const values = cols.map((c, i) => (c === 'diagnostics' ? `$${i + 1}::jsonb` : `$${i + 1}`)).join(', ');
-      const r = await one(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${values}) RETURNING ${COLUMNS}`, params);
-      return r!;
     },
     async get(id) {
       if (!isUuid(id)) return null;

@@ -5,7 +5,15 @@ export type NewReport = ReportInput & {
   screenshots: string[];
   /** Who sent it while signed out, as a keyed hash (never the address itself), for anonymousLimit. */
   clientKey?: string | null;
+  /**
+   * One per draft, the same on every retry of it (shipcue report 9833fd28). A store files a key
+   * once per project; a repeat returns the report it filed, with `replayed: true`. Needs the
+   * idempotency_key column ("Upgrading from 0.26" in sql/schema.sql); without it, no dedupe.
+   */
+  idempotencyKey?: string | null;
 };
+/** What create returns: the report, and `replayed: true` when its idempotencyKey was already filed (it is that first report). */
+export type CreatedReport = Report & { replayed?: true };
 export type ClosedStatus = Extract<Status, 'fixed' | 'wontfix'>;
 
 export interface ListFilter {
@@ -39,7 +47,8 @@ export interface HolderOptions {
 
 /** Where reports live. Every method returns null when the id is unknown or the move is not allowed. */
 export interface ReportStore {
-  create(input: NewReport): Promise<Report>;
+  /** Files a report. With an idempotencyKey it has seen (for this project), returns that report instead, with `replayed: true`. */
+  create(input: NewReport): Promise<CreatedReport>;
   get(id: string): Promise<Report | null>;
   /** Queue order: most urgent first, oldest first within a priority. */
   list(filter?: ListFilter): Promise<Report[]>;
@@ -115,6 +124,7 @@ export function memoryStore(): ReportStore {
   const rows = new Map<string, Report>();
   const log: ReportEvent[] = [];
   const clients = new Map<string, string>();
+  const keys = new Map<string, string>();
   // Strictly increasing so reports filed in the same millisecond keep their order.
   let last = 0;
   const now = () => new Date((last = Math.max(Date.now(), last + 1))).toISOString();
@@ -142,6 +152,8 @@ export function memoryStore(): ReportStore {
 
   return {
     async create(input) {
+      const known = input.idempotencyKey ? keys.get(input.idempotencyKey) : undefined;
+      if (known && rows.has(known)) return { ...rows.get(known)!, replayed: true };
       const r: Report = {
         ...input,
         context: input.context ?? null,
@@ -155,7 +167,9 @@ export function memoryStore(): ReportStore {
       };
       // Kept beside the report, never on it.
       delete (r as Partial<NewReport>).clientKey;
+      delete (r as Partial<NewReport>).idempotencyKey;
       if (input.clientKey) clients.set(r.id, input.clientKey);
+      if (input.idempotencyKey) keys.set(input.idempotencyKey, r.id);
       r.updatedAt = r.createdAt;
       rows.set(r.id, r);
       return { ...r };

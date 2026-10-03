@@ -96,3 +96,22 @@ ALTER TABLE shipcue_report_events ADD CONSTRAINT shipcue_report_events_action_ch
 ALTER TABLE shipcue_report_events DROP CONSTRAINT IF EXISTS shipcue_report_events_action_check;
 ALTER TABLE shipcue_report_events ADD CONSTRAINT shipcue_report_events_action_check
   CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note', 'edited'));
+
+-- Upgrading from 0.26: retry-safe filing (shipcue report 9833fd28). The panel sends one key per
+-- draft and the same key when that draft is sent again (after a timeout, a stalled database);
+-- the store files a key once and answers a repeat with the first report. Additive: one nullable
+-- column and a unique index over the rows that have a key. Until this runs, reports file as
+-- before, without the protection. On a shared (Cloud) table the key is unique per project.
+ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS idempotency_key text CHECK (length(idempotency_key) <= 100);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'shipcue_reports'::regclass AND attname = 'project_id' AND NOT attisdropped) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS shipcue_reports_idempotency_project
+      ON shipcue_reports ((coalesce(project_id, '00000000-0000-0000-0000-000000000000'::uuid)), idempotency_key)
+      WHERE idempotency_key IS NOT NULL;
+    DROP INDEX IF EXISTS shipcue_reports_idempotency;
+  ELSE
+    CREATE UNIQUE INDEX IF NOT EXISTS shipcue_reports_idempotency
+      ON shipcue_reports (idempotency_key) WHERE idempotency_key IS NOT NULL;
+  END IF;
+END $$;

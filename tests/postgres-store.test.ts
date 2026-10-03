@@ -80,3 +80,61 @@ describe('sql/schema.sql runs again safely', () => {
     await expect(db.exec(schema)).resolves.toBeDefined();
   });
 });
+
+describe('retry-safe filing in Postgres (shipcue report 9833fd28)', () => {
+  const input = { type: 'bug' as const, priority: 'high' as const, area: 'other', description: 'Saving fails', pageUrl: '', userAgent: '', diagnostics: {}, screenshots: [], reporter: null };
+
+  it('scopes a key to its project: the same key in two Cloud projects files two reports', async () => {
+    const db = new PGlite();
+    await db.exec(schema);
+    await db.exec(cloud);
+    const q = { query: (text: string, params?: unknown[]) => db.query(text, params) };
+    const a = postgresStore(q, 'shipcue_reports', { project: A });
+    const b = postgresStore(q, 'shipcue_reports', { project: B });
+    const own = postgresStore(q, 'shipcue_reports', { project: null });
+    const inA = await a.create({ ...input, idempotencyKey: 'same-key' });
+    const inB = await b.create({ ...input, idempotencyKey: 'same-key' });
+    const inOwn = await own.create({ ...input, idempotencyKey: 'same-key' });
+    expect(new Set([inA.id, inB.id, inOwn.id]).size).toBe(3);
+    expect([inA, inB, inOwn].every((r) => !r.replayed)).toBe(true);
+    expect((await a.create({ ...input, idempotencyKey: 'same-key' })).id).toBe(inA.id);
+    expect((await own.create({ ...input, idempotencyKey: 'same-key' })).id).toBe(inOwn.id);
+    const { rows } = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM shipcue_reports WHERE idempotency_key = 'same-key'`);
+    expect(rows[0]!.n).toBe(3);
+  });
+
+  it('a table not yet upgraded (no idempotency_key column) still takes reports, without the protection', async () => {
+    const db = new PGlite();
+    await db.exec(schema);
+    await db.exec('DROP INDEX IF EXISTS shipcue_reports_idempotency; DROP INDEX IF EXISTS shipcue_reports_idempotency_project; ALTER TABLE shipcue_reports DROP COLUMN idempotency_key;');
+    const store = postgresStore({ query: (text, params) => db.query(text, params) });
+    const one = await store.create({ ...input, idempotencyKey: 'k-old-table' });
+    const two = await store.create({ ...input, idempotencyKey: 'k-old-table' });
+    expect(one.id).not.toBe(two.id);
+    expect((await store.list()).length).toBe(2);
+  });
+
+  it('sql/schema.sql and sql/cloud.sql re-run safely over rows that carry keys, in either order', async () => {
+    const db = new PGlite();
+    await db.exec(schema);
+    const own = postgresStore({ query: (text, params) => db.query(text, params) });
+    await own.create({ ...input, idempotencyKey: 'k1' });
+    await db.exec(schema);
+    await db.exec(cloud);
+    await db.exec(schema);
+    await db.exec(cloud);
+    const q = { query: (text: string, params?: unknown[]) => db.query(text, params) };
+    const a = postgresStore(q, 'shipcue_reports', { project: A });
+    const b = postgresStore(q, 'shipcue_reports', { project: B });
+    // Scoped per project after the upgrade, whichever file ran last.
+    expect((await a.create({ ...input, idempotencyKey: 'k2' })).id).not.toBe((await b.create({ ...input, idempotencyKey: 'k2' })).id);
+    const { rows } = await db.query<{ indexname: string }>(`SELECT indexname FROM pg_indexes WHERE tablename = 'shipcue_reports' AND indexname LIKE 'shipcue_reports_idempotency%' ORDER BY 1`);
+    expect(rows.map((r) => r.indexname)).toEqual(['shipcue_reports_idempotency_project']);
+  });
+
+  it('refuses a key longer than 100 characters at the database', async () => {
+    const db = new PGlite();
+    await db.exec(schema);
+    await expect(db.query(`INSERT INTO shipcue_reports (type, priority, area, description, idempotency_key) VALUES ('bug', 'low', 'other', 'x', $1)`, ['k'.repeat(101)])).rejects.toThrow();
+  });
+});
