@@ -211,6 +211,25 @@ export function storeContract(name: string, makeStore: () => Promise<ReportStore
         expect(await store.note!('00000000-0000-4000-8000-000000000999', 'nobody', ada)).toBeNull();
       });
 
+      it('edits a filed report and logs which fields changed (shipcue report 5c54da74)', async () => {
+        const r = await store.create(sample({ description: 'Save fails', area: 'other' }));
+        const e = await store.edit!(r.id, { description: 'Save fails on Safari', type: 'feature', area: 'editor' }, ada);
+        expect(e).toMatchObject({ id: r.id, description: 'Save fails on Safari', type: 'feature', area: 'editor', status: 'open', priority: r.priority });
+        expect(await store.get(r.id)).toMatchObject({ description: 'Save fails on Safari', type: 'feature', area: 'editor' });
+        const events = await store.events!(r.id);
+        expect(events.map((x) => [x.action, x.actor?.name])).toEqual([['edited', 'Ada']]);
+        expect(events[0]?.detail).toEqual({ fields: ['description', 'type', 'area'] });
+        expect(await store.edit!('00000000-0000-4000-8000-000000000999', { description: 'nobody' }, ada)).toBeNull();
+      });
+
+      it('rewrites what changed on a closed report and keeps it closed', async () => {
+        const r = await store.create(sample());
+        await store.close(r.id, 'fixed', 'First go');
+        const e = await store.edit!(r.id, { resolution: 'Saving works on Safari now' }, ada);
+        expect(e).toMatchObject({ status: 'fixed', resolution: 'Saving works on Safari now', description: r.description });
+        expect((await store.events!(r.id)).at(-1)).toMatchObject({ action: 'edited', detail: { fields: ['resolution'] } });
+      });
+
       it('lists one claimant\'s reports', async () => {
         const a = await store.create(sample());
         await store.create(sample());

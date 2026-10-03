@@ -26,7 +26,8 @@ export function toClaimant(who: string | Claimant): Claimant {
 }
 
 // 'note': a comment on the report from a person, an agent or Cloud's hosted agent (shipcue report 3d2dded6).
-export const EVENT_ACTIONS = ['claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note'] as const;
+// 'edited': its text, type, area or what-changed line was rewritten (shipcue report 5c54da74).
+export const EVENT_ACTIONS = ['claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note', 'edited'] as const;
 export type ReportEventAction = (typeof EVENT_ACTIONS)[number];
 
 /** One change to a report, for its history in the CueLog. */
@@ -318,6 +319,46 @@ export function validateReport(raw: Record<string, unknown>, config: ShipcueConf
       context,
     },
   };
+}
+
+/** The longest what-changed line a report keeps. */
+export const MAX_RESOLUTION = 2000;
+
+/** What a team member may rewrite on a filed report (shipcue report 5c54da74). */
+export interface ReportEdit {
+  description?: string;
+  type?: ReportType;
+  area?: string;
+  /** What changed, or why not; null clears it. */
+  resolution?: string | null;
+}
+export const EDIT_FIELDS = ['description', 'type', 'area', 'resolution'] as const;
+
+/** Checks an edit against the config, as validateReport does a new report. Needs at least one field. */
+export function validateEdit(raw: Record<string, unknown>, config: ShipcueConfig): Result<ReportEdit> {
+  const edit: ReportEdit = {};
+  if (raw.description !== undefined) {
+    const description = String(raw.description ?? '').trim();
+    if (description.length < config.minLength) return { ok: false, error: `Tell us a little more (at least ${config.minLength} characters).` };
+    if (description.length > config.maxLength) return { ok: false, error: `Keep the report under ${config.maxLength.toLocaleString('en-US')} characters.` };
+    edit.description = description;
+  }
+  if (raw.type !== undefined) {
+    if (!includes(REPORT_TYPES, raw.type)) return { ok: false, error: 'Pick bug, feature request or agent task.' };
+    edit.type = raw.type;
+  }
+  if (raw.area !== undefined) {
+    const area = String(raw.area);
+    if (!config.areas.some((a) => a.value === area)) return { ok: false, error: 'Pick where it happened.' };
+    edit.area = area;
+  }
+  if (raw.resolution !== undefined) {
+    const resolution = raw.resolution == null ? '' : String(raw.resolution).trim();
+    if (resolution.length > MAX_RESOLUTION) return { ok: false, error: `Keep what changed under ${MAX_RESOLUTION.toLocaleString('en-US')} characters.` };
+    edit.resolution = resolution || null;
+  }
+  if (Object.keys(edit).length === 0) return { ok: false, error: 'Nothing to change.' };
+  return { ok: true, value: edit };
 }
 
 export function areaLabel(area: string, config: ShipcueConfig): string {

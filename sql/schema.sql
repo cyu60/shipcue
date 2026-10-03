@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS shipcue_report_events (
   report_id   uuid NOT NULL,
   -- The Cloud project, when the table serves many (see cloud.sql); null for one app.
   project_id  uuid,
-  action      text NOT NULL CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note')),
+  action      text NOT NULL CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note', 'edited')),
   actor_kind  text CHECK (actor_kind IN ('person', 'agent')),
   actor_id    text,
   actor_name  text,
@@ -87,3 +87,10 @@ CREATE INDEX IF NOT EXISTS shipcue_reports_client ON shipcue_reports (client_key
 ALTER TABLE shipcue_report_events DROP CONSTRAINT IF EXISTS shipcue_report_events_action_check;
 ALTER TABLE shipcue_report_events ADD CONSTRAINT shipcue_report_events_action_check
   CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note'));
+
+-- Upgrading from 0.20/0.21: editing a filed report from the CueLog (shipcue report 5c54da74).
+-- No new columns; the history's action check widens to take 'edited'. Until this runs, an edit
+-- fails (the history insert is refused) and everything else keeps working.
+ALTER TABLE shipcue_report_events DROP CONSTRAINT IF EXISTS shipcue_report_events_action_check;
+ALTER TABLE shipcue_report_events ADD CONSTRAINT shipcue_report_events_action_check
+  CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note', 'edited'));

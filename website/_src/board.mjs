@@ -5,4 +5,4 @@ import { createRoot } from 'react-dom/client';
 import { ShipcueBoard } from '../../src/react';
 
 const el = document.getElementById('shipcue-board');
-if (el) createRoot(el).render(createElement(ShipcueBoard, { endpoint: '/api/shipcue', accentColor: '#16203A', initialView: 'changelog' }));
+if (el) createRoot(el).render(createElement(ShipcueBoard, { endpoint: '/api/shipcue', accentColor: '#16203A', initialView: 'changelog', filters: true, syncUrl: true }));
