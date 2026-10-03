@@ -203,6 +203,8 @@ export { handler as GET, handler as POST };</code></pre>
   <li>A small "Powered by shipcue · Star it on GitHub" line sits at the bottom of the panel. If shipcue helps you, a star really helps us; <code>watermark={false}</code> turns it off.</li>
   <li>Recent page errors are added to the snapshot as <code>recentErrors</code>. Turn this off with <code>captureErrors={false}</code>.</li>
   <li><code>uploadVideo</code> uploads a recording or video yourself; without it the button posts it to the handler.</li>
+  <li><strong>Move it.</strong> Drag the floating button, or the panel by its title: the two move together, the panel stays on screen and settles above or below the button when you let go. Reset position (⌃⇧H / Alt+Shift+H) puts it back; <code>movable={false}</code> keeps it still.</li>
+  <li><strong>Copy prompt for my agent.</strong> A small link in the panel's footer copies a prompt for Claude Code or Codex: the app, the page, the form's choices and your areas, what was typed so far, any context and the snapshot. The agent asks for what is missing, then files it with the MCP tool <code>file_report</code> or a ready <code>curl</code> to your endpoint.</li>
   <li><strong>Select area.</strong> The tile next to the screenshot tile (⌃⇧A / Alt+Shift+A) tints the page; drag a rectangle and it is captured from the tab (the browser asks once) and opened in an annotator: draw, arrow, box, highlight, text, blur, crop, colours, S/M/L lines, undo/redo and <strong>alt text</strong>, which is saved with the screenshot and shown on the board and the CueLog. The pencil on any pasted screenshot opens it there too. <code>dimOnOpen</code> tints the page while the panel is open, without blocking it.</li>
   <li><code>limits</code> (e.g. <code>{ maxScreenshots: 20 }</code>) sets how many screenshots and how big a video may be when you send reports with <code>submit</code>; with the built-in endpoint the button reads them from the handler's <code>resolveConfig</code>.</li>
   <li><code>text</code> puts your app's own words on anything the panel or board says, e.g. <code>{ seeReports: 'See your reports', send: 'Submit' }</code>; <code>DEFAULT_TEXT</code> lists every key.</li>
@@ -247,7 +249,7 @@ export { handler as GET, handler as POST };</code></pre>
   -e SHIPCUE_URL=https://your.app/api/shipcue \\
   -e SHIPCUE_TOKEN=... \\
   -- npx shipcue-mcp</code></pre>
-<p>The agent gets six tools: <code>list_reports</code>, <code>claim_next_report</code>, <code>get_report</code>, <code>claim_report</code>, <code>release_report</code> and <code>close_report</code>. A claimed report arrives as a task prompt with the description, page, screenshots, app snapshot and what to do next: reproduce, write a failing test, fix, close with the PR link.</p>
+<p>The agent gets these tools: <code>file_report</code> (files a report for a person, with no token needed; the panel's Copy prompt for my agent link sets it up), <code>list_reports</code>, <code>claim_next_report</code>, <code>get_report</code>, <code>claim_report</code>, <code>release_report</code> and <code>close_report</code>. A claimed report arrives as a task prompt with the description, page, screenshots, app snapshot and what to do next: reproduce, write a failing test, fix, close with the PR link.</p>
 
 <h2>5. Show the queue and a changelog</h2>
 <p>Let people see what is waiting and what got fixed. Switch the board on in the handler, then drop the component on any page:</p>
