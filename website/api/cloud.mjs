@@ -18,6 +18,29 @@ var PRIORITY_LABEL = {
   blocking: "Blocking"
 };
 var BLOCKED_FILE_TYPES = ["text/html", "application/xhtml+xml", "image/svg+xml", "text/javascript", "application/javascript", "application/x-msdownload"];
+function shotAlt(src) {
+  const m = src.startsWith("data:") ? /^data:[^,]*?;alt=([^;,]*)/.exec(src) : /#(?:[^#]*&)?alt=([^&]*)/.exec(src);
+  if (!m?.[1]) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return null;
+  }
+}
+function withShotAlt(src, alt) {
+  const text = alt.trim();
+  if (src.startsWith("data:")) {
+    const bare2 = src.replace(/;alt=[^;,]*/, "");
+    return text ? bare2.replace(/^(data:[^;,]+)/, `$1;alt=${encodeURIComponent(text)}`) : bare2;
+  }
+  const bare = src.replace(/#alt=[^&#]*$/, "");
+  if (!text || bare.includes("#")) return bare;
+  return `${bare}#alt=${encodeURIComponent(text)}`;
+}
+function altFragment(src) {
+  const alt = shotAlt(src);
+  return alt ? `#alt=${encodeURIComponent(alt)}` : "";
+}
 var VIDEO_TYPES = ["video/webm", "video/mp4", "video/quicktime"];
 var VIDEO_EXTENSION = { "video/webm": "webm", "video/mp4": "mp4", "video/quicktime": "mov" };
 function videoType(mime) {
@@ -47,7 +70,8 @@ function resolveConfig(partial = {}) {
     maxTotalScreenshotBytes: partial.maxTotalScreenshotBytes ?? 4 * 1024 * 1024,
     maxVideoBytes: partial.maxVideoBytes ?? 40 * 1024 * 1024,
     maxVideoSeconds: partial.maxVideoSeconds ?? 60,
-    allowFiles: partial.allowFiles ?? false
+    allowFiles: partial.allowFiles ?? false,
+    maxAltText: partial.maxAltText ?? 500
   };
 }
 function toBoardItem(r, screenshots) {
@@ -504,7 +528,7 @@ function sameToken(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 var escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var isImageLink = (u) => u.startsWith("/") || u.startsWith("https://") && !/\.(?!png|jpe?g|webp|gif)[a-z0-9]{2,5}(?:[?#]|$)/i.test(u);
+var isImageLink = (u) => u.startsWith("/") || u.startsWith("https://") && !/\.(?!png|jpe?g|webp|gif)[a-z0-9]{2,5}(?:[?#]|$)/i.test(u.replace(/#.*$/, ""));
 async function toDataUrl(file, withName = false) {
   const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
   const name = withName && file.name ? `;name=${encodeURIComponent(file.name)}` : "";
@@ -599,9 +623,11 @@ function createShipcueHandler(opts) {
     }
     const batch = crypto.randomUUID();
     const screenshots = [];
+    const alts = form.getAll("screenshotAlt").map((a) => typeof a === "string" ? a.slice(0, config.maxAltText) : "");
     for (const [i, f] of files.entries()) {
       const key = `${batch}/${i + 1}.${IMAGE_TYPES[f.type]}`;
-      screenshots.push(opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f, !IMAGE_TYPES[f.type]));
+      const src = opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f, !IMAGE_TYPES[f.type]);
+      screenshots.push(i < shots.length && alts[i] ? withShotAlt(src, alts[i]) : src);
     }
     const anonymous = !!reporter && opts.anonymousLimit !== void 0 && form.get("anonymous") === "1";
     const report = await store.create({ ...checked.value, reporter: anonymous ? null : reporter, screenshots, ...clientKey ? { clientKey } : {} });
@@ -737,7 +763,7 @@ function createShipcueHandler(opts) {
     }
     return fail("Not found", 404);
   }
-  const teamShots = (r) => r.screenshots.map((src, n) => src.startsWith("data:") ? `${base}/team/screenshot/${r.id}/${n}` : src);
+  const teamShots = (r) => r.screenshots.map((src, n) => src.startsWith("data:") ? `${base}/team/screenshot/${r.id}/${n}${altFragment(src)}` : src);
   const forTeam = (r) => ({ ...r, screenshots: teamShots(r) });
   async function teamApi(req, parts) {
     if (!opts.team) return fail("Not found", 404);
@@ -865,13 +891,13 @@ function createShipcueHandler(opts) {
       headers: { "content-type": "application/json", "cache-control": "no-store" }
     });
   }
-  const boardShots = (r) => r.screenshots.map((src, n) => src.startsWith("data:") ? /^data:image\/(png|jpeg|webp|gif)[;,]/.test(src) ? `${base}/board/screenshot/${r.id}/${n}` : "" : src).filter(isImageLink);
+  const boardShots = (r) => r.screenshots.map((src, n) => src.startsWith("data:") ? /^data:image\/(png|jpeg|webp|gif)[;,]/.test(src) ? `${base}/board/screenshot/${r.id}/${n}${altFragment(src)}` : "" : src).filter(isImageLink);
   async function boardScreenshot(req, id, n) {
     const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
     if (!allowed || !opts.boardScreenshots) return fail("Not found", 404);
     const r = await store.get(id);
     if (!r || !["open", "claimed", "in_review", "fixed"].includes(r.status)) return fail("Not found", 404);
-    const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/.exec(r.screenshots[n] ?? "");
+    const m = /^data:(image\/(?:png|jpeg|webp|gif))(?:;[^;,]+)*;base64,(.+)$/.exec(r.screenshots[n] ?? "");
     if (!m) return fail("Not found", 404);
     return new Response(Buffer.from(m[2] ?? "", "base64"), {
       headers: {
@@ -915,6 +941,7 @@ function createShipcueHandler(opts) {
         maxScreenshots: config.maxScreenshots,
         maxScreenshotBytes: config.maxScreenshotBytes,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
+        maxAltText: config.maxAltText,
         ...opts.anonymousLimit !== void 0 ? { signedIn: !!(opts.getReporter && await opts.getReporter(req)), anonymous: true } : {}
       };
       return new Response(JSON.stringify(caps), { headers: { "content-type": "application/json", "cache-control": "no-store" } });

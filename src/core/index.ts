@@ -81,6 +81,8 @@ export interface ShipcueConfig {
    * limits. Off by default: turn it on where whoever reads your reports can open any file.
    */
   allowFiles: boolean;
+  /** Longest alt text a screenshot may carry (shipcue report 58b727d9). */
+  maxAltText: number;
 }
 
 /** What the handler takes, from GET {base}/capabilities, so the button only offers that. */
@@ -93,6 +95,8 @@ export interface Capabilities {
   maxScreenshots: number;
   maxScreenshotBytes: number;
   maxTotalScreenshotBytes: number;
+  /** Longest alt text per screenshot; older handlers leave it out. */
+  maxAltText?: number;
   /** The person asking is signed in (the handler's getReporter knows them). */
   signedIn?: boolean;
   /** They may send a report without their name on it ("Send anonymously"). */
@@ -100,7 +104,7 @@ export interface Capabilities {
 }
 
 /** The limits the button checks before sending; it takes them from the handler, or from its limits prop. */
-export type Limits = Pick<ShipcueConfig, 'maxScreenshots' | 'maxScreenshotBytes' | 'maxTotalScreenshotBytes' | 'maxVideoBytes' | 'maxVideoSeconds'>;
+export type Limits = Pick<ShipcueConfig, 'maxScreenshots' | 'maxScreenshotBytes' | 'maxTotalScreenshotBytes' | 'maxVideoBytes' | 'maxVideoSeconds' | 'maxAltText'>;
 
 /** File types never taken as attachments: they could run as a page or a script. */
 export const BLOCKED_FILE_TYPES = ['text/html', 'application/xhtml+xml', 'image/svg+xml', 'text/javascript', 'application/javascript', 'application/x-msdownload'];
@@ -109,6 +113,39 @@ export const BLOCKED_FILE_TYPES = ['text/html', 'application/xhtml+xml', 'image/
 export function dataUrlName(url: string): string | null {
   const m = /^data:[^;,]+(?:;[^;,]+)*?;name=([^;,]+)/.exec(url);
   return m?.[1] ? decodeURIComponent(m[1]) : null;
+}
+
+// Alt text travels with its screenshot (shipcue report 58b727d9): `;alt=` in a data URL, or
+// `#alt=` on a link (a stored file or the board's own route), so no new column is needed and
+// the board, the CueLog, the Lightbox and agents all read it from the same string.
+
+/** A screenshot's alt text, or null when it has none. */
+export function shotAlt(src: string): string | null {
+  const m = src.startsWith('data:') ? /^data:[^,]*?;alt=([^;,]*)/.exec(src) : /#(?:[^#]*&)?alt=([^&]*)/.exec(src);
+  if (!m?.[1]) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return null;
+  }
+}
+
+/** The screenshot with this alt text kept on it (an empty alt removes it). */
+export function withShotAlt(src: string, alt: string): string {
+  const text = alt.trim();
+  if (src.startsWith('data:')) {
+    const bare = src.replace(/;alt=[^;,]*/, '');
+    return text ? bare.replace(/^(data:[^;,]+)/, `$1;alt=${encodeURIComponent(text)}`) : bare;
+  }
+  const bare = src.replace(/#alt=[^&#]*$/, '');
+  if (!text || bare.includes('#')) return bare;
+  return `${bare}#alt=${encodeURIComponent(text)}`;
+}
+
+/** Just the `#alt=` part for a link made from a screenshot ('' when it has none). */
+export function altFragment(src: string): string {
+  const alt = shotAlt(src);
+  return alt ? `#alt=${encodeURIComponent(alt)}` : '';
 }
 
 export const VIDEO_TYPES = ['video/webm', 'video/mp4', 'video/quicktime'] as const;
@@ -148,6 +185,7 @@ export function resolveConfig(partial: Partial<ShipcueConfig> = {}): ShipcueConf
     maxVideoBytes: partial.maxVideoBytes ?? 40 * 1024 * 1024,
     maxVideoSeconds: partial.maxVideoSeconds ?? 60,
     allowFiles: partial.allowFiles ?? false,
+    maxAltText: partial.maxAltText ?? 500,
   };
 }
 

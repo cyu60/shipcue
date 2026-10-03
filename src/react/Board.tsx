@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { type Board, type BoardItem, type ReportType } from '../core';
+import { shotAlt, type Board, type BoardItem, type ReportType } from '../core';
 import { fill, resolveText, type ShipcueText } from './text';
 import { useLightbox } from './Lightbox';
 import { PinIcon } from './PinIcon';
@@ -384,7 +384,7 @@ function Item({
               onClick={() => onShot?.(i)}
               style={{ padding: 0, border: 0, background: 'none', cursor: 'zoom-in' }}
             >
-              <img src={src} alt={`Screenshot ${i + 1}`} loading="lazy" style={s.shot} />
+              <img src={src} alt={shotAlt(src) ?? `Screenshot ${i + 1}`} loading="lazy" style={s.shot} />
             </button>
           ))}
         </div>

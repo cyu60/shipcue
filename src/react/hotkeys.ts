@@ -17,12 +17,14 @@ export function isMac(): boolean {
  * On a Mac: ⌘J for an agent task, ⌃B for a bug, ⌃F for a feature request (as in Block Outliner).
  * Elsewhere Ctrl+J, Ctrl+B and Ctrl+F belong to the browser and to editors, so Alt+Shift.
  */
-export function defaultHotkeys(mac = isMac()): Required<Hotkeys> & { dictate: string[]; resetPosition: string[] } {
+export function defaultHotkeys(mac = isMac()): Required<Hotkeys> & { dictate: string[]; resetPosition: string[]; selectArea: string[] } {
   // dictate: speak into the report (shipcue report 77a47290). resetPosition: put a dragged
-  // button back in its corner (shipcue report 57a7cb45).
+  // button back in its corner (shipcue report 57a7cb45). selectArea: drag out part of the page
+  // as a screenshot (shipcue report 58b727d9); ⌃⇧A is free on a Mac (the browsers' own are ⌘⇧A),
+  // and Alt+Shift+A elsewhere stays off Ctrl, which the browser owns.
   return mac
-    ? { task: ['Mod+J'], bug: ['Ctrl+B'], feature: ['Ctrl+F'], dictate: ['Ctrl+M'], resetPosition: ['Ctrl+Shift+H'] }
-    : { task: ['Alt+Shift+J'], bug: ['Alt+Shift+B'], feature: ['Alt+Shift+F'], dictate: ['Alt+Shift+M'], resetPosition: ['Alt+Shift+H'] };
+    ? { task: ['Mod+J'], bug: ['Ctrl+B'], feature: ['Ctrl+F'], dictate: ['Ctrl+M'], resetPosition: ['Ctrl+Shift+H'], selectArea: ['Ctrl+Shift+A'] }
+    : { task: ['Alt+Shift+J'], bug: ['Alt+Shift+B'], feature: ['Alt+Shift+F'], dictate: ['Alt+Shift+M'], resetPosition: ['Alt+Shift+H'], selectArea: ['Alt+Shift+A'] };
 }
 
 /** The chord a key press is ("Ctrl+B", "Cmd+J"), or null for a lone modifier. */

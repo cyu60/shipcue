@@ -12,3 +12,6 @@ export { Lightbox, useLightbox, type LightboxProps } from './Lightbox';
 export { useStars, toggleStar, loadStars, loadMine, starredFirst, type MyReport } from './stars';
 export { BUTTON_PX, TEXT_ZOOM, type Size as ShipcueSize } from './appearance';
 export { PinIcon } from './PinIcon';
+export { Annotator, type AnnotatorProps } from './Annotator';
+export { AreaSelect, type AreaSelectProps } from './AreaSelect';
+export { captureArea, canCaptureTab, cropRect, type Rect as ShipcueRect } from './capture';

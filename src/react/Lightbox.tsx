@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { shotAlt } from '../core';
 
 // Click a screenshot, see it big on the page, close it: no new tab (outliner report eea8e2be).
 // Fits the screen; click the image to see it at full size and scroll around; Esc, × or the
@@ -12,9 +13,11 @@ export interface LightboxProps {
   onClose: () => void;
   /** Labels, so apps can use their own words. */
   label?: string;
+  /** Alt text per image; without it, each image's own (#alt= or ;alt=, shipcue report 58b727d9). */
+  alts?: (string | null | undefined)[];
 }
 
-export function Lightbox({ images, index: start, onClose, label = 'Screenshot' }: LightboxProps) {
+export function Lightbox({ images, index: start, onClose, label = 'Screenshot', alts }: LightboxProps) {
   const [index, setIndex] = useState(start);
   const [zoomed, setZoomed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -58,7 +61,7 @@ export function Lightbox({ images, index: start, onClose, label = 'Screenshot' }
       <div style={zoomed ? s.scrollZoomed : s.scroll} onClick={(e) => e.target === e.currentTarget && onClose()}>
         <img
           src={src}
-          alt={`${label} ${index + 1}`}
+          alt={alts?.[index] || shotAlt(src) || `${label} ${index + 1}`}
           onClick={(e) => {
             e.stopPropagation();
             setZoomed((z) => !z);
@@ -88,13 +91,13 @@ export function Lightbox({ images, index: start, onClose, label = 'Screenshot' }
 
 /** State for a lightbox: open(images, i) shows it, and `box` renders it (or nothing). */
 export function useLightbox(label?: string) {
-  const [shown, setShown] = useState<{ images: string[]; index: number } | null>(null);
+  const [shown, setShown] = useState<{ images: string[]; index: number; alts?: (string | null | undefined)[] } | null>(null);
   return {
-    open: (images: string[], index: number) => setShown({ images, index }),
+    open: (images: string[], index: number, alts?: (string | null | undefined)[]) => setShown({ images, index, alts }),
     // On document.body, so no panel or drawer it was opened from can clip it or sit on top of it.
     box:
       shown && typeof document !== 'undefined'
-        ? createPortal(<Lightbox images={shown.images} index={shown.index} label={label} onClose={() => setShown(null)} />, document.body)
+        ? createPortal(<Lightbox images={shown.images} index={shown.index} label={label} alts={shown.alts} onClose={() => setShown(null)} />, document.body)
         : null,
   };
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, type Hotkeys } from './hotkeys';
 import { useLightbox } from './Lightbox';
 import { PinIcon } from './PinIcon';
@@ -12,6 +13,9 @@ import { shrinkImage } from './shrink';
 import { isOutlineText, OutlinePreview } from './outline';
 import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
+import { afterPaint, canCaptureTab, captureArea, captureError, type Rect } from './capture';
+import { AreaSelect } from './AreaSelect';
+import { Annotator } from './Annotator';
 
 /** signIn: where to sign in, when the handler wants that before it takes more (anonymousLimit). */
 export type SubmitResult = { id: string } | { error: string; signIn?: string | null };
@@ -140,6 +144,11 @@ export interface ReportButtonProps {
    * They never replace shipcue's own fields (description, type, context, ...).
    */
   fields?: () => Record<string, string>;
+  /**
+   * Tint the page while the panel is open, so the panel stands out (shipcue report 58b727d9).
+   * The page stays usable underneath (people copy text from it into reports). Off by default.
+   */
+  dimOnOpen?: boolean;
 }
 
 /** Whether ?<param>=true turned shipcue on for this tab (remembered in sessionStorage). */
@@ -264,6 +273,7 @@ function ReportPanel({
   movable = true,
   formExtras,
   fields,
+  dimOnOpen = false,
 }: ReportButtonProps) {
   // The app's words over shipcue's (the older pastReportsLabel/seeReportsLabel props still work).
   const t = useMemo(
@@ -294,6 +304,13 @@ function ReportPanel({
   const [priority, setPriority] = useState<Priority>('medium');
   const [area, setArea] = useState('other');
   const [files, setFiles] = useState<File[]>([]);
+  // Select an area, capture it, mark it up (shipcue report 58b727d9). Alt text per screenshot.
+  const [selecting, setSelecting] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const [annotating, setAnnotating] = useState<{ src: string; index: number | null; alt: string; name: string; own: boolean } | null>(null);
+  const [alts, setAlts] = useState<Map<File, string>>(() => new Map());
+  const annotatingRef = useRef(annotating);
+  annotatingRef.current = annotating;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<string | null>(null);
@@ -328,6 +345,7 @@ function ReportPanel({
           maxScreenshotBytes: known.maxScreenshotBytes,
           maxTotalScreenshotBytes: known.maxTotalScreenshotBytes,
           maxVideoSeconds: known.maxVideoSeconds,
+          ...(known.maxAltText ? { maxAltText: known.maxAltText } : {}),
           // A video uploaded by the app itself is not held to the one-request cap.
           ...(uploadVideo ? {} : { maxVideoBytes: known.maxVideoBytes }),
         }
@@ -360,7 +378,8 @@ function ReportPanel({
 
   useEffect(() => {
     const el = textareaRef.current;
-    if (!open || !el) return;
+    // Not from under the annotator, which has the keys while it is open.
+    if (!open || !el || annotatingRef.current) return;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
   }, [open, type]);
@@ -421,7 +440,7 @@ function ReportPanel({
   const keys = useMemo<Hotkeys>(() => {
     if (hotkeys === false) return {};
     const all = { ...appKeys, ...userKeys };
-    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id), ...(speech ? ['dictate'] : []), ...(canMove ? ['resetPosition'] : [])];
+    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id), ...(speech ? ['dictate'] : []), ...(canMove ? ['resetPosition'] : []), 'selectArea'];
     return Object.fromEntries(ids.map((id) => [id, (all as Hotkeys)[id] ?? []]));
   }, [hotkeys, appKeys, userKeys, tabs, extraTabs, speech, canMove]);
 
@@ -491,6 +510,10 @@ function ReportPanel({
       e.stopPropagation();
       if (t === 'resetPosition') {
         resetPositionRef.current();
+        return;
+      }
+      if (t === 'selectArea') {
+        startSelectRef.current();
         return;
       }
       if (t === 'dictate') {
@@ -644,9 +667,12 @@ function ReportPanel({
 
   // Pasted, dropped or picked: a video goes to the video slot, an image is a screenshot, and
   // anything else is a file when the handler takes files (shipcue report e8b2dedd).
-  const addFiles = async (incoming: File[]) => {
+  // `replace`: the index of a screenshot the annotator edited, swapped in place; `alt` its alt text.
+  const addFiles = async (incoming: File[], opts: { alt?: string; replace?: number } = {}) => {
     setError(null);
-    const next = [...files];
+    const replaced = opts.replace !== undefined ? files[opts.replace] : undefined;
+    const next = replaced ? files.filter((f) => f !== replaced) : [...files];
+    const before = next.length;
     for (const raw of incoming) {
       if (raw.type.startsWith('video/')) {
         if (videoOn) attachVideo(raw);
@@ -682,8 +708,56 @@ function ReportPanel({
         break;
       }
       next.push(f);
+      if (opts.alt !== undefined && isImage) setAlts((m) => new Map(m).set(f, opts.alt!));
+    }
+    // An edited screenshot goes back where it was; if it could not be taken, the original stays.
+    if (replaced && opts.replace !== undefined) {
+      if (next.length > before) next.splice(opts.replace, 0, next.pop()!);
+      else next.splice(opts.replace, 0, replaced);
     }
     setFiles(next);
+  };
+
+  const startSelect = () => {
+    setError(null);
+    if (!canCaptureTab()) {
+      setError(t.captureUnsupported);
+      if (!openRef.current) show();
+      return;
+    }
+    recognitionRef.current?.abort();
+    if (!openRef.current) setPage(window.location.href);
+    setSelecting(true);
+  };
+  const startSelectRef = useRef(startSelect);
+  startSelectRef.current = startSelect;
+
+  // The tint and the panel are gone before the frame is taken, so neither is in the picture.
+  const captureSelection = async (rect: Rect) => {
+    setSelecting(false);
+    setCapturing(true);
+    try {
+      await afterPaint();
+      const blob = await captureArea(rect);
+      setAnnotating({ src: URL.createObjectURL(blob), index: null, alt: '', name: 'area.png', own: true });
+    } catch (e) {
+      const problem = captureError(e);
+      if (problem) setError(problem === 'declined' ? t.captureDeclined : problem === 'unsupported' ? t.captureUnsupported : t.captureFailed);
+    } finally {
+      setCapturing(false);
+      setSent(null);
+      setOpen(true);
+    }
+  };
+
+  const finishAnnotating = (blob: Blob | null, alt = '') => {
+    const a = annotating;
+    setAnnotating(null);
+    if (!a) return;
+    if (a.own) URL.revokeObjectURL(a.src);
+    if (!blob) return;
+    const name = a.name.replace(/\.[a-z0-9]+$/i, '') + '.png';
+    void addFiles([new File([blob], name, { type: 'image/png' })], { alt, ...(a.index !== null ? { replace: a.index } : {}) });
   };
 
   const send = async () => {
@@ -704,6 +778,9 @@ function ReportPanel({
       form.set('userAgent', navigator.userAgent);
       form.set('diagnostics', snapshot(diagnostics, captureErrors));
       files.forEach((f) => form.append(ACCEPT.includes(f.type) ? 'screenshot' : 'file', f, f.name));
+      // Alt text, one per screenshot in the same order, when any has some (shipcue report 58b727d9).
+      const shots = files.filter((f) => ACCEPT.includes(f.type));
+      if (shots.some((f) => alts.get(f)?.trim())) shots.forEach((f) => form.append('screenshotAlt', alts.get(f)?.trim() ?? ''));
       for (const [key, value] of Object.entries(fields?.() ?? {})) if (!form.has(key)) form.set(key, value);
       const result = submit ? await submit(form) : await postTo(endpoint, form, reporter);
       if ('error' in result) {
@@ -728,6 +805,7 @@ function ReportPanel({
       setText('');
       setContext(null);
       setFiles([]);
+      setAlts(new Map());
       onSubmitted?.(result.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send the report. Please try again.');
@@ -749,8 +827,21 @@ function ReportPanel({
   resetPositionRef.current = resetPosition;
 
   return (
-    <div data-shipcue={variant} style={variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap}>
-      {open && recording === null && (
+    <div data-shipcue={variant} style={{ ...(variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap), ...(selecting || capturing ? { visibility: 'hidden' } : null) }}>
+      {dimOnOpen && open && !selecting && !capturing && typeof document !== 'undefined' && createPortal(<div data-shipcue-dim="" aria-hidden="true" style={s.dim} />, document.body)}
+      {selecting && <AreaSelect hint={t.selectAreaHint} onSelect={(r) => void captureSelection(r)} onCancel={() => setSelecting(false)} />}
+      {annotating && (
+        <Annotator
+          src={annotating.src}
+          alt={annotating.alt}
+          maxAlt={lim.maxAltText}
+          text={t}
+          zoom={textZoom}
+          onCancel={() => finishAnnotating(null)}
+          onSave={(blob, alt) => finishAnnotating(blob, alt)}
+        />
+      )}
+      {open && recording === null && !selecting && !capturing && (
         <div
           ref={panelRef}
           role="dialog"
@@ -993,18 +1084,32 @@ function ReportPanel({
                         type="button"
                         aria-label={`Preview screenshot ${i + 1}`}
                         onClick={() => {
-                          const shots = previews.filter(Boolean);
-                          lightbox.open(shots, shots.indexOf(src));
+                          const shown = previews.map((p, j) => ({ p, alt: alts.get(files[j]!) })).filter((x) => x.p);
+                          lightbox.open(shown.map((x) => x.p), shown.findIndex((x) => x.p === src), shown.map((x) => x.alt));
                         }}
                         style={{ padding: 0, border: 0, background: 'none', cursor: 'zoom-in', display: 'block' }}
                       >
-                        <img src={src} alt={`Screenshot ${i + 1}`} style={s.thumb} />
+                        <img src={src} alt={alts.get(files[i]!) || `Screenshot ${i + 1}`} style={s.thumb} />
                       </button>
                     ) : (
                       <div title={files[i]!.name} style={{ ...s.thumb, ...s.fileChip }}>
                         <span style={s.fileName}>{files[i]!.name}</span>
                         <span>{formatBytes(files[i]!.size)}</span>
                       </div>
+                    )}
+                    {src && (
+                      // Open it in the annotator again (shipcue report 58b727d9).
+                      <button
+                        type="button"
+                        aria-label={`${t.editScreenshot} screenshot ${i + 1}`}
+                        title={t.editScreenshot}
+                        onClick={() => setAnnotating({ src, index: i, alt: alts.get(files[i]!) ?? '', name: files[i]!.name, own: false })}
+                        style={s.edit}
+                      >
+                        <svg data-icon="pencil" width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                          <path d="M4 20h4L19 9l-4-4L4 16z" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+                        </svg>
+                      </button>
                     )}
                     <button
                       type="button"
@@ -1028,6 +1133,21 @@ function ReportPanel({
                       <rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
                       <circle cx="9" cy="10" r="1.6" stroke="currentColor" strokeWidth="1.6" />
                       <path d="m4 17 5-4.5 3.5 3 2.5-2 5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+                {files.length < lim.maxScreenshots && (
+                  // Next to the screenshot tile: drag out part of the page (shipcue report 58b727d9).
+                  <button
+                    type="button"
+                    onClick={startSelect}
+                    aria-label={t.selectArea}
+                    title={`${t.selectArea}${keys.selectArea?.[0] ? ` (${display(keys.selectArea[0]!)})` : ''}`}
+                    style={s.addShot}
+                  >
+                    <svg data-icon="select-area" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                      <path d="M12 9v6M9 12h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                     </svg>
                   </button>
                 )}
@@ -1164,7 +1284,7 @@ function ReportPanel({
               )}
               {editingKeys && hotkeys !== false && (
                 <div style={s.keysBox} aria-label="Shortcuts">
-                  {[...tabs.map((x) => ({ id: x.value as string, label: x.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label })), ...(speech ? [{ id: 'dictate', label: t.dictate }] : []), ...(canMove ? [{ id: 'resetPosition', label: t.resetPosition }] : [])].map(({ id, label }) => (
+                  {[...tabs.map((x) => ({ id: x.value as string, label: x.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label })), ...(speech ? [{ id: 'dictate', label: t.dictate }] : []), ...(canMove ? [{ id: 'resetPosition', label: t.resetPosition }] : []), { id: 'selectArea', label: t.selectArea }].map(({ id, label }) => (
                     <div key={id} style={s.keysRow}>
                       <span>{label}</span>
                       <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1615,6 +1735,23 @@ function styles(accent: string) {
       background: '#27272a',
       color: '#fff',
       fontSize: 11,
+      cursor: 'pointer',
+    } as CSSProperties,
+    dim: { position: 'fixed', inset: 0, zIndex: 2147482999, background: 'rgba(9,9,11,0.35)', pointerEvents: 'none' } as CSSProperties,
+    edit: {
+      position: 'absolute',
+      bottom: -6,
+      right: -6,
+      width: 20,
+      height: 20,
+      borderRadius: 999,
+      border: '1px solid #e4e4e7',
+      background: '#fff',
+      color: '#3f3f46',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 0,
       cursor: 'pointer',
     } as CSSProperties,
     addShot: {
