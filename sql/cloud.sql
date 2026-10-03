@@ -109,6 +109,10 @@ ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS digest_sent_at timestamptz;
 -- signed with this secret (shown once). Null: off.
 ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS github_secret text;
 
+-- All projects (shipcue report e4e1a85e): the app's shipcue endpoint, e.g. https://app.example.com/api/shipcue.
+-- The overview reads its /capabilities (server-side, short timeout) to show the version the app runs.
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS app_url text CHECK (app_url IS NULL OR (app_url ~ '^https://' AND length(app_url) <= 500));
+
 -- Server only: row-level security on with no policies, and no grants to browser roles.
 ALTER TABLE cloud_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_members ENABLE ROW LEVEL SECURITY;

@@ -1,6 +1,8 @@
 // Pure report logic shared by the button, the server handler and the agent
 // tools. No React, no database, no network.
 
+export { SHIPCUE_VERSION, parseVersion, compareVersions } from './version';
+
 export const REPORT_TYPES = ['bug', 'feature', 'task'] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
@@ -110,6 +112,8 @@ export interface Capabilities {
    * panel's Yours list works on any device (shipcue report 3d0d7995).
    */
   mine?: boolean;
+  /** The shipcue version the handler runs (SHIPCUE_VERSION); handlers before it leave it out. */
+  version?: string;
 }
 
 /** The limits the button checks before sending; it takes them from the handler, or from its limits prop. */

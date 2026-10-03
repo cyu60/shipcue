@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { ACTIVE_STATUSES, altFragment, BLOCKED_FILE_TYPES, conflictWarning, conflictsOf, findConflicts, validateScope, type ConflictReport, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, toAgentPrompt, toBoardItem, toMineItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
+import { ACTIVE_STATUSES, altFragment, BLOCKED_FILE_TYPES, conflictWarning, conflictsOf, findConflicts, validateScope, type ConflictReport, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, SHIPCUE_VERSION, toAgentPrompt, toBoardItem, toMineItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 import { findGitHubLink, publicGitHubLinks } from './links';
@@ -839,6 +839,7 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
         maxScreenshotBytes: config.maxScreenshotBytes,
         maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
         maxAltText: config.maxAltText,
+        version: SHIPCUE_VERSION,
         ...(opts.anonymousLimit !== undefined ? { signedIn: !!(await reporterOf()), anonymous: true } : {}),
         ...(opts.reporterPortal && (await reporterOf()) ? { mine: true } : {}),
       };

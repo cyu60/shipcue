@@ -17,7 +17,7 @@ export interface CueLogMember {
 
 export type CueLogTab = 'open' | 'mine' | 'starred' | 'in_review' | 'fixed' | 'all';
 export type CueLogSort = 'queue' | 'waiting' | 'updated' | 'claimant';
-/** '' anyone · 'me' · 'none' nobody yet · 'agents' · 'people' · or "kind:id" for one claimant. */
+/** '' anyone · 'me' · 'none' nobody yet · 'unlooked' nobody has looked · 'agents' · 'people' · or "kind:id" for one claimant. */
 export type ClaimantFilter = string;
 
 export interface CueLogFilter {
@@ -33,6 +33,7 @@ export const CUELOG_TEXT = {
   tabs: { open: 'Open', mine: 'Mine', starred: 'Pinned', in_review: 'In review', fixed: 'Fixed', all: 'All' } as Record<CueLogTab, string>,
   status: { open: 'Open', claimed: 'Claimed', in_review: 'In review', fixed: 'Fixed', wontfix: "Won't fix" } as Record<Status, string>,
   nobody: 'Nobody yet',
+  nobodyLooked: 'Nobody has looked',
   queuedFor: 'Queued for',
   list: 'List',
   board: 'Board',
@@ -82,6 +83,18 @@ export const CUELOG_TEXT = {
 export type CueLogText = typeof CUELOG_TEXT;
 
 const DAY = 86_400_000;
+// A video the button sends right after the report moves updatedAt; that is still the reporter, not the team.
+const FILING_GRACE_MS = 120_000;
+
+/**
+ * Nobody has looked (shipcue report e4e1a85e): open, nobody holds it or has it queued, and nothing has
+ * happened to it since it was filed. A claim, an assignment, a note, a priority or an edit all move
+ * updatedAt, so an untouched report still has the updatedAt it was filed with.
+ */
+export function nobodyLooked(r: Report): boolean {
+  if (r.status !== 'open' || r.claimantId != null || r.claimedBy != null) return false;
+  return Date.parse(r.updatedAt ?? r.createdAt) - Date.parse(r.createdAt) <= FILING_GRACE_MS;
+}
 
 /** Which reports a tab and the filters keep. `stars`: the ids starred in this browser. */
 export function filterReports(reports: readonly Report[], f: CueLogFilter, me: string | null, stars: readonly string[] = []): Report[] {
@@ -97,6 +110,7 @@ export function filterReports(reports: readonly Report[], f: CueLogFilter, me: s
     const c = f.claimant ?? '';
     if (c === 'me' && r.claimantId !== me) return false;
     if (c === 'none' && r.claimantId != null) return false;
+    if (c === 'unlooked' && !nobodyLooked(r)) return false;
     if (c === 'agents' && r.claimantKind !== 'agent') return false;
     if (c === 'people' && r.claimantKind !== 'person') return false;
     if (c.includes(':') && `${r.claimantKind}:${r.claimantId}` !== c) return false;
@@ -357,6 +371,7 @@ export function CueLogTable({
           <option value="">Anyone</option>
           <option value="me">Me</option>
           <option value="none">{t.nobody}</option>
+          <option value="unlooked">{t.nobodyLooked}</option>
           <option value="agents">Any agent</option>
           <option value="people">Any person</option>
           {claimants.map((c) => (

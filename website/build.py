@@ -329,7 +329,7 @@ POST /reports/:id/note        { "text": "..." }: a note on the report's history
 POST /digest                  { since?, until?, every? }: the last period's digest (with the digest option)
 GET  /board                   no token: the queue and the changelog (only with board on)
 GET  /board/version           no token: changes whenever a report does (for a live board)
-GET  /capabilities            no token: what the handler takes (video, files, limits)
+GET  /capabilities            no token: what the handler takes (video, files, limits) and the shipcue version it runs
 POST /github                  GitHub's signed pull_request webhook (only with github on)</code></pre>
 
 <h2>What a report holds</h2>
@@ -374,6 +374,8 @@ CLOUD = """
 <h2>Hosted agent</h2>
 <p>Every project can turn on <strong>shipcue-agent</strong>, an agent that runs on shipcue, so there is nothing to install. Assign a report to it in the CueLog (or switch on <em>Triage every new report</em>) and it reads the report with OpenAI and leaves a note: a one-paragraph summary, the likely area, a suggested priority with a reason, steps to reproduce or what is missing, and a short plan for a coding agent. Then it puts the report back in the queue for a person or a coding agent to fix. It never changes code, never sees screenshots or who filed the report, and treats the report's words as data, not instructions. Each project gets a daily allowance of triages.</p>
 <p>Its note comes with one-click suggestions: <strong>Apply priority</strong>, <strong>Apply area</strong> and, when it spots that the report repeats one of the project's open reports (it reads their headlines in the same call, nothing else about them), <strong>Merge into #id</strong>. Merge closes the duplicate as won't fix with a link to the original, notes both and counts the extra reporters on the original. Nothing changes until someone clicks, and each click is in the report's history under their name.</p>
+<h2>All projects</h2>
+<p>On two or more projects, Cloud opens on <strong>All projects</strong>: one row per project you are on, with what is open, claimed and in review, how long the oldest open report has been waiting, agent claims stuck past their lease, and how many open reports nobody has looked at yet (never claimed, assigned or noted). <strong>Nobody has looked</strong> lists those reports, oldest first, each opening in its project's CueLog. Add your app's shipcue endpoint in Setup → Settings and the row shows the version it runs (from its <code>/capabilities</code>), flagged when it is behind; an app that does not answer quickly shows "unknown". The CueLog's "Claimed by" filter has the same <em>Nobody has looked</em>.</p>
 <h2>Digest</h2>
 <p>Rather have one message than one per event? Under <strong>Digest</strong>, pick hourly or daily and send it to the project's Slack channel or the owner's email: what was filed, fixed (with the fix line and PR), reopened, claims stuck past their lease, how many are still open and the oldest waiting. Quiet periods send nothing, and it never includes who filed a report or the app snapshot.</p>
 <h2>What stays the same</h2>
