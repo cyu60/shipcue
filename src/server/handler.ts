@@ -4,6 +4,7 @@ import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 import { findGitHubLink, publicGitHubLinks } from './links';
 import { DIGEST_PERIOD_MS, digest as buildDigestMessage, type DigestFormat, type DigestPeriod, type DigestSender } from './digest';
+import { githubLoop, type GitHubOptions } from './github';
 
 const IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -115,6 +116,14 @@ export interface HandlerOptions {
    */
   cors?: string[] | ((origin: string, req: Request) => boolean | Promise<boolean>);
   /**
+   * Close the loop with GitHub (shipcue report 919f5ca2): turns on POST {base}/github for a
+   * repository webhook (Pull requests, JSON, this secret). A PR naming a report (full id or its
+   * first 8 characters, in the title, body or branch) moves it to in_review with the PR link;
+   * merging closes it as fixed ("Merged in #N"). With liveCheck it stays in review until your
+   * version URL serves the merge commit ("Merged in #N, live in <sha7>"). Off by default.
+   */
+  github?: GitHubOptions;
+  /**
    * The activity digest (shipcue report 5f4d339b): POST {base}/digest, with the agent token,
    * builds one summary of the last period (filed, fixed with their fix lines and PRs, reopened,
    * claims stuck past their lease, how many are still open, the oldest waiting) and sends it
@@ -136,6 +145,12 @@ export interface DigestHandlerOptions {
   /** Send even when nothing happened in the period. Off by default. */
   sendEmpty?: boolean;
 }
+
+/** The handler, plus checkLive() for a cron when github.liveCheck is on. */
+export type ShipcueHandler = ((req: Request) => Promise<Response>) & {
+  /** Closes merged reports that production now serves (github.liveCheck); [] when it is off. */
+  checkLive: () => Promise<Report[]>;
+};
 
 /** Who an agent token belongs to (see HandlerOptions.agents). */
 export interface AgentIdentity {
@@ -203,15 +218,19 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
  *   POST {base}/reports/:id/note        agent: { text }: a note on the report's history
  *   GET  {base}/reports?mine=1          agent: what it holds or has queued
  *   GET|POST {base}/team/...            the CueLog table for signed-in members (see the team option)
+ *   POST {base}/github                  a GitHub pull_request webhook (see the github option)
  *
  * In Next.js: app/api/shipcue/[...path]/route.ts → export { handler as GET, handler as POST }.
  */
-export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Promise<Response> {
+export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
   const config = opts.config ?? resolveConfig();
   const base = (opts.basePath ?? '/api/shipcue').replace(/\/$/, '');
   const { store } = opts;
   const emit = (type: ShipcueEventType, report: Report | null) =>
     report ? broadcast(opts.broadcasters, { type, at: new Date().toISOString(), report }) : Promise.resolve();
+  const gh = opts.github ? githubLoop(store, opts.github, emit) : null;
+  /** With github.liveCheck, reads also close merges production now serves (throttled). */
+  const checkLiveLazily = () => gh?.maybeCheckLive() ?? Promise.resolve();
 
   const ipKey = (req: Request) => {
     const ip = (req.headers.get('x-forwarded-for')?.split(',')[0] ?? req.headers.get('x-real-ip') ?? '').trim();
@@ -432,6 +451,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
 
     if (req.method === 'GET' && !id) {
       await expireLeases();
+      await checkLiveLazily();
       const params = new URL(req.url).searchParams;
       const filter = (['open', 'claimed', 'in_review', 'fixed', 'wontfix'] as const).find((s) => s === params.get('status'));
       const mine = params.get('mine') === '1' ? me.id : undefined;
@@ -522,6 +542,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     // The areas come along so the CueLog's Edit can offer them without the app passing them again.
     if (req.method === 'GET' && section === 'me') return json({ member, claimants: await claimants(), areas: config.areas });
     if (req.method === 'GET' && section === 'version') {
+      await checkLiveLazily();
       const version = store.version ? await store.version() : String((await store.list()).length);
       return new Response(JSON.stringify({ version }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
@@ -544,6 +565,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     if (section !== 'reports') return fail('Not found', 404);
     if (req.method === 'GET' && !id) {
       await expireLeases();
+      await checkLiveLazily();
       const status = (['open', 'claimed', 'in_review', 'fixed', 'wontfix'] as const).find((s) => s === new URL(req.url).searchParams.get('status'));
       return json({ reports: (await store.list(status ? { status } : {})).map(forTeamList) });
     }
@@ -633,6 +655,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
   async function board(req: Request): Promise<Response> {
     const allowed = typeof opts.board === 'function' ? await opts.board(req) : opts.board === true;
     if (!allowed) return fail('Not found', 404);
+    await checkLiveLazily();
     const [open, claimed, inReview, fixed] = await Promise.all([
       store.list({ status: 'open' }),
       store.list({ status: 'claimed' }),
@@ -728,6 +751,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       try {
         const allowed = typeof opts.board === 'function' ? await opts.board(req) : opts.board === true;
         if (!allowed) return fail('Not found', 404);
+        await checkLiveLazily();
         let version: string;
         if (store.version) version = await store.version();
         else {
@@ -745,6 +769,15 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         return await board(req);
       } catch (err) {
         console.error('shipcue: board failed', err);
+        return fail('Something went wrong. Please try again.', 500);
+      }
+    }
+    if (req.method === 'POST' && path === `${base}/github`) {
+      if (!gh) return fail('Not found', 404);
+      try {
+        return await gh.webhook(req);
+      } catch (err) {
+        console.error('shipcue: github webhook failed', err);
         return fail('Something went wrong. Please try again.', 500);
       }
     }
@@ -776,7 +809,7 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     }
   };
 
-  return async function handler(req: Request): Promise<Response> {
+  const handler = async function handler(req: Request): Promise<Response> {
     const origin = opts.cors ? await corsAllows(req) : null;
     if (req.method === 'OPTIONS') {
       if (!origin) return new Response(null, { status: 404 });
@@ -794,4 +827,5 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     const res = await route(req);
     return origin ? withCors(res, origin) : res;
   };
+  return Object.assign(handler, { checkLive: () => gh?.checkLive() ?? Promise.resolve([]) });
 }

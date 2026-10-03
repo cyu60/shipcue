@@ -35,6 +35,8 @@ const handler = createShipcueHandler({
   // shipcue's own board shows screenshots too (report 9fdd0b45).
   boardScreenshots: true,
   // Videos are uploaded to Vercel Blob by /api/shipcue-upload; only this store's report folders count.
+  // PRs on cyu60/shipcue that name a report move it to In review and close it on merge (report 919f5ca2).
+  github: process.env.SHIPCUE_GITHUB_SECRET ? { secret: process.env.SHIPCUE_GITHUB_SECRET } : undefined,
   acceptVideoUrl: (url, id) => {
     const u = new URL(url);
     return u.hostname.endsWith('.public.blob.vercel-storage.com') && u.pathname.startsWith(`/videos/${id}/`);

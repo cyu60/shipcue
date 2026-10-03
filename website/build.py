@@ -304,6 +304,17 @@ createShipcueHandler({ ..., agentToken: process.env.SHIPCUE_TOKEN,
 curl -X POST https://app.example.com/api/shipcue/digest -H "Authorization: Bearer $SHIPCUE_TOKEN"</code></pre>
 <p>Without <code>send</code> it returns the digest as Markdown, ready for a daily note or an outliner log. Quiet periods send nothing (<code>sendEmpty</code> to send anyway); <code>digest(store, { since, until, format })</code> builds one anywhere.</p>
 
+<h2>7. Close the loop with GitHub</h2>
+<p>Let pull requests move reports. A PR whose title, body or branch names a report (its full id or first 8 characters, say <code>fix/919f5ca2-github-loop</code>) moves it to In review with the PR link; merging it marks it Fixed ("Merged in #N"); closing it unmerged puts it back in the queue. Ids that are not reports in this queue are ignored.</p>
+<pre><code>createShipcueHandler({ ...,
+  github: {
+    secret: process.env.SHIPCUE_GITHUB_SECRET,
+    // Optional: stay in review until production serves the merge commit, then "live in abc1234".
+    liveCheck: { url: 'https://app.example.com/api/version' },
+  },
+})</code></pre>
+<p>In the repository: <strong>Settings → Webhooks → Add webhook</strong>, Payload URL <code>https://your.app/api/shipcue/github</code>, content type <code>application/json</code>, the same secret, and only the <strong>Pull requests</strong> event. <code>liveCheck</code> is checked when the board, the CueLog or an agent reads the queue (at most once a minute), or call <code>handler.checkLive()</code> from a cron. On shipcue Cloud, Setup gives each project its webhook URL and secret.</p>
+
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
 <pre><code>POST /reports                 file a report (multipart form, from the button)
@@ -317,7 +328,8 @@ POST /reports/:id/note        { "text": "..." }: a note on the report's history
 POST /digest                  { since?, until?, every? }: the last period's digest (with the digest option)
 GET  /board                   no token: the queue and the changelog (only with board on)
 GET  /board/version           no token: changes whenever a report does (for a live board)
-GET  /capabilities            no token: what the handler takes (video, files, limits)</code></pre>
+GET  /capabilities            no token: what the handler takes (video, files, limits)
+POST /github                  GitHub's signed pull_request webhook (only with github on)</code></pre>
 
 <h2>What a report holds</h2>
 <ul>
@@ -352,6 +364,7 @@ CLOUD = """
   <li><a href="/app/">Sign in</a> and create a project.</li>
   <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app (or run <code>npx shipcue init --cloud &lt;key&gt; --write</code> in a Next.js app), and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report.</li>
   <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
+  <li>Optional: under <strong>Close the loop with GitHub</strong>, turn on the project's webhook and add its URL and secret to your repository (Pull requests only), so opening a PR puts a report in review and merging it marks it Fixed.</li>
 </ol>
 <h2>Run a listener</h2>
 <p>Keep an agent working the queue on your own machine, like a daemon. In Setup, under <strong>Run a listener</strong>, pick an agent (or create one on the spot, and its token is filled in), choose the events (filed, assigned to it, claimed, released, closed, video) and what it runs for each one. By default that is:</p>
