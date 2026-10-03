@@ -9,6 +9,10 @@ import { isTiny, rectFrom, type Point, type Rect } from './capture';
 // captures it, Esc cancels. Pointer events, so a finger works as well as a mouse. From the
 // keyboard: Enter with nothing drawn takes the whole visible page; arrows move the selection
 // and Shift+arrows resize it.
+//
+// `ambient` (shipcue report 503aa011): the same tint and drag, laid under the open report panel
+// so a drag anywhere on the page captures with no hotkey or button. It takes no keys and no
+// focus (typing in the panel never captures), and a plain click or tap lifts it (onDismiss).
 
 export interface AreaSelectProps {
   onSelect: (rect: Rect) => void;
@@ -17,11 +21,20 @@ export interface AreaSelectProps {
   hint: string;
   /** Smaller than this (CSS px) on either side is a click, not a selection. */
   minSize?: number;
+  /**
+   * Under the report panel instead of over everything: no keys, no focus, and a press that moves
+   * less than `clickSlop` px calls onDismiss. Esc is the panel's to handle.
+   */
+  ambient?: boolean;
+  /** Ambient only: a click or tap on the tint (no drag). */
+  onDismiss?: () => void;
+  /** Ambient only: how far (CSS px) a press may move and still be a click. */
+  clickSlop?: number;
 }
 
 const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
 
-export function AreaSelect({ onSelect, onCancel, hint, minSize = 8 }: AreaSelectProps) {
+export function AreaSelect({ onSelect, onCancel, hint, minSize = 8, ambient = false, onDismiss, clickSlop = 5 }: AreaSelectProps) {
   const [rect, setRect] = useState<Rect | null>(null);
   const start = useRef<Point | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -31,6 +44,7 @@ export function AreaSelect({ onSelect, onCancel, hint, minSize = 8 }: AreaSelect
   done.current = { onSelect, onCancel };
 
   useEffect(() => {
+    if (ambient) return;
     const before = document.activeElement as HTMLElement | null;
     ref.current?.focus();
     const onKey = (e: KeyboardEvent) => {
@@ -69,36 +83,46 @@ export function AreaSelect({ onSelect, onCancel, hint, minSize = 8 }: AreaSelect
       window.removeEventListener('keydown', onKey, true);
       before?.focus?.();
     };
-  }, [minSize]);
+  }, [minSize, ambient]);
 
   const at = (e: React.PointerEvent): Point => ({ x: e.clientX, y: e.clientY });
+  // Ambient: no rectangle until the press has moved past the click slop.
+  const moved = (p: Point) => !!start.current && Math.max(Math.abs(p.x - start.current.x), Math.abs(p.y - start.current.y)) >= clickSlop;
   const r = rect;
-  const dim = 'rgba(9,9,11,0.45)';
+  const dim = ambient ? 'rgba(9,9,11,0.3)' : 'rgba(9,9,11,0.45)';
   return createPortal(
     <div
       ref={ref}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Select an area"
-      tabIndex={-1}
-      data-shipcue-select=""
-      style={s.layer}
+      {...(ambient ? { 'data-shipcue-capture': '' } : { role: 'dialog', 'aria-modal': 'true' as const, 'aria-label': 'Select an area', tabIndex: -1, 'data-shipcue-select': '' })}
+      style={ambient ? { ...s.layer, zIndex: 2147482999 } : s.layer}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.preventDefault();
         start.current = at(e);
-        setRect({ ...at(e), width: 0, height: 0 });
+        if (!ambient) setRect({ ...at(e), width: 0, height: 0 });
         try {
           e.currentTarget.setPointerCapture?.(e.pointerId);
         } catch {
           // An unknown pointer (some synthetic events).
         }
       }}
-      onPointerMove={(e) => start.current && setRect(rectFrom(start.current, at(e), viewport()))}
+      onPointerMove={(e) => {
+        if (!start.current || (ambient && !rectRef.current && !moved(at(e)))) return;
+        setRect(rectFrom(start.current, at(e), viewport()));
+      }}
+      onPointerCancel={() => {
+        start.current = null;
+        setRect(null);
+      }}
       onPointerUp={(e) => {
         if (!start.current) return;
         const next = rectFrom(start.current, at(e), viewport());
+        const click = ambient && !rectRef.current && !moved(at(e));
         start.current = null;
+        if (click) {
+          onDismiss?.();
+          return;
+        }
         if (isTiny(next, minSize)) {
           setRect(null);
           return;
@@ -122,7 +146,7 @@ export function AreaSelect({ onSelect, onCancel, hint, minSize = 8 }: AreaSelect
       ) : (
         <div style={{ ...s.band, background: dim, inset: 0 }} />
       )}
-      <p role="status" style={s.hint}>
+      <p {...(ambient ? null : { role: 'status' })} style={ambient ? s.ambientHint : s.hint}>
         {hint}
       </p>
     </div>,
@@ -136,5 +160,6 @@ const s: Record<string, CSSProperties> = {
   band: { position: 'absolute', pointerEvents: 'none' },
   sel: { position: 'absolute', boxSizing: 'border-box', border: '1px solid rgba(255,255,255,0.9)', boxShadow: '0 0 0 1px rgba(9,9,11,0.35)', pointerEvents: 'none' },
   size: { position: 'absolute', padding: '2px 6px', borderRadius: 4, background: 'rgba(9,9,11,0.75)', color: '#fff', fontSize: 11, fontFamily: font, pointerEvents: 'none', whiteSpace: 'nowrap' },
+  ambientHint: { position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', margin: 0, padding: '3px 9px', borderRadius: 999, background: 'rgba(9,9,11,0.6)', color: 'rgba(255,255,255,0.9)', fontSize: 11, fontFamily: font, pointerEvents: 'none', whiteSpace: 'nowrap', maxWidth: 'calc(100vw - 32px)', overflow: 'hidden', textOverflow: 'ellipsis' },
   hint: { position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', margin: 0, padding: '4px 10px', borderRadius: 999, background: 'rgba(9,9,11,0.75)', color: '#fff', fontSize: 12, fontFamily: font, pointerEvents: 'none', whiteSpace: 'nowrap' },
 };

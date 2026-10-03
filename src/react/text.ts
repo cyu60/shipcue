@@ -35,6 +35,8 @@ export interface ShipcueText {
   // Select an area and mark it up (shipcue report 58b727d9).
   selectArea: string;
   selectAreaHint: string;
+  /** The line on the tint that comes with the open panel (captureOnOpen). */
+  captureOnOpenHint: string;
   captureDeclined: string;
   captureUnsupported: string;
   captureFailed: string;
@@ -149,6 +151,7 @@ export const DEFAULT_TEXT: ShipcueText = {
   attachVideo: 'or attach a video',
   selectArea: 'Select area',
   selectAreaHint: 'Drag to select an area · Enter captures · Esc cancels',
+  captureOnOpenHint: 'Drag to capture part of the page · click to dismiss',
   captureDeclined: 'Screen capture was not allowed. Paste a screenshot instead.',
   captureUnsupported: 'This browser cannot capture the page. Paste a screenshot instead.',
   captureFailed: 'Could not capture that area. Paste a screenshot instead.',

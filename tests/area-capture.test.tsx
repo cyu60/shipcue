@@ -223,9 +223,124 @@ describe('the annotator', () => {
   });
 });
 
+describe('capture on open (shipcue report 503aa011)', () => {
+  const tint = () => document.querySelector('[data-shipcue-capture]') as HTMLElement | null;
+  const dragTint = (from: [number, number], to: [number, number]) => {
+    const el = tint()!;
+    fireEvent.pointerDown(el, { button: 0, clientX: from[0], clientY: from[1], pointerId: 1 });
+    fireEvent.pointerMove(el, { clientX: to[0], clientY: to[1], pointerId: 1 });
+    fireEvent.pointerUp(el, { clientX: to[0], clientY: to[1], pointerId: 1 });
+  };
+
+  it('tints the page as soon as the panel opens, with a one-line hint, under the panel', async () => {
+    await openPanel();
+    const el = tint();
+    expect(el).not.toBeNull();
+    expect(el).toHaveStyle({ position: 'fixed', cursor: 'crosshair' });
+    expect(el).toHaveTextContent('Drag to capture part of the page · click to dismiss');
+    // Below the panel and its button, so both stay usable.
+    expect(Number(el!.style.zIndex)).toBeLessThan(2147483000);
+    expect(screen.getByRole('dialog', { name: 'Report a bug' })).toBeInTheDocument();
+  });
+
+  it('a drag on the tint selects an area, captures it and opens the annotator', async () => {
+    await openPanel();
+    const el = tint()!;
+    fireEvent.pointerDown(el, { button: 0, clientX: 100, clientY: 50, pointerId: 1 });
+    fireEvent.pointerMove(el, { clientX: 300, clientY: 150, pointerId: 1 });
+    expect(document.querySelector('[data-shipcue-selection]')).toHaveStyle({ left: '100px', top: '50px', width: '200px', height: '100px' });
+    expect(screen.getByText('200 × 100')).toBeInTheDocument();
+    fireEvent.pointerUp(el, { clientX: 300, clientY: 150, pointerId: 1 });
+    expect(await screen.findByRole('dialog', { name: 'Mark up the screenshot' })).toBeInTheDocument();
+    expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+    expect(drawImage.mock.calls[0]!.slice(1)).toEqual([200, 100, 400, 200, 0, 0, 400, 200]);
+    await userEvent.click(screen.getByRole('button', { name: 'Add to report' }));
+    expect(await screen.findByAltText('Screenshot 1')).toBeInTheDocument();
+    // Back at the panel with the page usable: the tint does not come back on its own.
+    expect(tint()).toBeNull();
+  });
+
+  it('a click without a drag lifts the tint and keeps the panel open; Select area brings it back', async () => {
+    await openPanel();
+    await userEvent.type(screen.getByRole('textbox'), 'Copy this');
+    dragTint([200, 200], [202, 201]);
+    expect(tint()).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Report a bug' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('Copy this');
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    expect(screen.getByRole('dialog', { name: 'Select an area' })).toBeInTheDocument();
+  });
+
+  it('a tap (touch pointer) lifts it too', async () => {
+    await openPanel();
+    const el = tint()!;
+    fireEvent.pointerDown(el, { button: 0, pointerType: 'touch', clientX: 50, clientY: 50, pointerId: 2 });
+    fireEvent.pointerUp(el, { button: 0, pointerType: 'touch', clientX: 51, clientY: 50, pointerId: 2 });
+    expect(tint()).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Report a bug' })).toBeInTheDocument();
+  });
+
+  it('a thin stroke past the click threshold is neither a click nor a capture', async () => {
+    await openPanel();
+    dragTint([100, 100], [300, 103]);
+    expect(tint()).not.toBeNull();
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+  });
+
+  it('Esc lifts the tint first, then a second Esc closes the panel', async () => {
+    await openPanel();
+    expect(tint()).not.toBeNull();
+    await userEvent.keyboard('{Escape}');
+    expect(tint()).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Report a bug' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Report a bug' })).toBeNull();
+  });
+
+  it('comes back each time the panel opens', async () => {
+    await openPanel();
+    await userEvent.keyboard('{Escape}');
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    expect(tint()).not.toBeNull();
+  });
+
+  it('typing in the panel never captures', async () => {
+    await openPanel();
+    await userEvent.type(screen.getByRole('textbox'), 'Enter does nothing here{Enter}and arrows{ArrowLeft}{ArrowUp}');
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Mark up the screenshot' })).toBeNull();
+    expect(tint()).not.toBeNull();
+    expect(screen.getByRole('textbox')).toHaveFocus();
+  });
+
+  it('captureOnOpen={false} keeps the old behaviour: no tint until Select area', async () => {
+    await openPanel({ captureOnOpen: false });
+    expect(tint()).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([100, 50], [300, 150]);
+    expect(await screen.findByRole('dialog', { name: 'Mark up the screenshot' })).toBeInTheDocument();
+  });
+
+  it('is off for the inline variant unless asked for', async () => {
+    await openPanel({ variant: 'inline' });
+    expect(tint()).toBeNull();
+    cleanup();
+    await openPanel({ variant: 'inline', captureOnOpen: true });
+    expect(tint()).not.toBeNull();
+  });
+
+  it('is not there where the browser cannot capture', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined });
+    await openPanel();
+    expect(tint()).toBeNull();
+  });
+});
+
 describe('dimOnOpen', () => {
   it('tints the page while the panel is open, without blocking it', async () => {
-    await openPanel({ dimOnOpen: true });
+    await openPanel({ dimOnOpen: true, captureOnOpen: false });
     const dim = document.querySelector('[data-shipcue-dim]');
     expect(dim).toHaveStyle({ pointerEvents: 'none', position: 'fixed' });
     await userEvent.keyboard('{Escape}');
@@ -233,8 +348,16 @@ describe('dimOnOpen', () => {
   });
 
   it('is off by default', async () => {
-    await openPanel();
+    await openPanel({ captureOnOpen: false });
     expect(document.querySelector('[data-shipcue-dim]')).toBeNull();
+  });
+
+  it('shows under a lifted capture tint, so the page stays tinted but usable', async () => {
+    await openPanel({ dimOnOpen: true });
+    expect(document.querySelector('[data-shipcue-dim]')).toBeNull();
+    await userEvent.keyboard('{Escape}');
+    expect(document.querySelector('[data-shipcue-capture]')).toBeNull();
+    expect(document.querySelector('[data-shipcue-dim]')).toHaveStyle({ pointerEvents: 'none' });
   });
 });
 
