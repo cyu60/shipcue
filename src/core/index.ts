@@ -93,6 +93,10 @@ export interface Capabilities {
   maxScreenshots: number;
   maxScreenshotBytes: number;
   maxTotalScreenshotBytes: number;
+  /** The person asking is signed in (the handler's getReporter knows them). */
+  signedIn?: boolean;
+  /** They may send a report without their name on it ("Send anonymously"). */
+  anonymous?: boolean;
 }
 
 /** The limits the button checks before sending; it takes them from the handler, or from its limits prop. */
@@ -200,6 +204,8 @@ export interface BoardItem {
   updatedAt: string;
   /** Screenshot URLs, only when the handler is created with boardScreenshots. */
   screenshots?: string[];
+  /** The fix on GitHub, when the viewer may see it (see the handler's boardLinks). */
+  prUrl?: string;
 }
 
 export interface Board {

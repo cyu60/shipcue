@@ -74,3 +74,8 @@ CREATE TABLE IF NOT EXISTS shipcue_report_events (
   at          timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 CREATE INDEX IF NOT EXISTS shipcue_report_events_report ON shipcue_report_events (report_id, at);
+
+-- Upgrading from 0.13: anonymousLimit. Who sent a signed-out report, as a keyed hash of their
+-- address (never the address), so the handler can ask them to sign in after a few.
+ALTER TABLE shipcue_reports ADD COLUMN IF NOT EXISTS client_key text CHECK (length(client_key) <= 64);
+CREATE INDEX IF NOT EXISTS shipcue_reports_client ON shipcue_reports (client_key) WHERE client_key IS NOT NULL AND NOT is_deleted;

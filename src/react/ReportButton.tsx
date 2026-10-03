@@ -2,6 +2,9 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, type Hotkeys } from './hotkeys';
+import { useLightbox } from './Lightbox';
+import { STAR_OFF, STAR_ON, rememberMine, starredFirst, useStars } from './stars';
+import { BUTTON_PX, SIZES, TEXT_ZOOM, loadAppearance, saveAppearance, type Appearance, type Size } from './appearance';
 import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
@@ -9,7 +12,8 @@ import { isOutlineText, OutlinePreview } from './outline';
 import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
 
-export type SubmitResult = { id: string } | { error: string };
+/** signIn: where to sign in, when the handler wants that before it takes more (anonymousLimit). */
+export type SubmitResult = { id: string } | { error: string; signIn?: string | null };
 
 export interface ReportButtonProps {
   /** The parts of your app a report can be about. "Other" is always added. */
@@ -52,6 +56,10 @@ export interface ReportButtonProps {
    * opens shipcue (hotkeys={false}). Without it, the link edits shipcue's own hotkeys in place.
    */
   onEditShortcuts?: () => void;
+  /** The floating button's size; each person can change it in the panel's Display settings. */
+  buttonSize?: Size;
+  /** How big the panel's text is; each person can change it in the panel's Display settings. */
+  textSize?: Size;
   /** Where people can see the reports they sent; shown as a Past reports link. */
   pastReportsHref?: string;
   /** The text of that link. "Past reports" by default. */
@@ -158,9 +166,9 @@ const ACCEPT = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 async function postTo(endpoint: string, form: FormData): Promise<SubmitResult> {
   const res = await fetch(`${endpoint.replace(/\/$/, '')}/reports`, { method: 'POST', body: form });
-  const body = (await res.json().catch(() => ({}))) as Partial<{ id: string; error: string }>;
+  const body = (await res.json().catch(() => ({}))) as Partial<{ id: string; error: string; signIn: string | null }>;
   if (res.ok && body.id) return { id: body.id };
-  return { error: body.error ?? 'Could not send the report. Please try again.' };
+  return { error: body.error ?? 'Could not send the report. Please try again.', signIn: body.signIn ?? null };
 }
 
 function snapshot(diagnostics: (() => Record<string, unknown>) | undefined, withErrors: boolean): string {
@@ -212,6 +220,8 @@ function ReportPanel({
   seeReportsLabel,
   limits,
   onEditShortcuts,
+  buttonSize: buttonSizeProp = 'medium',
+  textSize: textSizeProp = 'medium',
   watermark = true,
   types,
   hotkeys,
@@ -341,6 +351,26 @@ function ReportPanel({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only there in the browser
     setUserKeys(loadUserHotkeys());
   }, []);
+  // The floating button can be dragged, so it can be put back.
+  const canMove = variant === 'floating' && movable && trigger !== false;
+  const [appearance, setAppearanceState] = useState<Appearance>({});
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only there in the browser
+    setAppearanceState(loadAppearance());
+  }, []);
+  const setAppearance = (next: Appearance) => {
+    setAppearanceState(next);
+    saveAppearance(next);
+  };
+  const buttonPx = BUTTON_PX[appearance.buttonSize ?? buttonSizeProp];
+  const textZoom = TEXT_ZOOM[appearance.textSize ?? textSizeProp];
+  const [editingDisplay, setEditingDisplay] = useState(false);
+  const [anonymous, setAnonymous] = useState(false);
+  const [signInHref, setSignInHref] = useState<string | null>(null);
+  const lightbox = useLightbox();
+  const starState = useStars();
+  const [showMine, setShowMine] = useState(false);
+  const resetPositionRef = useRef<() => void>(() => undefined);
   const [editingKeys, setEditingKeys] = useState(false);
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const recordingRef = useRef<string | null>(null);
@@ -358,9 +388,9 @@ function ReportPanel({
   const keys = useMemo<Hotkeys>(() => {
     if (hotkeys === false) return {};
     const all = { ...appKeys, ...userKeys };
-    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id), ...(speech ? ['dictate'] : [])];
+    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id), ...(speech ? ['dictate'] : []), ...(canMove ? ['resetPosition'] : [])];
     return Object.fromEntries(ids.map((id) => [id, (all as Hotkeys)[id] ?? []]));
-  }, [hotkeys, appKeys, userKeys, tabs, extraTabs, speech]);
+  }, [hotkeys, appKeys, userKeys, tabs, extraTabs, speech, canMove]);
 
   // Open on a tab with what the report is about: the text highlighted on the page (not in
   // the panel), or else what the app says is selected.
@@ -426,6 +456,10 @@ function ReportPanel({
       if (!t) return;
       e.preventDefault();
       e.stopPropagation();
+      if (t === 'resetPosition') {
+        resetPositionRef.current();
+        return;
+      }
       if (t === 'dictate') {
         // Open the panel where it was (or keep it open), then listen.
         if (!openRef.current) openOnRef.current(undefined, false);
@@ -623,8 +657,10 @@ function ReportPanel({
     if (busy) return;
     setBusy(true);
     setError(null);
+    setSignInHref(null);
     try {
       const form = new FormData();
+      if (anonymous && known?.signedIn) form.set('anonymous', '1');
       form.set('type', type);
       form.set('description', text);
       form.set('context', context ?? '');
@@ -635,7 +671,10 @@ function ReportPanel({
       form.set('diagnostics', snapshot(diagnostics, captureErrors));
       files.forEach((f) => form.append(ACCEPT.includes(f.type) ? 'screenshot' : 'file', f, f.name));
       const result = submit ? await submit(form) : await postTo(endpoint, form);
-      if ('error' in result) throw new Error(result.error);
+      if ('error' in result) {
+        if (result.signIn) setSignInHref(result.signIn);
+        throw new Error(result.error);
+      }
       // The report is filed either way; a failed video upload is said on the thanks screen.
       let videoFailed: string | null = null;
       if (video && videoOn) {
@@ -646,6 +685,7 @@ function ReportPanel({
         }
       }
       setVideo(null);
+      rememberMine({ id: result.id, type: extra ? extra.id : type, title: (text.trim().split('\n')[0] ?? '').slice(0, 120), at: new Date().toISOString() });
       setOpen(false);
       setSent({ warning: videoFailed });
       setText('');
@@ -662,7 +702,8 @@ function ReportPanel({
   const canSend = !busy && text.trim().length >= config.minLength;
   const current = TYPES.find((t) => t.value === type)!;
   const s = styles(accentColor);
-  const drag = useDraggableButton(variant === 'floating' && movable);
+  const drag = useDraggableButton(canMove, buttonPx);
+  resetPositionRef.current = drag.reset;
 
   return (
     <div data-shipcue={variant} style={variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap}>
@@ -671,7 +712,7 @@ function ReportPanel({
           ref={panelRef}
           role="dialog"
           aria-label={extra ? (extra.title ?? extra.label) : HEADING[type][0]}
-          style={variant === 'floating' ? s.panel : s.inlinePanel}
+          style={{ ...(variant === 'floating' ? s.panel : s.inlinePanel), ...(textZoom !== 1 ? { zoom: textZoom } : null) }}
           onDragOver={(e) => {
             if (!extra && e.dataTransfer.types.includes('Files')) e.preventDefault();
           }}
@@ -890,7 +931,17 @@ function ReportPanel({
                 {previews.map((src, i) => (
                   <div key={(src || files[i]!.name) + i} style={{ position: 'relative' }}>
                     {src ? (
-                      <img src={src} alt={`Screenshot ${i + 1}`} style={s.thumb} />
+                      <button
+                        type="button"
+                        aria-label={`Preview screenshot ${i + 1}`}
+                        onClick={() => {
+                          const shots = previews.filter(Boolean);
+                          lightbox.open(shots, shots.indexOf(src));
+                        }}
+                        style={{ padding: 0, border: 0, background: 'none', cursor: 'zoom-in', display: 'block' }}
+                      >
+                        <img src={src} alt={`Screenshot ${i + 1}`} style={s.thumb} />
+                      </button>
                     ) : (
                       <div title={files[i]!.name} style={{ ...s.thumb, ...s.fileChip }}>
                         <span style={s.fileName}>{files[i]!.name}</span>
@@ -971,6 +1022,14 @@ function ReportPanel({
               {error && (
                 <p role="alert" style={s.error}>
                   {error}
+                  {signInHref && (
+                    <>
+                      {' '}
+                      <a href={signInHref} style={{ color: 'inherit', fontWeight: 600 }}>
+                        {t.signIn}
+                      </a>
+                    </>
+                  )}
                 </p>
               )}
               {page && (
@@ -981,9 +1040,73 @@ function ReportPanel({
                   </button>
                 </p>
               )}
+              {showMine && (
+                <div style={s.keysBox} aria-label={t.yourReports}>
+                  {starState.mine.length === 0 ? (
+                    <p style={{ ...s.hint, marginTop: 0 }}>{t.noReportsYet}</p>
+                  ) : (
+                    starredFirst(starState.mine, starState.stars).map((m) => (
+                      <div key={m.id} style={{ ...s.keysRow, gap: 8 }}>
+                        <button
+                          type="button"
+                          aria-label={starState.isStarred(m.id) ? `Unstar ${m.title}` : `Star ${m.title}`}
+                          aria-pressed={starState.isStarred(m.id)}
+                          onClick={() => starState.toggle(m.id)}
+                          style={{ ...s.linkBtn, textDecoration: 'none', fontSize: 13, color: starState.isStarred(m.id) ? '#d97706' : '#a1a1aa' }}
+                        >
+                          {starState.isStarred(m.id) ? STAR_ON : STAR_OFF}
+                        </button>
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.title}>
+                          {m.title}
+                        </span>
+                        <span style={{ color: '#a1a1aa', flex: 'none' }}>{new Date(m.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                      </div>
+                    ))
+                  )}
+                  <p style={{ ...s.hint, marginTop: 6 }}>{t.starsHint}</p>
+                </div>
+              )}
+              {editingDisplay && (
+                <div style={s.keysBox} aria-label={t.display}>
+                  {([['buttonSize', t.buttonSize, buttonSizeProp], ['textSize', t.textSize, textSizeProp]] as const)
+                    .filter(([k]) => k === 'textSize' || variant === 'floating')
+                    .map(([k, label, fallback]) => (
+                      <div key={k} style={s.keysRow}>
+                        <span>{label}</span>
+                        <span role="radiogroup" aria-label={label} style={{ display: 'flex', gap: 4 }}>
+                          {SIZES.map((size, i) => {
+                            const on = (appearance[k] ?? fallback) === size;
+                            return (
+                              <button
+                                key={size}
+                                type="button"
+                                role="radio"
+                                aria-checked={on}
+                                aria-label={`${label}: ${size}`}
+                                onClick={() => setAppearance({ ...appearance, [k]: size })}
+                                style={{ ...s.keysKbd, minWidth: 24, cursor: 'pointer', ...(on ? { background: '#18181b', color: '#fff', borderColor: '#18181b' } : null) }}
+                              >
+                                {t.sizeNames[i]}
+                              </button>
+                            );
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  {canMove && (
+                    <div style={s.keysRow}>
+                      <button type="button" onClick={() => drag.reset()} style={s.linkBtn}>
+                        {t.resetPosition}
+                      </button>
+                      {keys.resetPosition?.[0] && <kbd style={s.keysKbd}>{display(keys.resetPosition[0])}</kbd>}
+                    </div>
+                  )}
+                  <p style={{ ...s.hint, marginTop: 6 }}>Saved in this browser.</p>
+                </div>
+              )}
               {editingKeys && hotkeys !== false && (
                 <div style={s.keysBox} aria-label="Shortcuts">
-                  {[...tabs.map((x) => ({ id: x.value as string, label: x.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label })), ...(speech ? [{ id: 'dictate', label: t.dictate }] : [])].map(({ id, label }) => (
+                  {[...tabs.map((x) => ({ id: x.value as string, label: x.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label })), ...(speech ? [{ id: 'dictate', label: t.dictate }] : []), ...(canMove ? [{ id: 'resetPosition', label: t.resetPosition }] : [])].map(({ id, label }) => (
                     <div key={id} style={s.keysRow}>
                       <span>{label}</span>
                       <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1002,6 +1125,12 @@ function ReportPanel({
                   <p style={{ ...s.hint, marginTop: 6 }}>Saved in this browser. Esc cancels.</p>
                 </div>
               )}
+              {known?.signedIn && known.anonymous && (
+                <label style={{ ...s.hint, display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, color: '#52525b', fontSize: 11 }}>
+                  <input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />
+                  {t.sendAnonymously}
+                </label>
+              )}
               <div style={{ ...s.row, alignItems: 'center', marginTop: 12 }}>
                 <span style={{ ...s.hint, marginTop: 0 }}>
                   {pastReportsHref && (
@@ -1009,7 +1138,26 @@ function ReportPanel({
                       {t.pastReports}
                     </a>
                   )}
-                  {pastReportsHref && (hotkeys !== false || onEditShortcuts) && ' · '}
+                  {pastReportsHref && ' · '}
+                  <button
+                    type="button"
+                    onClick={() => setShowMine((v) => !v)}
+                    aria-expanded={showMine}
+                    style={{ ...s.linkBtn, fontSize: 10, textDecoration: 'none', color: '#71717a' }}
+                  >
+                    {t.yours}
+                    {starState.mine.length > 0 ? ` (${starState.mine.length})` : ''}
+                  </button>
+                  {' · '}
+                  <button
+                    type="button"
+                    onClick={() => setEditingDisplay((v) => !v)}
+                    aria-expanded={editingDisplay}
+                    style={{ ...s.linkBtn, fontSize: 10, textDecoration: 'none', color: '#71717a' }}
+                  >
+                    {t.display}
+                  </button>
+                  {(hotkeys !== false || onEditShortcuts) && ' · '}
                   {(hotkeys !== false || onEditShortcuts) && (
                     <button
                       type="button"
@@ -1080,6 +1228,7 @@ function ReportPanel({
           ● {Math.floor(recording / 60)}:{String(recording % 60).padStart(2, '0')}
         </button>
       )}
+      {lightbox.box}
       {trigger !== false && (
         <button
           type="button"
@@ -1091,12 +1240,12 @@ function ReportPanel({
           {...drag.handlers}
           aria-label={open ? t.closeButton : t.openButton}
           title={t.openButton}
-          style={variant === 'floating' ? { ...s.fab, ...(drag.dragging ? { cursor: 'grabbing' } : null) } : s.inlineBtn}
+          style={variant === 'floating' ? { ...s.fab, width: buttonPx, height: buttonPx, ...(drag.dragging ? { cursor: 'grabbing' } : null) } : s.inlineBtn}
         >
           {launcherIcon ?? (icon === 'hat' ? (
-            <HatIcon size={variant === 'floating' ? 24 : 19} />
+            <HatIcon size={variant === 'floating' ? Math.round(buttonPx / 2) : 19} />
           ) : (
-          <svg data-icon="ship" width={variant === 'floating' ? 22 : 18} height={variant === 'floating' ? 22 : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <svg data-icon="ship" width={variant === 'floating' ? Math.round(buttonPx * 0.46) : 18} height={variant === 'floating' ? Math.round(buttonPx * 0.46) : 18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 3v12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             <path d="M12 4.5 18 13h-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
             <path d="M12 7.5 7 13h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
@@ -1115,12 +1264,13 @@ function ReportPanel({
  * Solid in currentColor; the lamp is cut out so the button's colour shows through.
  */
 export function HatIcon({ size = 24 }: { size?: number }) {
+  // Lucide's hard-hat (ISC, lucide.dev): crisp strokes at every size (shipcue report 7f2dac1e).
   return (
-    <svg data-icon="hat" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path fillRule="evenodd" d="M6.3 15.2C6.3 10.5 9.4 7.4 13.5 7.4s7.2 3.1 7.2 7.8zM7.1 9.4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" />
-      <path d="M9 9.1c1.3-1.9 2.8-2.8 4.5-2.8s3.3.9 4.6 2.7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <rect x="2.4" y="15.6" width="19.6" height="2.2" rx="1.1" />
-      <circle cx="7.1" cy="11.9" r="1.3" />
+    <svg data-icon="hat" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5" />
+      <path d="M14 6a6 6 0 0 1 6 6v3" />
+      <path d="M4 15v-3a6 6 0 0 1 6-6" />
+      <rect x="2" y="15" width="20" height="4" rx="1" />
     </svg>
   );
 }
@@ -1139,7 +1289,6 @@ interface SpeechLike {
 }
 
 const POSITION_KEY = 'shipcue:button-position';
-const FAB = 48;
 const EDGE = 8;
 
 /**
@@ -1147,7 +1296,7 @@ const EDGE = 8;
  * centre; the wrapper is anchored to the nearest corner, so the panel opens towards the middle
  * of the screen and never off it.
  */
-function useDraggableButton(enabled: boolean) {
+function useDraggableButton(enabled: boolean, FAB: number) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const start = useRef<{ px: number; py: number; moved: boolean } | null>(null);
@@ -1230,6 +1379,15 @@ function useDraggableButton(enabled: boolean) {
     wrapStyle,
     handlers,
     dragging,
+    /** Back to the corner it started in, and forget the saved spot. */
+    reset: () => {
+      setPos(null);
+      try {
+        localStorage.removeItem(POSITION_KEY);
+      } catch {
+        // Storage blocked: nothing was saved.
+      }
+    },
     /** True once, right after a drag ended, so that release is not taken as a click. */
     justDragged: () => {
       const was = dragged.current;

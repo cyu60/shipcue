@@ -113,7 +113,11 @@ function Auth({ onIn }) {
           <Button onClick={() => setMode(mode === 'sign-up' ? 'sign-in' : 'sign-up')}>{mode === 'sign-up' ? 'I have an account' : 'Make an account'}</Button>
         )}
       </div>
-      <p style={s.small}>shipcue Cloud is invite-only for now. If a team invited you, sign up with that email and you will land in their project.</p>
+      <p style={s.small}>
+        {new URLSearchParams(window.location.search).get('next')
+          ? 'Sign in, or make an account, to keep sending reports. You can still send them anonymously; you come straight back after.'
+          : 'shipcue Cloud is invite-only for now. If a team invited you, sign up with that email and you will land in their project.'}
+      </p>
     </form>
   );
 }
@@ -420,7 +424,14 @@ function App() {
   const [creating, setCreating] = useState(false);
   const load = useCallback(async () => {
     try {
-      setMe(await api('/me'));
+      const who = await api('/me');
+      // Sent here to sign in from a page's report button: go back there.
+      const next = new URLSearchParams(window.location.search).get('next');
+      if (next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/app')) {
+        window.location.assign(next);
+        return;
+      }
+      setMe(who);
     } catch (err) {
       if (err.status === 401) setMe(null);
       else throw err;

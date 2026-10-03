@@ -1,6 +1,6 @@
 {
   "name": "shipcue",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "A drop-in bug report and feature request button whose inbox is a queue that people and coding agents both work from.",
   "license": "MIT",
   "type": "module",
@@ -35,10 +35,14 @@
     "prepare": "npm run build"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": ">=18",
+    "react-dom": ">=18"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "react-dom": {
       "optional": true
     }
   },

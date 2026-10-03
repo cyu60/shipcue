@@ -76,6 +76,28 @@ export function insforgeAuth(baseUrl, fetchImpl = fetch) {
   };
 }
 
+/** The signed-in Cloud user from the request's cookies, or null. Refreshes without saving: for read-only callers. */
+export async function cloudUserFrom(req, auth) {
+  const c = cookies(req);
+  if (c[ACCESS_COOKIE]) {
+    try {
+      const user = await auth.current(c[ACCESS_COOKIE]);
+      if (user) return user;
+    } catch {
+      // Expired: try the refresh token.
+    }
+  }
+  if (c[REFRESH_COOKIE]) {
+    try {
+      const t = await auth.refresh(c[REFRESH_COOKIE]);
+      if (t) return t.user ? { id: t.user.id, email: t.user.email } : await auth.current(t.accessToken);
+    } catch {
+      // Signed out.
+    }
+  }
+  return null;
+}
+
 /**
  * @param {{ db: { query(text: string, params?: unknown[]): Promise<{ rows: any[] }> }, auth: ReturnType<typeof insforgeAuth>,
  *   base?: string, beta?: string[], secureCookies?: boolean, refreshDays?: number }} opts
@@ -89,8 +111,10 @@ export function createCloudHandler(opts) {
   const refreshDays = opts.refreshDays ?? 30;
   const q = async (text, params = []) => (await db.query(text, params)).rows;
 
+  // Path /api: the site's own report button (/api/shipcue) knows who is signed in too.
+  const cookiePath = opts.cookiePath ?? '/api';
   const cookie = (name, value, maxAge) =>
-    `${name}=${encodeURIComponent(value)}; Path=${base}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+    `${name}=${encodeURIComponent(value)}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
   const sessionCookies = (t) => [cookie(ACCESS_COOKIE, t.accessToken, 60 * 60 * 24), cookie(REFRESH_COOKIE, t.refreshToken ?? '', 60 * 60 * 24 * refreshDays)];
   const clearCookies = () => [cookie(ACCESS_COOKIE, '', 0), cookie(REFRESH_COOKIE, '', 0)];
   const withCookies = (res, set) => {
@@ -396,6 +420,11 @@ export function createCloudHandler(opts) {
       basePath: `${base}/p/${key}`,
       cors: p.allowed_origins,
       board: p.public_board,
+      // The team sees every fix link on the public board, private repositories included.
+      boardAdmin: async (r) => {
+        const sess = await session(r);
+        return !!(sess && (await memberOf(p.id, sess.user.id)));
+      },
       leaseSeconds: p.lease_seconds ?? undefined,
       agents: async (token) => {
         const a = (

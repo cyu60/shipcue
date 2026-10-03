@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-230%20passing-2E5BFF?style=flat-square" alt="230 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-245%20passing-2E5BFF?style=flat-square" alt="245 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -249,6 +249,7 @@ pnpm build
 
 ## Changelog
 
+- **0.14.0**: the CueLog gets stars (pin any report to the top in the panel, the board and the CueLog table; the panel's new Yours list shows what you sent from this browser), an in-page image preview for screenshots everywhere (click to zoom, arrows, Esc), GitHub links on the changelog when the repository is public or the viewer is an admin (`boardLinks`, `boardAdmin`), `anonymousLimit` (a few reports without signing in, then `signInUrl`; signed in, people can still send anonymously), button and text sizes with a Display panel (`buttonSize`, `textSize`) and a hotkey to reset a dragged button (⌃⇧H / Alt+Shift+H). The hat is now Lucide's hard-hat. **Upgrading:** for `anonymousLimit`, run the "Upgrading from 0.13" lines in `sql/schema.sql`.
 - **0.13.0**: the CueLog's claim model. A claim names a person or an agent (`claimantKind`, `claimantId`), agents can have their own tokens (`agents`), agent claims can have a lease (`leaseSeconds`, `heartbeat`), a PR puts a report `in_review`, and every change goes to `shipcue_report_events`. New `team` API and `CueLogTable` component; new MCP tools `submit_for_review`, `heartbeat_report`, `list_my_reports`. **Upgrading:** run the "Upgrading from 0.12" lines at the end of `sql/schema.sql` before deploying (new columns, the `in_review` status and the events table). shipcue Cloud's tables are in `sql/cloud.sql`.
 - **0.12.0**: building blocks for a hosted queue (shipcue Cloud): `postgresStore(db, table, { project })` keeps every read and write to one project in a shared table (`sql/cloud.sql` adds `project_id`), and the handler's `cors` option takes reports from listed origins. Both are opt-in; self-hosted apps don't change.
 - **0.11.0**: shipcue's mark is now a builder's hard hat (with its headlamp) on the button, the site and the extension; `icon="ship"` keeps the sailboat, `launcherIcon` takes your own. Dictate: a small mic beside the text box (⌃M on a Mac, Alt+Shift+M elsewhere, even with the panel closed) speaks into the report with the browser's own speech recognition; hidden where the browser has none.

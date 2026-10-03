@@ -226,12 +226,17 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
         input.reporter,
         input.context ?? null
       ];
-      if (project !== void 0) params.push(project);
-      const r = await one(
-        `INSERT INTO ${table} (type, priority, area, description, page_url, user_agent, diagnostics, screenshots, reporter, context${project !== void 0 ? ", project_id" : ""})
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10${project !== void 0 ? ", $11" : ""}) RETURNING ${COLUMNS}`,
-        params
-      );
+      const cols = ["type", "priority", "area", "description", "page_url", "user_agent", "diagnostics", "screenshots", "reporter", "context"];
+      if (project !== void 0) {
+        params.push(project);
+        cols.push("project_id");
+      }
+      if (input.clientKey) {
+        params.push(input.clientKey);
+        cols.push("client_key");
+      }
+      const values = cols.map((c, i) => c === "diagnostics" ? `$${i + 1}::jsonb` : `$${i + 1}`).join(", ");
+      const r = await one(`INSERT INTO ${table} (${cols.join(", ")}) VALUES (${values}) RETURNING ${COLUMNS}`, params);
       return r;
     },
     async get(id) {
@@ -334,6 +339,14 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
       );
       return rows.map((r) => toReport(r));
     },
+    async countFromClient(clientKey) {
+      const params = [clientKey];
+      const { rows } = await db.query(
+        `SELECT count(*)::int AS n FROM ${table} WHERE client_key = $1 AND reporter IS NULL AND NOT is_deleted${scope(params)}`,
+        params
+      );
+      return Number(rows[0]?.n ?? 0);
+    },
     async events(id) {
       if (!isUuid(id)) return [];
       const params = [id];
@@ -348,7 +361,7 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
 }
 
 // src/server/handler.ts
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 // src/server/broadcast.ts
 async function broadcast(broadcasters, event, timeoutMs = 4e3) {
@@ -371,6 +384,38 @@ async function broadcast(broadcasters, event, timeoutMs = 4e3) {
       }
     })
   );
+}
+
+// src/server/links.ts
+var REPO = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)(?:[/?#]|$)/i;
+var FIX_LINK = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:pull|commit|issues|compare)\/[\w.]+/i;
+function findGitHubLink(text) {
+  return text ? FIX_LINK.exec(text)?.[0] ?? null : null;
+}
+function publicGitHubLinks(opts = {}) {
+  const doFetch = opts.fetch ?? ((u, i) => fetch(u, i));
+  const cacheMs = opts.cacheMs ?? 60 * 60 * 1e3;
+  const timeoutMs = opts.timeoutMs ?? 3e3;
+  const known = /* @__PURE__ */ new Map();
+  return async (url) => {
+    const m = REPO.exec(url);
+    if (!m) return false;
+    const repo = `${m[1]}/${m[2]}`.toLowerCase();
+    const hit = known.get(repo);
+    if (hit && Date.now() - hit.at < cacheMs) return hit.open;
+    let open = false;
+    try {
+      const res = await doFetch(`https://api.github.com/repos/${m[1]}/${m[2]}`, {
+        headers: { accept: "application/vnd.github+json", "user-agent": "shipcue" },
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      open = res.ok && !(await res.json().catch(() => ({}))).private;
+    } catch {
+      open = false;
+    }
+    known.set(repo, { open, at: Date.now() });
+    return open;
+  };
 }
 
 // src/server/handler.ts
@@ -407,9 +452,29 @@ function createShipcueHandler(opts) {
   const base = (opts.basePath ?? "/api/shipcue").replace(/\/$/, "");
   const { store } = opts;
   const emit = (type, report) => report ? broadcast(opts.broadcasters, { type, at: (/* @__PURE__ */ new Date()).toISOString(), report }) : Promise.resolve();
+  const ipKey = (req) => {
+    const ip = (req.headers.get("x-forwarded-for")?.split(",")[0] ?? req.headers.get("x-real-ip") ?? "").trim();
+    if (!ip) return null;
+    return createHmac("sha256", opts.clientKeySecret ?? opts.agentToken ?? "shipcue").update(ip).digest("hex").slice(0, 32);
+  };
+  const signInFor = (req) => typeof opts.signInUrl === "function" ? opts.signInUrl(req) : opts.signInUrl;
   async function fileReport(req) {
     const reporter = opts.getReporter ? await opts.getReporter(req) : null;
     if (opts.requireReporter && !reporter) return fail("Sign in to send a report.", 401);
+    let clientKey = null;
+    if (!reporter && opts.anonymousLimit !== void 0 && store.countFromClient) {
+      clientKey = opts.clientKey ? await opts.clientKey(req) : ipKey(req);
+      if (clientKey && await store.countFromClient(clientKey) >= opts.anonymousLimit) {
+        const n = opts.anonymousLimit;
+        return json(
+          {
+            error: `You have sent ${n} report${n === 1 ? "" : "s"} without signing in. Sign in to send more; you can still send them anonymously.`,
+            signIn: signInFor(req) ?? null
+          },
+          401
+        );
+      }
+    }
     let form;
     try {
       form = await req.formData();
@@ -467,7 +532,8 @@ function createShipcueHandler(opts) {
       const key = `${batch}/${i + 1}.${IMAGE_TYPES[f.type]}`;
       screenshots.push(opts.saveScreenshot ? await opts.saveScreenshot(f, key) : await toDataUrl(f, !IMAGE_TYPES[f.type]));
     }
-    const report = await store.create({ ...checked.value, reporter, screenshots });
+    const anonymous = !!reporter && opts.anonymousLimit !== void 0 && form.get("anonymous") === "1";
+    const report = await store.create({ ...checked.value, reporter: anonymous ? null : reporter, screenshots, ...clientKey ? { clientKey } : {} });
     if (opts.onReport) {
       try {
         await opts.onReport(report);
@@ -527,8 +593,8 @@ function createShipcueHandler(opts) {
   }
   async function agentApi(req, parts) {
     if (!opts.agentToken && !opts.agents) return fail("Not found", 404);
-    const auth = req.headers.get("authorization") ?? "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    const auth2 = req.headers.get("authorization") ?? "";
+    const token = auth2.startsWith("Bearer ") ? auth2.slice(7) : "";
     const identity = token && opts.agents ? await opts.agents(token, req) : null;
     if (!identity && !(token && opts.agentToken && sameToken(token, opts.agentToken))) return fail("Unauthorized", 401);
     const [id, action] = parts;
@@ -699,6 +765,7 @@ function createShipcueHandler(opts) {
     return fail("Not found", 404);
   }
   const BOARD_LIMIT = 200;
+  const defaultLinks = publicGitHubLinks();
   async function board(req) {
     const allowed = typeof opts.board === "function" ? await opts.board(req) : opts.board === true;
     if (!allowed) return fail("Not found", 404);
@@ -708,10 +775,20 @@ function createShipcueHandler(opts) {
       store.list({ status: "in_review" }),
       store.list({ status: "fixed" })
     ]);
-    const item = (r) => toBoardItem(r, opts.boardScreenshots ? boardShots(r) : void 0);
+    const admin = opts.boardAdmin ? await opts.boardAdmin(req) : false;
+    const mayLink = async (url) => {
+      if (admin || opts.boardLinks === true) return true;
+      if (opts.boardLinks === false) return false;
+      return (opts.boardLinks ?? defaultLinks)(url, req);
+    };
+    const item = async (r) => {
+      const base2 = toBoardItem(r, opts.boardScreenshots ? boardShots(r) : void 0);
+      const url = r.prUrl ?? findGitHubLink(r.resolution);
+      return url && await mayLink(url) ? { ...base2, prUrl: url } : base2;
+    };
     const result = {
-      queue: [...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item),
-      changelog: fixed.map(item).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
+      queue: await Promise.all([...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item)),
+      changelog: (await Promise.all(fixed.map(item))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
     };
     return new Response(JSON.stringify(result), {
       headers: { "content-type": "application/json", "cache-control": "no-store" }
@@ -766,7 +843,8 @@ function createShipcueHandler(opts) {
         maxVideoSeconds: config.maxVideoSeconds,
         maxScreenshots: config.maxScreenshots,
         maxScreenshotBytes: config.maxScreenshotBytes,
-        maxTotalScreenshotBytes: config.maxTotalScreenshotBytes
+        maxTotalScreenshotBytes: config.maxTotalScreenshotBytes,
+        ...opts.anonymousLimit !== void 0 ? { signedIn: !!(opts.getReporter && await opts.getReporter(req)), anonymous: true } : {}
       };
       return new Response(JSON.stringify(caps), { headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
@@ -842,13 +920,87 @@ var AREAS = [
   { value: "package", label: "The shipcue package" }
 ];
 
+// website/_src/cloud.mjs
+var ACCESS_COOKIE = "sc_at";
+var REFRESH_COOKIE = "sc_rt";
+function cookies(req) {
+  const out = {};
+  for (const part of (req.headers.get("cookie") ?? "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+function insforgeAuth(baseUrl, fetchImpl = fetch) {
+  const call = async (path, payload, token) => {
+    const res = await fetchImpl(`${baseUrl}${path}`, {
+      method: payload ? "POST" : "GET",
+      headers: { "content-type": "application/json", ...token ? { authorization: `Bearer ${token}` } : {} },
+      body: payload ? JSON.stringify(payload) : void 0
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.message ?? data.error ?? `Sign-in service said ${res.status}`), { status: res.status });
+    return data;
+  };
+  const tokens = (d) => d.accessToken ? { accessToken: d.accessToken, refreshToken: d.refreshToken, user: d.user } : null;
+  return {
+    async signUp(email, password) {
+      const d = await call("/api/auth/users?client_type=server", { email, password });
+      return { tokens: tokens(d), needsVerification: !d.accessToken };
+    },
+    async verify(email, otp) {
+      return tokens(await call("/api/auth/email/verify?client_type=server", { email, otp }));
+    },
+    async resend(email) {
+      await call("/api/auth/email/send-verification", { email });
+    },
+    async signIn(email, password) {
+      return tokens(await call("/api/auth/sessions?client_type=server", { email, password }));
+    },
+    async current(accessToken) {
+      const d = await call("/api/auth/sessions/current", null, accessToken);
+      return d.user ? { id: d.user.id, email: d.user.email } : null;
+    },
+    async refresh(refreshToken) {
+      return tokens(await call("/api/auth/refresh?client_type=server", { refreshToken }));
+    }
+  };
+}
+async function cloudUserFrom(req, auth2) {
+  const c = cookies(req);
+  if (c[ACCESS_COOKIE]) {
+    try {
+      const user = await auth2.current(c[ACCESS_COOKIE]);
+      if (user) return user;
+    } catch {
+    }
+  }
+  if (c[REFRESH_COOKIE]) {
+    try {
+      const t = await auth2.refresh(c[REFRESH_COOKIE]);
+      if (t) return t.user ? { id: t.user.id, email: t.user.email } : await auth2.current(t.accessToken);
+    } catch {
+    }
+  }
+  return null;
+}
+
 // website/_src/api.mjs
+var auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 var pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 var handler = createShipcueHandler({
   store: postgresStore(pool),
   // Any file can come along with a report here, not just screenshots (report e8b2dedd).
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: "/api/shipcue",
+  getReporter: async (req) => (await cloudUserFrom(req, auth))?.email ?? null,
+  // Three reports without an account, then sign in (report dce33fd0); signed in, they can still send anonymously.
+  anonymousLimit: Number(process.env.SHIPCUE_ANONYMOUS_LIMIT ?? 3),
+  signInUrl: (req) => {
+    const from = req.headers.get("referer");
+    const path = from && new URL(from).origin === new URL(req.url).origin ? new URL(from).pathname : "/";
+    return `/app/?next=${encodeURIComponent(path)}`;
+  },
   agentToken: process.env.SHIPCUE_TOKEN,
   // The Changelog page reads the queue and the fixes (no reporters or diagnostics).
   board: true,
