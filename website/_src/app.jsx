@@ -35,6 +35,7 @@ const s = {
   pre: { margin: 0, fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-all' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 15 },
   td: { padding: '6px 4px', borderBottom: '1px solid var(--line)' },
+  oauth: { display: 'block', textAlign: 'center', textDecoration: 'none', fontSize: 15, padding: '8px 12px' },
 };
 
 function Button({ ink, ...props }) {
@@ -58,8 +59,15 @@ function Auth({ onIn }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
-  const [error, setError] = useState(null);
+  // Continue with Google comes back to /app/?error=... when it could not finish.
+  const [error, setError] = useState(() => new URLSearchParams(window.location.search).get('error'));
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('error')) return;
+    url.searchParams.delete('error');
+    window.history.replaceState(null, '', url);
+  }, []);
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -83,6 +91,17 @@ function Auth({ onIn }) {
   return (
     <form onSubmit={submit} style={{ ...s.card, maxWidth: 420 }}>
       <h2 style={{ margin: 0 }}>{mode === 'sign-up' ? 'Make an account' : mode === 'verify' ? 'Check your email' : 'Sign in'}</h2>
+      {mode !== 'verify' && (
+        <>
+          <a href={`${API}/auth/oauth/google`} style={{ ...s.btn, ...s.ink, ...s.oauth }}>
+            Continue with Google
+          </a>
+          <a href={`${API}/auth/oauth/github`} style={{ ...s.btn, ...s.oauth }}>
+            Continue with GitHub
+          </a>
+          <p style={{ ...s.small, textAlign: 'center' }}>or with email</p>
+        </>
+      )}
       {mode === 'verify' ? (
         <>
           <p style={s.small}>We sent a 6-digit code to {email}.</p>

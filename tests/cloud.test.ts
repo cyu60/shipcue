@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 // @ts-expect-error -- plain JS module for the site's function
-import { createCloudHandler } from '../website/_src/cloud.mjs';
+import { createCloudHandler, insforgeAuth } from '../website/_src/cloud.mjs';
 
 const schema = readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8');
 const cloud = readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8');
@@ -35,17 +36,32 @@ function fakeAuth() {
       const email = token.slice(3).replace(/^expired-/, '');
       return users.has(email) ? tokens(email) : null;
     },
+    // Google sign-in: the provider's page carries the challenge; the code "code:<email>" signs that person in.
+    oauthCalls: [] as { provider: string; redirectUri: string; challenge: string }[],
+    async oauthUrl(provider: string, redirectUri: string, challenge: string) {
+      this.oauthCalls.push({ provider, redirectUri, challenge });
+      return `https://accounts.google.com/o/oauth2/v2/auth?state=${challenge}`;
+    },
+    async exchange(code: string, verifier: string) {
+      const email = code.slice(5);
+      const challenge = createHash('sha256').update(verifier).digest('base64url');
+      if (!this.oauthCalls.some((c) => c.challenge === challenge)) throw Object.assign(new Error('Invalid code verifier'), { status: 400 });
+      if (!users.has(email)) users.set(email, { id: crypto.randomUUID(), email, password: '' });
+      return tokens(email);
+    },
   };
 }
 
 let handle: (req: Request) => Promise<Response>;
 let db: PGlite;
+let auth: ReturnType<typeof fakeAuth>;
 
 beforeEach(async () => {
   db = new PGlite();
   await db.exec(schema);
   await db.exec(cloud);
-  handle = createCloudHandler({ db: { query: (t: string, p?: unknown[]) => db.query(t, p) }, auth: fakeAuth(), beta: ['ada@example.com'], secureCookies: false });
+  auth = fakeAuth();
+  handle = createCloudHandler({ db: { query: (t: string, p?: unknown[]) => db.query(t, p) }, auth, beta: ['ada@example.com'], secureCookies: false });
 });
 
 const jar = new Map<string, string>();
@@ -153,5 +169,85 @@ describe('shipcue Cloud', () => {
     expect(res.headers.getSetCookie().join(';')).toContain('sc_at=at%3Aada%40example.com');
     const ownerId = data.members[0].id;
     expect((await call('POST', `/projects/${made.project.id}/members/${ownerId}/remove`, { as: 'ada@example.com', body: {} })).res.status).toBe(409);
+  });
+});
+
+describe('shipcue Cloud: Continue with Google', () => {
+  const cookieOf = (res: Response, name: string) => res.headers.getSetCookie().find((c) => c.startsWith(`${name}=`));
+
+  it('starts on the provider page with a PKCE challenge and keeps the verifier in a short-lived httpOnly cookie', async () => {
+    const res = await handle(new Request(`${BASE}/auth/oauth/google`));
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toMatch(/^https:\/\/accounts\.google\.com\//);
+    const pkce = cookieOf(res, 'sc_pkce')!;
+    expect(pkce).toContain('HttpOnly');
+    expect(pkce).toMatch(/Max-Age=600/);
+    const verifier = decodeURIComponent(pkce.split(';')[0]!.slice('sc_pkce='.length));
+    const [call] = auth.oauthCalls;
+    expect(call).toMatchObject({ provider: 'google', redirectUri: `${BASE}/auth/oauth/callback` });
+    expect(call!.challenge).toBe(createHash('sha256').update(verifier).digest('base64url'));
+    expect(verifier.length).toBeGreaterThanOrEqual(43);
+  });
+
+  it('takes GitHub too, and nothing else', async () => {
+    expect((await handle(new Request(`${BASE}/auth/oauth/github`))).status).toBe(302);
+    expect((await handle(new Request(`${BASE}/auth/oauth/myspace`))).status).toBe(404);
+  });
+
+  it('comes back, swaps the code for a session and lands on /app/ in the same account', async () => {
+    await signUp('ada@example.com');
+    const { data: before } = await call('GET', '/me', { as: 'ada@example.com' });
+    const start = await handle(new Request(`${BASE}/auth/oauth/google`));
+    const pkce = cookieOf(start, 'sc_pkce')!.split(';')[0]!;
+    const back = await handle(new Request(`${BASE}/auth/oauth/callback?insforge_code=code:ada@example.com`, { headers: { cookie: pkce } }));
+    expect(back.status).toBe(302);
+    expect(back.headers.get('location')).toBe('https://shipcue.example.com/app/');
+    expect(cookieOf(back, 'sc_pkce')).toMatch(/Max-Age=0/);
+    const session = back.headers
+      .getSetCookie()
+      .filter((c) => c.startsWith('sc_at=') || c.startsWith('sc_rt='))
+      .map((c) => c.split(';')[0])
+      .join('; ');
+    const me = await handle(new Request(`${BASE}/me`, { headers: { cookie: session } }));
+    expect((await me.json()).user).toEqual(before.user);
+  });
+
+  it('sends people back to /app/ with a reason when it cannot finish', async () => {
+    const noCookie = await handle(new Request(`${BASE}/auth/oauth/callback?insforge_code=code:ada@example.com`));
+    expect(noCookie.status).toBe(302);
+    expect(new URL(noCookie.headers.get('location')!).searchParams.get('error')).toMatch(/try again/i);
+    const denied = await handle(new Request(`${BASE}/auth/oauth/callback?error=access_denied`, { headers: { cookie: 'sc_pkce=x'.padEnd(60, 'x') } }));
+    expect(new URL(denied.headers.get('location')!).pathname).toBe('/app/');
+    expect(new URL(denied.headers.get('location')!).searchParams.get('error')).toBeTruthy();
+    const wrong = await handle(new Request(`${BASE}/auth/oauth/callback?insforge_code=code:ada@example.com`, { headers: { cookie: `sc_pkce=${'y'.repeat(43)}` } }));
+    expect(new URL(wrong.headers.get('location')!).searchParams.get('error')).toBe('Invalid code verifier');
+    expect(wrong.headers.getSetCookie().some((c) => c.startsWith('sc_at='))).toBe(false);
+  });
+});
+
+describe('insforgeAuth: OAuth over REST', () => {
+  it('asks InsForge for the provider URL and swaps the code as a server client', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fetchImpl = async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      const body = url.includes('/oauth/exchange')
+        ? { accessToken: 'at', refreshToken: 'rt', user: { id: 'u1', email: 'ada@example.com' } }
+        : { authUrl: 'https://accounts.google.com/o/oauth2/v2/auth?x=1' };
+      return new Response(JSON.stringify(body), { status: 200 });
+    };
+    const a = insforgeAuth('https://auth.example.com', fetchImpl);
+    expect(await a.oauthUrl('google', 'https://shipcue.example.com/api/cloud/auth/oauth/callback', 'chal')).toBe('https://accounts.google.com/o/oauth2/v2/auth?x=1');
+    const start = new URL(calls[0]!.url);
+    expect(start.pathname).toBe('/api/auth/oauth/google');
+    expect(start.searchParams.get('redirect_uri')).toBe('https://shipcue.example.com/api/cloud/auth/oauth/callback');
+    expect(start.searchParams.get('code_challenge')).toBe('chal');
+    expect(await a.exchange('the-code', 'the-verifier')).toEqual({ accessToken: 'at', refreshToken: 'rt', user: { id: 'u1', email: 'ada@example.com' } });
+    expect(calls[1]!.url).toBe('https://auth.example.com/api/auth/oauth/exchange?client_type=server');
+    expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ code: 'the-code', code_verifier: 'the-verifier' });
+  });
+
+  it('refuses a provider URL that is not https', async () => {
+    const a = insforgeAuth('https://auth.example.com', async () => new Response(JSON.stringify({ authUrl: 'javascript:alert(1)' })));
+    await expect(a.oauthUrl('google', 'https://x', 'c')).rejects.toThrow();
   });
 });
