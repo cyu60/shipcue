@@ -211,6 +211,7 @@ One ✓ or ✗ line per check, with the exact fix under each ✗ (exit code 1 if
 | `GET` | `/reports/:id/events` | agent: the report's history |
 | `GET` | `/reports?mine=1` | agent: what it holds or has queued |
 | `POST` | `/reports/:id/note` | agent, `{ text }`: a note on the report's history |
+| `POST` | `/digest` | agent, `{ since?, until?, every? }`: the last period's digest, sent or returned (with the `digest` option) |
 | `GET` | `/team/me`, `/team/reports`, `/team/reports/:id` | signed-in members, with the `team` option |
 | `POST` | `/team/reports/:id/{claim,assign,release,close,reopen,review,priority,note}` | members (not viewers) |
 | `GET` | `/board` | anyone, only with `board` on: the queue and the changelog |
@@ -261,6 +262,13 @@ SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=... \
 
 `assigned` fires when someone queues a report for this agent in the CueLog. To keep a listener running as a daemon, shipcue Cloud's Setup tab writes it out for you (Run a listener): the one-line command, a macOS launchd agent (KeepAlive, logs in `~/Library/Logs`) or a Linux systemd `--user` unit, with the agent's token filled in.
 
+**One digest instead of a message per event.** Turn on `digest` and a cron (Vercel Cron, GitHub Actions, launchd) calls `POST {base}/digest` with the agent token every hour or day. It builds one summary of the last period from the report history: filed, fixed (with the fix line and PR), reopened, claims stuck past their lease, how many are still open and the oldest waiting, and sends it with `slackDigest({ webhookUrl })`, `emailDigest({ to, send })` (the same `send` as `emailReporter`) or your own `{ name, format, send }`. Without `send` it returns the digest as Markdown, for a daily note or an outliner log. Quiet periods send nothing unless `sendEmpty`. It never includes who filed a report, the page, diagnostics or attachments. `digest(store, { since, until, format: 'slack' | 'email' | 'markdown' })` builds one anywhere.
+
+```ts
+createShipcueHandler({ /* ... */ digest: { every: 'day', send: slackDigest({ webhookUrl: process.env.SLACK_WEBHOOK! }), link: 'https://app.example.com/reports' } });
+// curl -X POST https://app.example.com/api/shipcue/digest -H "Authorization: Bearer $SHIPCUE_TOKEN"   (body: { since?, until?, every? })
+```
+
 ## Try it locally
 
 ```bash
@@ -291,6 +299,7 @@ Release tarballs for GitHub: `npm run pack:release` (builds, then `npm pack`).
 
 - **next**: isolation regression suite for Cloud (shipcue report 407a5d6d). `tests/isolation.test.ts` runs every read and write path (store methods, the public board, its version and screenshots, the team API, the agent API, the button's video route, and Cloud's per-project queue at `/api/cloud/p/<key>/`) with two Cloud projects and an own-rows store (`project: null`) on one database, and checks nothing crosses over in any direction, so the 0.16.1 leak (the site's own queue reading every Cloud project's reports) cannot come back unnoticed. No leak found; tests only.
 - **next**: setup without the traps (shipcue report 5fdbd60f). `npx shipcue doctor` checks the install and version, the signed-URL lockfile trap, the handler route and the env vars it reads (Vercel's too), and with `--url` the live endpoint, the agent token and the tables (RLS, columns, history actions), printing the fix or the "Upgrading from" block for each ✗. `npx shipcue init --cloud <pk_…>` wires the button to a Cloud project. Ready for npm: `prepare` became `prepublishOnly` (nothing builds on install), plus `publishConfig` and a `./package.json` export; see Publishing.
+- **next**: activity digest (shipcue report 5f4d339b): one batched summary per hour or day instead of a message per event. `digest(store, { since, until, format })` builds it from the report history (filed, fixed with fix lines and PRs, reopened, claims stuck past their lease, still open, oldest waiting) as Slack, email or Markdown, never with reporters or diagnostics; the handler's opt-in `digest` option adds `POST {base}/digest` (agent token) for a cron, sending with `slackDigest` / `emailDigest` or returning Markdown. shipcue Cloud: Setup → Digest (off / hourly / daily, to the project's Slack or the owner's email), sent by a cron at `/api/cloud/digest`. **Upgrading (Cloud):** run the new digest lines in `sql/cloud.sql`.
 - **0.24.2**: when key presses on the resize grip come quicker than the panel redraws, each one now counts (shipcue report ee970b18).
 - **0.24.1**: the Send button keeps its size while sending: "Sending…" no longer wraps it onto two lines or makes it taller.
 - **0.24.0**: resize the panel (shipcue report ee970b18). A small grip on the floating panel's free corner (the one away from the button, so it follows the quadrant) resizes it by drag, or by the arrow keys once focused (Shift for bigger steps); the text box takes the extra height. At least the default size, at most 8px inside the window, scaled with the text size, kept in this browser (`shipcue:panel-size`); Reset position (⌃⇧H or Display) also resets the size, and is now offered with `movable={false}` too. New: prop `resizable` (on by default for the floating panel); text key `resizePanel`.
@@ -356,7 +365,6 @@ The backlog lives on [shipcue's own CueLog](https://shipcue.ibuildathing.com/cue
 - One view of every queue, with waiting time and installed versions
 - Hosted agent: one-click suggestions and duplicate detection
 - Setup without the traps: publish to npm and add `shipcue doctor`
-- Activity digest broadcaster
 - Reporter portal: your reports on any device
 - Swarm mode with work-area claims (needs a design first)
 - Isolation regression suite for Cloud

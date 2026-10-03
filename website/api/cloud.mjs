@@ -3,7 +3,7 @@ import pg from "pg";
 import { waitUntil } from "@vercel/functions";
 
 // website/_src/cloud.mjs
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 
 // src/core/index.ts
 var REPORT_TYPES = ["bug", "feature", "task"];
@@ -11,6 +11,7 @@ var PRIORITIES = ["low", "medium", "high", "blocking"];
 function toClaimant(who) {
   return typeof who === "string" ? { kind: "agent", id: who, name: who } : who;
 }
+var TYPE_LABEL = { bug: "Bug", feature: "Feature request", task: "Agent task" };
 var TITLE_PREFIX = { bug: "Bug", feature: "Feature", task: "Task" };
 var PRIORITY_LABEL = {
   low: "Low",
@@ -569,6 +570,173 @@ function publicGitHubLinks(opts = {}) {
   };
 }
 
+// src/server/digest.ts
+var DIGEST_PERIOD_MS = { hour: 60 * 60 * 1e3, day: 24 * 60 * 60 * 1e3 };
+var iso2 = (d) => (typeof d === "string" ? new Date(d) : d).toISOString();
+var EMAIL_LIKE = /[^\s@<>"()[\]]+@[^\s@<>"()[\]]+\.[a-z]{2,}/gi;
+var clean = (t, max = 140) => {
+  const line = (t ?? "").trim().split("\n")[0].replace(EMAIL_LIKE, "[email]").trim();
+  return line.length > max ? `${line.slice(0, max - 3)}...` : line;
+};
+var safeLink = (u) => u && /^https?:\/\/[^\s<>|]+$/i.test(u) ? u : null;
+var item = (r, extra = {}) => ({
+  id: r.id,
+  type: r.type,
+  priority: r.priority,
+  text: clean(r.description),
+  createdAt: r.createdAt,
+  ...extra
+});
+async function buildDigest(store, opts) {
+  const since = iso2(opts.since);
+  const until = iso2(opts.until ?? /* @__PURE__ */ new Date());
+  const inPeriod = (t) => !!t && t >= since && t < until;
+  const all = await store.list();
+  const filed = all.filter((r) => inPeriod(r.createdAt)).map((r) => item(r));
+  const fixed = [];
+  const reopened = [];
+  const stuck = [];
+  const fixedItem = (r) => item(r, { resolution: clean(r.resolution, 200) || null, prUrl: safeLink(r.prUrl) });
+  const touched = all.filter((r) => (r.updatedAt ?? r.createdAt) >= since);
+  for (const r of touched) {
+    if (!store.events) {
+      if (r.status === "fixed" && inPeriod(r.updatedAt)) fixed.push(fixedItem(r));
+      continue;
+    }
+    const events = (await store.events(r.id)).filter((e) => inPeriod(e.at));
+    if (events.some((e) => e.action === "closed" && e.detail.status === "fixed")) fixed.push(fixedItem(r));
+    if (events.some((e) => e.action === "reopened")) reopened.push(item(r));
+    const expired = events.filter((e) => e.action === "expired").pop();
+    if (expired && r.status !== "claimed") stuck.push(item(r, { claimedBy: clean(expired.actor?.name, 60) || null, leaseExpiresAt: null, returned: true }));
+  }
+  for (const r of all) {
+    if (r.status === "claimed" && r.leaseExpiresAt && r.leaseExpiresAt < until) {
+      stuck.push(item(r, { claimedBy: clean(r.claimedBy, 60) || null, leaseExpiresAt: r.leaseExpiresAt, returned: false }));
+    }
+  }
+  const open = all.filter((r) => r.status === "open" || r.status === "claimed" || r.status === "in_review");
+  const waiting = all.filter((r) => r.status === "open" && r.createdAt < until).sort((a, b) => a.createdAt < b.createdAt ? -1 : 1)[0];
+  return {
+    since,
+    until,
+    filed,
+    fixed,
+    reopened,
+    stuck,
+    stillOpen: open.length,
+    oldest: waiting ? item(waiting) : null,
+    empty: !filed.length && !fixed.length && !reopened.length && !stuck.length
+  };
+}
+function age(fromIso, toIso) {
+  const mins = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 6e4));
+  if (mins < 60) return `${mins}m`;
+  if (mins < 48 * 60) return `${Math.round(mins / 60)}h`;
+  return `${Math.round(mins / 1440)}d`;
+}
+var when = (t) => `${t.slice(0, 10)} ${t.slice(11, 16)}`;
+var period = (s) => s.since.slice(0, 10) === s.until.slice(0, 10) ? `${when(s.since)}\u2013${s.until.slice(11, 16)} UTC` : `${when(s.since)} \u2013 ${when(s.until)} UTC`;
+function sections(s) {
+  const kind = (i) => `${TYPE_LABEL[i.type]} (${i.priority})`;
+  const out = [];
+  if (s.filed.length) out.push({ title: `Filed (${s.filed.length})`, lines: s.filed.map((i) => ({ text: `${kind(i)}: ${i.text}` })) });
+  if (s.fixed.length) {
+    out.push({
+      title: `Fixed (${s.fixed.length})`,
+      lines: s.fixed.map((i) => ({ text: i.resolution ? `${i.resolution} (${i.text})` : i.text, link: i.prUrl ? { url: i.prUrl, label: "PR" } : null }))
+    });
+  }
+  if (s.reopened.length) out.push({ title: `Reopened (${s.reopened.length})`, lines: s.reopened.map((i) => ({ text: `${kind(i)}: ${i.text}` })) });
+  if (s.stuck.length) {
+    out.push({
+      title: `Stuck past the lease (${s.stuck.length})`,
+      lines: s.stuck.map((i) => ({
+        text: i.returned ? `${i.claimedBy ?? "An agent"} let the lease run out, back in the queue: ${i.text}` : `${i.claimedBy ?? "Someone"} still holds it, lease ran out ${i.leaseExpiresAt ? `${age(i.leaseExpiresAt, s.until)} ago` : ""}: ${i.text}`
+      }))
+    });
+  }
+  return out;
+}
+var footer = (s) => `Still open: ${s.stillOpen}${s.oldest ? `. Oldest waiting (${age(s.oldest.createdAt, s.until)}): ${s.oldest.text}` : ""}`;
+var subjectOf = (s, appName) => {
+  const parts = [
+    s.filed.length && `${s.filed.length} filed`,
+    s.fixed.length && `${s.fixed.length} fixed`,
+    s.reopened.length && `${s.reopened.length} reopened`,
+    s.stuck.length && `${s.stuck.length} stuck`
+  ].filter(Boolean);
+  return `${appName} digest: ${parts.length ? `${parts.join(", ")}, ` : "no new activity, "}${s.stillOpen} still open`;
+};
+var slackEsc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+var htmlEsc = (t) => t.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var mdEsc = (t) => t.replace(/([\\[\]`*_])/g, "\\$1");
+function formatDigest(s, format, opts = {}) {
+  const appName = opts.appName ?? "shipcue";
+  const link = safeLink(opts.link);
+  const subject = subjectOf(s, appName);
+  const secs = sections(s);
+  if (format === "slack") {
+    const text2 = [
+      `*${slackEsc(appName)} digest* \xB7 ${period(s)}`,
+      ...secs.flatMap((sec) => [`*${sec.title}*`, ...sec.lines.map((l) => `\u2022 ${slackEsc(l.text)}${l.link ? ` <${l.link.url}|${l.link.label}>` : ""}`)]),
+      ...s.empty ? ["No new activity."] : [],
+      slackEsc(footer(s)),
+      ...link ? [`<${link}|Open the queue>`] : []
+    ].join("\n");
+    return { format, subject, text: text2, summary: s };
+  }
+  if (format === "markdown") {
+    const text2 = [
+      `**${mdEsc(appName)} digest** \xB7 ${period(s)}`,
+      ...secs.flatMap((sec) => [`- ${sec.title}`, ...sec.lines.map((l) => `  - ${mdEsc(l.text)}${l.link ? ` ([${l.link.label}](${l.link.url}))` : ""}`)]),
+      ...s.empty ? ["- No new activity."] : [],
+      `- ${mdEsc(footer(s))}`,
+      ...link ? [`- [Open the queue](${link})`] : []
+    ].join("\n");
+    return { format, subject, text: text2, summary: s };
+  }
+  const text = [
+    `${appName} digest, ${period(s)}`,
+    "",
+    ...secs.flatMap((sec) => [sec.title, ...sec.lines.map((l) => `- ${l.text}${l.link ? ` ${l.link.url}` : ""}`), ""]),
+    ...s.empty ? ["No new activity.", ""] : [],
+    footer(s),
+    ...link ? ["", `Open the queue: ${link}`] : []
+  ].join("\n");
+  const html = [
+    `<p><strong>${htmlEsc(appName)} digest</strong> <span style="color:#71717a">${htmlEsc(period(s))}</span></p>`,
+    ...secs.map(
+      (sec) => `<p style="margin:12px 0 4px"><strong>${htmlEsc(sec.title)}</strong></p><ul style="margin:0;padding-left:20px">${sec.lines.map((l) => `<li>${htmlEsc(l.text)}${l.link && /^https:\/\//.test(l.link.url) ? ` <a href="${htmlEsc(l.link.url)}">${l.link.label}</a>` : ""}</li>`).join("")}</ul>`
+    ),
+    ...s.empty ? ["<p>No new activity.</p>"] : [],
+    `<p style="color:#52525b">${htmlEsc(footer(s))}</p>`,
+    ...link && /^https:\/\//.test(link) ? [`<p><a href="${htmlEsc(link)}">Open the queue</a></p>`] : []
+  ].join("\n");
+  return { format, subject, text, html, summary: s };
+}
+async function digest(store, opts) {
+  return formatDigest(await buildDigest(store, opts), opts.format ?? "markdown", opts);
+}
+function slackDigest(opts) {
+  return {
+    name: "slack digest",
+    format: "slack",
+    async send(m) {
+      const res = await fetch(opts.webhookUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: m.text }) });
+      if (!res.ok) throw new Error(`${res.status} from Slack`);
+    }
+  };
+}
+function emailDigest(opts) {
+  return {
+    name: "email digest",
+    format: "email",
+    async send(m) {
+      await opts.send({ to: opts.to, subject: m.subject, html: m.html ?? "", text: m.text });
+    }
+  };
+}
+
 // src/server/handler.ts
 var IMAGE_TYPES = {
   "image/png": "png",
@@ -750,12 +918,37 @@ function createShipcueHandler(opts) {
     if (!r) return fail("No such report", 404);
     return fail(r.claimedBy ? `${r.claimedBy} has it now.` : verb, 409);
   }
-  async function agentApi(req, parts) {
-    if (!opts.agentToken && !opts.agents) return fail("Not found", 404);
+  async function agentAuth(req) {
     const auth = req.headers.get("authorization") ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const identity = token && opts.agents ? await opts.agents(token, req) : null;
-    if (!identity && !(token && opts.agentToken && sameToken(token, opts.agentToken))) return fail("Unauthorized", 401);
+    if (identity) return identity;
+    return token && opts.agentToken && sameToken(token, opts.agentToken) ? "shared" : null;
+  }
+  async function digestRoute(req) {
+    const d = opts.digest;
+    if (!d || !opts.agentToken && !opts.agents) return fail("Not found", 404);
+    if (!await agentAuth(req)) return fail("Unauthorized", 401);
+    const body2 = await readJson(req);
+    const time = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v) : null;
+    const every = body2.every === "hour" || body2.every === "day" ? body2.every : d.every ?? "day";
+    if (body2.since != null && !time(body2.since) || body2.until != null && !time(body2.until)) return fail("since and until are ISO times.");
+    const until = time(body2.until) ?? /* @__PURE__ */ new Date();
+    const since = time(body2.since) ?? new Date(until.getTime() - DIGEST_PERIOD_MS[every]);
+    if (since >= until) return fail("since must be before until.");
+    const asked = ["slack", "email", "markdown"].find((f) => f === body2.format);
+    const format = d.send ? d.send.format : asked ?? "markdown";
+    const message = await digest(store, { since, until, format, appName: d.appName, link: d.link });
+    const out = { subject: message.subject, text: message.text, format, empty: message.summary.empty, summary: message.summary };
+    if (!d.send || message.summary.empty && !d.sendEmpty) return json({ ...out, sent: false });
+    await d.send.send(message);
+    return json({ ...out, sent: true });
+  }
+  async function agentApi(req, parts) {
+    if (!opts.agentToken && !opts.agents) return fail("Not found", 404);
+    const who = await agentAuth(req);
+    if (!who) return fail("Unauthorized", 401);
+    const identity = who === "shared" ? null : who;
     const [id, action] = parts;
     const body2 = req.method === "POST" ? await readJson(req) : {};
     const said = String(body2.agent ?? new URL(req.url).searchParams.get("agent") ?? "agent").slice(0, 100);
@@ -966,14 +1159,14 @@ function createShipcueHandler(opts) {
       if (opts.boardLinks === false) return false;
       return (opts.boardLinks ?? defaultLinks)(url, req);
     };
-    const item = async (r) => {
+    const item2 = async (r) => {
       const base2 = toBoardItem(r, opts.boardScreenshots ? boardShots(r) : void 0);
       const url = r.prUrl ?? findGitHubLink(r.resolution);
       return url && await mayLink(url) ? { ...base2, prUrl: url } : base2;
     };
     const result = {
-      queue: await Promise.all([...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item)),
-      changelog: (await Promise.all(fixed.map(item))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
+      queue: await Promise.all([...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item2)),
+      changelog: (await Promise.all(fixed.map(item2))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
     };
     return new Response(JSON.stringify(result), {
       headers: { "content-type": "application/json", "cache-control": "no-store" }
@@ -1063,6 +1256,14 @@ function createShipcueHandler(opts) {
         return await teamApi(req, path.slice(`${base}/team`.length).split("/").filter(Boolean));
       } catch (err) {
         console.error("shipcue: team api failed", err);
+        return fail("Something went wrong. Please try again.", 500);
+      }
+    }
+    if (req.method === "POST" && path === `${base}/digest`) {
+      try {
+        return await digestRoute(req);
+      } catch (err) {
+        console.error("shipcue: digest failed", err);
         return fail("Something went wrong. Please try again.", 500);
       }
     }
@@ -1333,6 +1534,28 @@ function insforgeAuth(baseUrl, fetchImpl = fetch) {
     }
   };
 }
+function insforgeEmail(baseUrl, apiKey, fetchImpl = fetch) {
+  if (!apiKey) return null;
+  return async (m) => {
+    const res = await fetchImpl(`${baseUrl}/api/email/send-raw`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ to: m.to, subject: m.subject, html: m.html, from: "shipcue" })
+    });
+    if (!res.ok) throw new Error(`email: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  };
+}
+var DIGEST_EVERY = ["off", "hour", "day"];
+var DIGEST_TO = ["slack", "email"];
+var DIGEST_EARLY_SHARE = 0.1;
+function digestDue(p, now = /* @__PURE__ */ new Date()) {
+  const period2 = DIGEST_PERIOD_MS[p?.digest_every];
+  if (!period2) return null;
+  const last = p.digest_sent_at ? new Date(p.digest_sent_at).getTime() : null;
+  const gap = last === null ? Infinity : now.getTime() - last;
+  if (gap < period2 * (1 - DIGEST_EARLY_SHARE)) return null;
+  return { since: new Date(gap <= 2 * period2 ? last : now.getTime() - period2), until: now };
+}
 function createCloudHandler(opts) {
   const { db, auth } = opts;
   const hosted = opts.hosted ?? null;
@@ -1344,6 +1567,7 @@ function createCloudHandler(opts) {
   const secure = opts.secureCookies !== false;
   const refreshDays = opts.refreshDays ?? 30;
   const q = async (text, params = []) => (await db.query(text, params)).rows;
+  const sendEmail = opts.sendEmail ?? null;
   const cookiePath = opts.cookiePath ?? "/api";
   const cookie = (name, value, maxAge) => `${name}=${encodeURIComponent(value)}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
   const sessionCookies = (t) => [cookie(ACCESS_COOKIE, t.accessToken, 60 * 60 * 24), cookie(REFRESH_COOKIE, t.refreshToken ?? "", 60 * 60 * 24 * refreshDays)];
@@ -1402,6 +1626,9 @@ function createCloudHandler(opts) {
     notifyEvents: p.notify_events ?? ["report.filed", "report.closed"],
     hostedAgent: !!p.hosted_agent,
     hostedAutoTriage: !!p.hosted_auto_triage,
+    digestEvery: p.digest_every ?? "off",
+    digestTo: p.digest_to ?? "slack",
+    digestSentAt: p.digest_sent_at ? new Date(p.digest_sent_at).toISOString() : null,
     createdAt: new Date(p.created_at).toISOString()
   });
   async function acceptInvites(user) {
@@ -1550,7 +1777,9 @@ function createCloudHandler(opts) {
           lastSeenAt: a.last_seen_at ? new Date(a.last_seen_at).toISOString() : null
         })),
         // Whether this server can run the hosted agent, and its daily cap per project.
-        hosted: { available: !!hosted, name: HOSTED_NAME, dailyLimit: hosted?.dailyLimit ?? null }
+        hosted: { available: !!hosted, name: HOSTED_NAME, dailyLimit: hosted?.dailyLimit ?? null },
+        // Whether this server can send digests, and by email.
+        digest: { available: !!opts.cronSecret, email: !!sendEmail }
       });
     }
     if (req.method !== "POST") return fail2("Not found", 404);
@@ -1629,6 +1858,15 @@ function createCloudHandler(opts) {
         set("hosted_agent", hostedOn);
       }
       if (b.hostedAutoTriage !== void 0) set("hosted_auto_triage", b.hostedAutoTriage === true);
+      if (b.digestEvery !== void 0) {
+        if (!DIGEST_EVERY.includes(b.digestEvery)) return fail2("A digest goes out off, hourly or daily.");
+        set("digest_every", b.digestEvery);
+      }
+      if (b.digestTo !== void 0) {
+        if (!DIGEST_TO.includes(b.digestTo)) return fail2("A digest goes to Slack or email.");
+        if (b.digestTo === "email" && !sendEmail) return fail2("Email digests are not available on this server.", 409);
+        set("digest_to", b.digestTo);
+      }
       if (!sets.length) return fail2("Nothing to change.");
       const [row] = await q(`UPDATE cloud_projects SET ${sets.join(", ")}, updated_at = now() WHERE id = $1 RETURNING *`, params);
       if (hostedOn === true && !(await q(`SELECT 1 FROM cloud_agents WHERE project_id = $1 AND hosted AND revoked_at IS NULL`, [id])).length) {
@@ -1798,12 +2036,55 @@ function createCloudHandler(opts) {
     });
     return withCookies(await handler2(req), s?.set);
   }
+  async function digestSender(p) {
+    if (p.digest_to === "email") {
+      if (!sendEmail) return null;
+      const owner = (await q(`SELECT email FROM cloud_members WHERE project_id = $1 AND role = 'owner' AND NOT is_deleted ORDER BY created_at LIMIT 1`, [p.id]))[0];
+      return owner ? emailDigest({ to: owner.email, send: sendEmail }) : null;
+    }
+    return p.slack_webhook_url ? slackDigest({ webhookUrl: p.slack_webhook_url }) : null;
+  }
+  async function runDigests(req) {
+    if (!opts.cronSecret) return fail2("Not found", 404);
+    const given = Buffer.from(req.headers.get("authorization") ?? "");
+    const expected = Buffer.from(`Bearer ${opts.cronSecret}`);
+    if (given.length !== expected.length || !timingSafeEqual2(given, expected)) return fail2("Unauthorized", 401);
+    const now = /* @__PURE__ */ new Date();
+    const link = new URL(appPath, req.url).toString();
+    const results = [];
+    for (const p of await q(`SELECT * FROM cloud_projects WHERE digest_every <> 'off' AND NOT is_deleted ORDER BY digest_sent_at NULLS FIRST`)) {
+      const due = digestDue(p, now);
+      if (!due) continue;
+      const taken = await q(`UPDATE cloud_projects SET digest_sent_at = $2 WHERE id = $1 AND digest_sent_at IS NOT DISTINCT FROM $3::timestamptz RETURNING id`, [p.id, due.until, p.digest_sent_at ?? null]);
+      if (!taken.length) continue;
+      try {
+        const sender = await digestSender(p);
+        if (!sender) {
+          results.push({ project: p.id, sent: false, reason: "no destination" });
+          continue;
+        }
+        const message = await digest(postgresStore(db, "shipcue_reports", { project: p.id }), { ...due, format: sender.format, appName: p.name, link });
+        if (message.summary.empty) {
+          results.push({ project: p.id, sent: false, reason: "no activity" });
+          continue;
+        }
+        await sender.send(message);
+        results.push({ project: p.id, sent: true });
+      } catch (err) {
+        console.error("shipcue cloud: digest failed", p.id, err instanceof Error ? err.message : err);
+        await q(`UPDATE cloud_projects SET digest_sent_at = $3::timestamptz WHERE id = $1 AND digest_sent_at = $2`, [p.id, due.until, p.digest_sent_at ?? null]);
+        results.push({ project: p.id, sent: false, reason: "failed" });
+      }
+    }
+    return json2({ sent: results.filter((r) => r.sent).length, results });
+  }
   async function route(req) {
     const path = new URL(req.url).pathname;
     if (!path.startsWith(`${base}/`)) return fail2("Not found", 404);
     const parts = path.slice(base.length + 1).split("/").filter(Boolean);
     const [head, ...rest] = parts;
     if (head === "p" && rest[0]) return projectQueue(req, rest[0]);
+    if (head === "digest" && !rest.length && (req.method === "GET" || req.method === "POST")) return runDigests(req);
     if (!jsonWrite(req)) return fail2("Send JSON.", 415);
     if (head === "auth") return authRoutes(req, rest[0], rest[1]);
     const s = await session(req);
@@ -1834,7 +2115,11 @@ var handler = createCloudHandler({
   // The hosted agent (shipcue report 3d2dded6): OPENAI_API_KEY, SHIPCUE_HOSTED_MODEL, SHIPCUE_HOSTED_DAILY_LIMIT.
   hosted: hostedFromEnv(),
   // Its OpenAI call runs after the response.
-  background: (work) => waitUntil(work)
+  background: (work) => waitUntil(work),
+  // The activity digest (shipcue report 5f4d339b): Vercel Cron (vercel.json) calls /api/cloud/digest with CRON_SECRET,
+  // and email digests go out with InsForge emails, like the fix emails in api.mjs.
+  cronSecret: process.env.CRON_SECRET,
+  sendEmail: insforgeEmail(process.env.SHIPCUE_CLOUD_AUTH_URL, process.env.SHIPCUE_EMAIL_API_KEY)
 });
 function restore(req) {
   const url = new URL(req.url);

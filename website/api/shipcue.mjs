@@ -7,6 +7,7 @@ var PRIORITIES = ["low", "medium", "high", "blocking"];
 function toClaimant(who) {
   return typeof who === "string" ? { kind: "agent", id: who, name: who } : who;
 }
+var TYPE_LABEL = { bug: "Bug", feature: "Feature request", task: "Agent task" };
 var TITLE_PREFIX = { bug: "Bug", feature: "Feature", task: "Task" };
 var PRIORITY_LABEL = {
   low: "Low",
@@ -523,6 +524,154 @@ function publicGitHubLinks(opts = {}) {
   };
 }
 
+// src/server/digest.ts
+var DIGEST_PERIOD_MS = { hour: 60 * 60 * 1e3, day: 24 * 60 * 60 * 1e3 };
+var iso2 = (d) => (typeof d === "string" ? new Date(d) : d).toISOString();
+var EMAIL_LIKE = /[^\s@<>"()[\]]+@[^\s@<>"()[\]]+\.[a-z]{2,}/gi;
+var clean = (t, max = 140) => {
+  const line = (t ?? "").trim().split("\n")[0].replace(EMAIL_LIKE, "[email]").trim();
+  return line.length > max ? `${line.slice(0, max - 3)}...` : line;
+};
+var safeLink = (u) => u && /^https?:\/\/[^\s<>|]+$/i.test(u) ? u : null;
+var item = (r, extra = {}) => ({
+  id: r.id,
+  type: r.type,
+  priority: r.priority,
+  text: clean(r.description),
+  createdAt: r.createdAt,
+  ...extra
+});
+async function buildDigest(store, opts) {
+  const since = iso2(opts.since);
+  const until = iso2(opts.until ?? /* @__PURE__ */ new Date());
+  const inPeriod = (t) => !!t && t >= since && t < until;
+  const all = await store.list();
+  const filed = all.filter((r) => inPeriod(r.createdAt)).map((r) => item(r));
+  const fixed = [];
+  const reopened = [];
+  const stuck = [];
+  const fixedItem = (r) => item(r, { resolution: clean(r.resolution, 200) || null, prUrl: safeLink(r.prUrl) });
+  const touched = all.filter((r) => (r.updatedAt ?? r.createdAt) >= since);
+  for (const r of touched) {
+    if (!store.events) {
+      if (r.status === "fixed" && inPeriod(r.updatedAt)) fixed.push(fixedItem(r));
+      continue;
+    }
+    const events = (await store.events(r.id)).filter((e) => inPeriod(e.at));
+    if (events.some((e) => e.action === "closed" && e.detail.status === "fixed")) fixed.push(fixedItem(r));
+    if (events.some((e) => e.action === "reopened")) reopened.push(item(r));
+    const expired = events.filter((e) => e.action === "expired").pop();
+    if (expired && r.status !== "claimed") stuck.push(item(r, { claimedBy: clean(expired.actor?.name, 60) || null, leaseExpiresAt: null, returned: true }));
+  }
+  for (const r of all) {
+    if (r.status === "claimed" && r.leaseExpiresAt && r.leaseExpiresAt < until) {
+      stuck.push(item(r, { claimedBy: clean(r.claimedBy, 60) || null, leaseExpiresAt: r.leaseExpiresAt, returned: false }));
+    }
+  }
+  const open = all.filter((r) => r.status === "open" || r.status === "claimed" || r.status === "in_review");
+  const waiting = all.filter((r) => r.status === "open" && r.createdAt < until).sort((a, b) => a.createdAt < b.createdAt ? -1 : 1)[0];
+  return {
+    since,
+    until,
+    filed,
+    fixed,
+    reopened,
+    stuck,
+    stillOpen: open.length,
+    oldest: waiting ? item(waiting) : null,
+    empty: !filed.length && !fixed.length && !reopened.length && !stuck.length
+  };
+}
+function age(fromIso, toIso) {
+  const mins = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 6e4));
+  if (mins < 60) return `${mins}m`;
+  if (mins < 48 * 60) return `${Math.round(mins / 60)}h`;
+  return `${Math.round(mins / 1440)}d`;
+}
+var when = (t) => `${t.slice(0, 10)} ${t.slice(11, 16)}`;
+var period = (s) => s.since.slice(0, 10) === s.until.slice(0, 10) ? `${when(s.since)}\u2013${s.until.slice(11, 16)} UTC` : `${when(s.since)} \u2013 ${when(s.until)} UTC`;
+function sections(s) {
+  const kind = (i) => `${TYPE_LABEL[i.type]} (${i.priority})`;
+  const out = [];
+  if (s.filed.length) out.push({ title: `Filed (${s.filed.length})`, lines: s.filed.map((i) => ({ text: `${kind(i)}: ${i.text}` })) });
+  if (s.fixed.length) {
+    out.push({
+      title: `Fixed (${s.fixed.length})`,
+      lines: s.fixed.map((i) => ({ text: i.resolution ? `${i.resolution} (${i.text})` : i.text, link: i.prUrl ? { url: i.prUrl, label: "PR" } : null }))
+    });
+  }
+  if (s.reopened.length) out.push({ title: `Reopened (${s.reopened.length})`, lines: s.reopened.map((i) => ({ text: `${kind(i)}: ${i.text}` })) });
+  if (s.stuck.length) {
+    out.push({
+      title: `Stuck past the lease (${s.stuck.length})`,
+      lines: s.stuck.map((i) => ({
+        text: i.returned ? `${i.claimedBy ?? "An agent"} let the lease run out, back in the queue: ${i.text}` : `${i.claimedBy ?? "Someone"} still holds it, lease ran out ${i.leaseExpiresAt ? `${age(i.leaseExpiresAt, s.until)} ago` : ""}: ${i.text}`
+      }))
+    });
+  }
+  return out;
+}
+var footer = (s) => `Still open: ${s.stillOpen}${s.oldest ? `. Oldest waiting (${age(s.oldest.createdAt, s.until)}): ${s.oldest.text}` : ""}`;
+var subjectOf = (s, appName) => {
+  const parts = [
+    s.filed.length && `${s.filed.length} filed`,
+    s.fixed.length && `${s.fixed.length} fixed`,
+    s.reopened.length && `${s.reopened.length} reopened`,
+    s.stuck.length && `${s.stuck.length} stuck`
+  ].filter(Boolean);
+  return `${appName} digest: ${parts.length ? `${parts.join(", ")}, ` : "no new activity, "}${s.stillOpen} still open`;
+};
+var slackEsc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+var htmlEsc = (t) => t.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var mdEsc = (t) => t.replace(/([\\[\]`*_])/g, "\\$1");
+function formatDigest(s, format, opts = {}) {
+  const appName = opts.appName ?? "shipcue";
+  const link = safeLink(opts.link);
+  const subject = subjectOf(s, appName);
+  const secs = sections(s);
+  if (format === "slack") {
+    const text2 = [
+      `*${slackEsc(appName)} digest* \xB7 ${period(s)}`,
+      ...secs.flatMap((sec) => [`*${sec.title}*`, ...sec.lines.map((l) => `\u2022 ${slackEsc(l.text)}${l.link ? ` <${l.link.url}|${l.link.label}>` : ""}`)]),
+      ...s.empty ? ["No new activity."] : [],
+      slackEsc(footer(s)),
+      ...link ? [`<${link}|Open the queue>`] : []
+    ].join("\n");
+    return { format, subject, text: text2, summary: s };
+  }
+  if (format === "markdown") {
+    const text2 = [
+      `**${mdEsc(appName)} digest** \xB7 ${period(s)}`,
+      ...secs.flatMap((sec) => [`- ${sec.title}`, ...sec.lines.map((l) => `  - ${mdEsc(l.text)}${l.link ? ` ([${l.link.label}](${l.link.url}))` : ""}`)]),
+      ...s.empty ? ["- No new activity."] : [],
+      `- ${mdEsc(footer(s))}`,
+      ...link ? [`- [Open the queue](${link})`] : []
+    ].join("\n");
+    return { format, subject, text: text2, summary: s };
+  }
+  const text = [
+    `${appName} digest, ${period(s)}`,
+    "",
+    ...secs.flatMap((sec) => [sec.title, ...sec.lines.map((l) => `- ${l.text}${l.link ? ` ${l.link.url}` : ""}`), ""]),
+    ...s.empty ? ["No new activity.", ""] : [],
+    footer(s),
+    ...link ? ["", `Open the queue: ${link}`] : []
+  ].join("\n");
+  const html = [
+    `<p><strong>${htmlEsc(appName)} digest</strong> <span style="color:#71717a">${htmlEsc(period(s))}</span></p>`,
+    ...secs.map(
+      (sec) => `<p style="margin:12px 0 4px"><strong>${htmlEsc(sec.title)}</strong></p><ul style="margin:0;padding-left:20px">${sec.lines.map((l) => `<li>${htmlEsc(l.text)}${l.link && /^https:\/\//.test(l.link.url) ? ` <a href="${htmlEsc(l.link.url)}">${l.link.label}</a>` : ""}</li>`).join("")}</ul>`
+    ),
+    ...s.empty ? ["<p>No new activity.</p>"] : [],
+    `<p style="color:#52525b">${htmlEsc(footer(s))}</p>`,
+    ...link && /^https:\/\//.test(link) ? [`<p><a href="${htmlEsc(link)}">Open the queue</a></p>`] : []
+  ].join("\n");
+  return { format, subject, text, html, summary: s };
+}
+async function digest(store, opts) {
+  return formatDigest(await buildDigest(store, opts), opts.format ?? "markdown", opts);
+}
+
 // src/server/handler.ts
 var IMAGE_TYPES = {
   "image/png": "png",
@@ -704,12 +853,37 @@ function createShipcueHandler(opts) {
     if (!r) return fail("No such report", 404);
     return fail(r.claimedBy ? `${r.claimedBy} has it now.` : verb, 409);
   }
-  async function agentApi(req, parts) {
-    if (!opts.agentToken && !opts.agents) return fail("Not found", 404);
+  async function agentAuth(req) {
     const auth2 = req.headers.get("authorization") ?? "";
     const token = auth2.startsWith("Bearer ") ? auth2.slice(7) : "";
     const identity = token && opts.agents ? await opts.agents(token, req) : null;
-    if (!identity && !(token && opts.agentToken && sameToken(token, opts.agentToken))) return fail("Unauthorized", 401);
+    if (identity) return identity;
+    return token && opts.agentToken && sameToken(token, opts.agentToken) ? "shared" : null;
+  }
+  async function digestRoute(req) {
+    const d = opts.digest;
+    if (!d || !opts.agentToken && !opts.agents) return fail("Not found", 404);
+    if (!await agentAuth(req)) return fail("Unauthorized", 401);
+    const body = await readJson(req);
+    const time = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v) : null;
+    const every = body.every === "hour" || body.every === "day" ? body.every : d.every ?? "day";
+    if (body.since != null && !time(body.since) || body.until != null && !time(body.until)) return fail("since and until are ISO times.");
+    const until = time(body.until) ?? /* @__PURE__ */ new Date();
+    const since = time(body.since) ?? new Date(until.getTime() - DIGEST_PERIOD_MS[every]);
+    if (since >= until) return fail("since must be before until.");
+    const asked = ["slack", "email", "markdown"].find((f) => f === body.format);
+    const format = d.send ? d.send.format : asked ?? "markdown";
+    const message = await digest(store, { since, until, format, appName: d.appName, link: d.link });
+    const out = { subject: message.subject, text: message.text, format, empty: message.summary.empty, summary: message.summary };
+    if (!d.send || message.summary.empty && !d.sendEmpty) return json({ ...out, sent: false });
+    await d.send.send(message);
+    return json({ ...out, sent: true });
+  }
+  async function agentApi(req, parts) {
+    if (!opts.agentToken && !opts.agents) return fail("Not found", 404);
+    const who = await agentAuth(req);
+    if (!who) return fail("Unauthorized", 401);
+    const identity = who === "shared" ? null : who;
     const [id, action] = parts;
     const body = req.method === "POST" ? await readJson(req) : {};
     const said = String(body.agent ?? new URL(req.url).searchParams.get("agent") ?? "agent").slice(0, 100);
@@ -920,14 +1094,14 @@ function createShipcueHandler(opts) {
       if (opts.boardLinks === false) return false;
       return (opts.boardLinks ?? defaultLinks)(url, req);
     };
-    const item = async (r) => {
+    const item2 = async (r) => {
       const base2 = toBoardItem(r, opts.boardScreenshots ? boardShots(r) : void 0);
       const url = r.prUrl ?? findGitHubLink(r.resolution);
       return url && await mayLink(url) ? { ...base2, prUrl: url } : base2;
     };
     const result = {
-      queue: await Promise.all([...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item)),
-      changelog: (await Promise.all(fixed.map(item))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
+      queue: await Promise.all([...inReview, ...claimed, ...open].slice(0, BOARD_LIMIT).map(item2)),
+      changelog: (await Promise.all(fixed.map(item2))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, BOARD_LIMIT)
     };
     return new Response(JSON.stringify(result), {
       headers: { "content-type": "application/json", "cache-control": "no-store" }
@@ -1017,6 +1191,14 @@ function createShipcueHandler(opts) {
         return await teamApi(req, path.slice(`${base}/team`.length).split("/").filter(Boolean));
       } catch (err) {
         console.error("shipcue: team api failed", err);
+        return fail("Something went wrong. Please try again.", 500);
+      }
+    }
+    if (req.method === "POST" && path === `${base}/digest`) {
+      try {
+        return await digestRoute(req);
+      } catch (err) {
+        console.error("shipcue: digest failed", err);
         return fail("Something went wrong. Please try again.", 500);
       }
     }
@@ -1134,26 +1316,29 @@ async function cloudUserFrom(req, auth2) {
   }
   return null;
 }
+function insforgeEmail(baseUrl, apiKey, fetchImpl = fetch) {
+  if (!apiKey) return null;
+  return async (m) => {
+    const res = await fetchImpl(`${baseUrl}/api/email/send-raw`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ to: m.to, subject: m.subject, html: m.html, from: "shipcue" })
+    });
+    if (!res.ok) throw new Error(`email: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  };
+}
 
 // website/_src/api.mjs
 var auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 var pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
-var EMAIL_KEY = process.env.SHIPCUE_EMAIL_API_KEY;
-var sendEmail = async (m) => {
-  const res = await fetch(`${process.env.SHIPCUE_CLOUD_AUTH_URL}/api/email/send-raw`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${EMAIL_KEY}` },
-    body: JSON.stringify({ to: m.to, subject: m.subject, html: m.html, from: "shipcue" })
-  });
-  if (!res.ok) throw new Error(`email: ${res.status} ${(await res.text()).slice(0, 200)}`);
-};
+var sendEmail = insforgeEmail(process.env.SHIPCUE_CLOUD_AUTH_URL, process.env.SHIPCUE_EMAIL_API_KEY);
 var handler = createShipcueHandler({
   // Only shipcue's own reports: the same table holds every Cloud project's, which must never show here.
   store: postgresStore(pool, "shipcue_reports", { project: null }),
   // Any file can come along with a report here, not just screenshots (report e8b2dedd).
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: "/api/shipcue",
-  broadcasters: EMAIL_KEY ? [emailReporter({ appName: "shipcue", link: "https://shipcue.ibuildathing.com/cuelog/", send: sendEmail })] : [],
+  broadcasters: sendEmail ? [emailReporter({ appName: "shipcue", link: "https://shipcue.ibuildathing.com/cuelog/", send: sendEmail })] : [],
   getReporter: async (req) => (await cloudUserFrom(req, auth))?.email ?? null,
   // Three reports without an account, then sign in (report dce33fd0); signed in, they can still send anonymously.
   anonymousLimit: Number(process.env.SHIPCUE_ANONYMOUS_LIMIT ?? 3),

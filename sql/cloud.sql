@@ -98,6 +98,13 @@ ALTER TABLE cloud_agents ADD CONSTRAINT cloud_agents_token_or_hosted CHECK (host
 -- The daily cap counts the hosted agent's notes.
 CREATE INDEX IF NOT EXISTS shipcue_report_events_notes ON shipcue_report_events (project_id, actor_id, at) WHERE action = 'note';
 
+-- The activity digest (shipcue report 5f4d339b): one summary per hour or day, to the project's Slack
+-- channel or the first owner's email, sent by the Cloud's cron (/api/cloud/digest). digest_sent_at is
+-- the end of the last period sent, so the next digest starts there.
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS digest_every text NOT NULL DEFAULT 'off' CHECK (digest_every IN ('off', 'hour', 'day'));
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS digest_to text NOT NULL DEFAULT 'slack' CHECK (digest_to IN ('slack', 'email'));
+ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS digest_sent_at timestamptz;
+
 -- Server only: row-level security on with no policies, and no grants to browser roles.
 ALTER TABLE cloud_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_members ENABLE ROW LEVEL SECURITY;

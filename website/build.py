@@ -292,6 +292,17 @@ createShipcueHandler({ ...,
 <pre><code>SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=... \
   npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"</code></pre>
 <p>Events: <code>filed</code>, <code>assigned</code> (queued for this agent), <code>claimed</code>, <code>released</code>, <code>closed</code>, <code>video</code>. shipcue Cloud writes the launchd or systemd file that keeps it running (<a href="/cloud/">Run a listener</a>).</p>
+<h3>One digest instead of a message per event</h3>
+<p>Turn on <code>digest</code> and a cron gets one summary per hour or day: what was filed, fixed (with the fix line and PR), reopened, claims stuck past their lease, how many are still open and the oldest waiting. Never who filed it, the page or the app snapshot.</p>
+<pre><code>import { slackDigest, emailDigest } from 'shipcue/server';
+
+createShipcueHandler({ ..., agentToken: process.env.SHIPCUE_TOKEN,
+  digest: { every: 'day', send: slackDigest({ webhookUrl: process.env.SLACK_WEBHOOK }) },
+})
+
+# Vercel Cron, GitHub Actions or launchd, once a day:
+curl -X POST https://app.example.com/api/shipcue/digest -H "Authorization: Bearer $SHIPCUE_TOKEN"</code></pre>
+<p>Without <code>send</code> it returns the digest as Markdown, ready for a daily note or an outliner log. Quiet periods send nothing (<code>sendEmpty</code> to send anyway); <code>digest(store, { since, until, format })</code> builds one anywhere.</p>
 
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
@@ -303,6 +314,7 @@ POST /reports/:id/claim       take a specific report (409 if someone has it)
 POST /reports/:id/release     give it back to the queue
 POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }
 POST /reports/:id/note        { "text": "..." }: a note on the report's history
+POST /digest                  { since?, until?, every? }: the last period's digest (with the digest option)
 GET  /board                   no token: the queue and the changelog (only with board on)
 GET  /board/version           no token: changes whenever a report does (for a live board)
 GET  /capabilities            no token: what the handler takes (video, files, limits)</code></pre>
@@ -347,6 +359,8 @@ CLOUD = """
 <p>Copy it as one command, as a macOS launchd agent (it keeps running, starts at login and logs to <code>~/Library/Logs/shipcue-listen-&lt;project&gt;.log</code>) or as a Linux systemd <code>--user</code> unit. The listener checks the queue every 15 seconds and needs no open port. For instant delivery, point the project's webhook (Forward reports) at that machine instead, say a Tailscale Funnel address.</p>
 <h2>Hosted agent</h2>
 <p>Every project can turn on <strong>shipcue-agent</strong>, an agent that runs on shipcue, so there is nothing to install. Assign a report to it in the CueLog (or switch on <em>Triage every new report</em>) and it reads the report with OpenAI and leaves a note: a one-paragraph summary, the likely area, a suggested priority with a reason, steps to reproduce or what is missing, and a short plan for a coding agent. Then it puts the report back in the queue for a person or a coding agent to fix. It never changes code, never sees screenshots or who filed the report, and treats the report's words as data, not instructions. Each project gets a daily allowance of triages.</p>
+<h2>Digest</h2>
+<p>Rather have one message than one per event? Under <strong>Digest</strong>, pick hourly or daily and send it to the project's Slack channel or the owner's email: what was filed, fixed (with the fix line and PR), reopened, claims stuck past their lease, how many are still open and the oldest waiting. Quiet periods send nothing, and it never includes who filed a report or the app snapshot.</p>
 <h2>What stays the same</h2>
 <p>The button, the API and the MCP tools are the same as the open source package, and the CueLog table is in it too (<code>CueLogTable</code> with the handler's <code>team</code> option). You can move between hosted and self-hosted at any time.</p>
 <h2>Later</h2>

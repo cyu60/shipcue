@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 // @ts-expect-error -- plain JS module for the site's function
-import { createCloudHandler, insforgeAuth } from '../website/_src/cloud.mjs';
+import { createCloudHandler, digestDue, insforgeAuth, insforgeEmail } from '../website/_src/cloud.mjs';
 
 const schema = readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8');
 const cloud = readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8');
@@ -485,5 +485,152 @@ describe('shipcue Cloud: the hosted agent (shipcue report 3d2dded6)', () => {
     expect(notes.rows[2]!.text).toMatch(/today's limit of 2/);
     const reports = await db.query<{ status: string; claimant_id: string | null }>('SELECT status, claimant_id FROM shipcue_reports');
     expect(reports.rows.every((r) => r.status === 'open' && r.claimant_id === null)).toBe(true);
+  });
+});
+
+describe('shipcue Cloud: the activity digest (shipcue report 5f4d339b)', () => {
+  const H = 60 * 60 * 1000;
+  let emails: { to: string; subject: string; html: string; text: string }[];
+  let slackPosts: { url: string; body: string }[];
+  let realFetch: typeof fetch;
+  beforeEach(() => {
+    emails = [];
+    slackPosts = [];
+    realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      slackPosts.push({ url: String(url), body: String(init?.body) });
+      return new Response('ok');
+    }) as typeof fetch;
+    handle = createCloudHandler({
+      db: { query: (t: string, p?: unknown[]) => db.query(t, p) },
+      auth,
+      beta: ['ada@example.com'],
+      secureCookies: false,
+      cronSecret: 'cron-secret',
+      sendEmail: async (m: (typeof emails)[number]) => void emails.push(m),
+    });
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+  const cron = (secret = 'cron-secret') => handle(new Request(`${BASE}/digest`, { headers: { authorization: `Bearer ${secret}` } }));
+  async function project(name = 'Acme') {
+    await signUp('ada@example.com');
+    const { data } = await call('POST', '/projects', { as: 'ada@example.com', body: { name } });
+    return data.project as { id: string; publicKey: string };
+  }
+  const file = (key: string, description: string) => {
+    const form = new FormData();
+    for (const [k, v] of Object.entries({ type: 'bug', priority: 'high', area: 'other', description, diagnostics: '{"secret":"diag-xyz"}' })) form.set(k, v);
+    return handle(new Request(`${BASE}/p/${key}/reports`, { method: 'POST', body: form, headers: { 'x-shipcue-user': 'reporter@example.com' } }));
+  };
+
+  it('is due once a period has (nearly) passed, from where the last one ended', () => {
+    const now = new Date('2026-10-03T12:00:00Z');
+    expect(digestDue({ digest_every: 'off' }, now)).toBeNull();
+    expect(digestDue({ digest_every: 'hour', digest_sent_at: null }, now)).toEqual({ since: new Date('2026-10-03T11:00:00Z'), until: now });
+    expect(digestDue({ digest_every: 'hour', digest_sent_at: new Date(now.getTime() - 30 * 60 * 1000) }, now)).toBeNull();
+    // A cron a few minutes early still counts; the period starts where the last one ended.
+    const last = new Date(now.getTime() - 57 * 60 * 1000);
+    expect(digestDue({ digest_every: 'hour', digest_sent_at: last }, now)).toEqual({ since: last, until: now });
+    // Vercel's daily cron wanders within its hour.
+    expect(digestDue({ digest_every: 'day', digest_sent_at: new Date(now.getTime() - 23 * H) }, now)).not.toBeNull();
+    expect(digestDue({ digest_every: 'day', digest_sent_at: new Date(now.getTime() - 20 * H) }, now)).toBeNull();
+    // After a long gap, only the last period.
+    expect(digestDue({ digest_every: 'day', digest_sent_at: new Date('2026-09-01T00:00:00Z') }, now)).toEqual({ since: new Date('2026-10-02T12:00:00Z'), until: now });
+  });
+
+  it('owners pick how often and where; email only where the server can send it', async () => {
+    const p = await project();
+    await call('POST', `/projects/${p.id}/invites`, { as: 'ada@example.com', body: { email: 'bob@example.com', role: 'member' } });
+    await signUp('bob@example.com');
+    await call('GET', '/me', { as: 'bob@example.com' });
+    expect((await call('POST', `/projects/${p.id}/settings`, { as: 'bob@example.com', body: { digestEvery: 'day' } })).res.status).toBe(403);
+    expect((await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { digestEvery: 'weekly' } })).res.status).toBe(400);
+    expect((await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { digestTo: 'sms' } })).res.status).toBe(400);
+    const { data } = await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { digestEvery: 'day', digestTo: 'email' } });
+    expect(data.project).toMatchObject({ digestEvery: 'day', digestTo: 'email', digestSentAt: null });
+    const { data: detail } = await call('GET', `/projects/${p.id}`, { as: 'ada@example.com' });
+    expect(detail.digest).toEqual({ available: true, email: true });
+
+    handle = createCloudHandler({ db: { query: (t: string, q?: unknown[]) => db.query(t, q) }, auth, beta: ['ada@example.com'], secureCookies: false });
+    expect((await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { digestTo: 'email' } })).res.status).toBe(409);
+    expect((await call('GET', `/projects/${p.id}`, { as: 'ada@example.com' })).data.digest).toEqual({ available: false, email: false });
+    // No cron secret: no cron route.
+    expect((await cron()).status).toBe(404);
+  });
+
+  it('the cron needs its secret', async () => {
+    expect((await cron('wrong')).status).toBe(401);
+    expect((await handle(new Request(`${BASE}/digest`))).status).toBe(401);
+    expect((await cron()).status).toBe(200);
+  });
+
+  it('sends due digests to Slack or the owner, once per period, without reporters or diagnostics', async () => {
+    const a = await project('Acme');
+    const { data: b } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Beta' } });
+    const off = (await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Quiet' } })).data.project;
+    await call('POST', `/projects/${a.id}/settings`, { as: 'ada@example.com', body: { digestEvery: 'hour', slackWebhookUrl: 'https://hooks.slack.com/services/T0/B0/xyz', notifyEvents: [] } });
+    await call('POST', `/projects/${b.project.id}/settings`, { as: 'ada@example.com', body: { digestEvery: 'day', digestTo: 'email' } });
+    await file(a.publicKey, 'Checkout button is grey');
+    await file(b.project.publicKey, 'Beta search is slow');
+    await file(off.publicKey, 'Never digested');
+    slackPosts.length = 0;
+
+    const { sent, results } = await (await cron()).json();
+    expect(sent).toBe(2);
+    expect(results).toHaveLength(2);
+    expect(slackPosts).toHaveLength(1);
+    const slackText = JSON.parse(slackPosts[0]!.body).text as string;
+    expect(slackText).toContain('*Acme digest*');
+    expect(slackText).toContain('Checkout button is grey');
+    expect(slackText).not.toContain('Beta search');
+    expect(emails).toHaveLength(1);
+    expect(emails[0]).toMatchObject({ to: 'ada@example.com', subject: 'Beta digest: 1 filed, 1 still open' });
+    expect(emails[0]!.text).toContain('Beta search is slow');
+    expect(emails[0]!.text).not.toContain('Checkout');
+    const everything = slackText + JSON.stringify(emails);
+    expect(everything).not.toContain('reporter@example.com');
+    expect(everything).not.toContain('diag-xyz');
+    expect(everything).not.toContain('Never digested');
+
+    // Recorded: the next run sends nothing until a period has passed.
+    const rows = (await db.query<{ digest_sent_at: Date | null }>(`SELECT digest_sent_at FROM cloud_projects WHERE id = $1`, [a.id])).rows;
+    expect(rows[0]!.digest_sent_at).not.toBeNull();
+    expect((await (await cron()).json()).sent).toBe(0);
+    expect(slackPosts).toHaveLength(1);
+    expect(emails).toHaveLength(1);
+  });
+
+  it('skips a quiet period and one with nowhere to go, and retries a failed send', async () => {
+    const p = await project();
+    await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { digestEvery: 'hour' } });
+    // Slack chosen but not connected.
+    expect((await (await cron()).json()).results).toEqual([{ project: p.id, sent: false, reason: 'no destination' }]);
+    await db.query(`UPDATE cloud_projects SET digest_sent_at = NULL, slack_webhook_url = 'https://hooks.slack.com/services/T0/B0/xyz' WHERE id = $1`, [p.id]);
+    expect((await (await cron()).json()).results).toEqual([{ project: p.id, sent: false, reason: 'no activity' }]);
+
+    await db.query(`UPDATE cloud_projects SET digest_sent_at = NULL WHERE id = $1`, [p.id]);
+    await file(p.publicKey, 'Something broke');
+    globalThis.fetch = (async () => new Response('nope', { status: 500 })) as typeof fetch;
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect((await (await cron()).json()).results).toEqual([{ project: p.id, sent: false, reason: 'failed' }]);
+    errors.mockRestore();
+    // Given back, so the next run tries again.
+    expect((await db.query<{ digest_sent_at: Date | null }>(`SELECT digest_sent_at FROM cloud_projects WHERE id = $1`, [p.id])).rows[0]!.digest_sent_at).toBeNull();
+    globalThis.fetch = (async () => new Response('ok')) as typeof fetch;
+    expect((await (await cron()).json()).sent).toBe(1);
+  });
+
+  it('insforgeEmail sends through InsForge, and is off without a key', async () => {
+    expect(insforgeEmail('https://auth.example.com', undefined)).toBeNull();
+    const calls: { url: string; init: RequestInit }[] = [];
+    const send = insforgeEmail('https://auth.example.com', 'key', async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response('{}');
+    });
+    await send({ to: 'a@example.com', subject: 's', html: '<p>h</p>', text: 'h' });
+    expect(calls[0]!.url).toBe('https://auth.example.com/api/email/send-raw');
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ to: 'a@example.com', subject: 's', html: '<p>h</p>', from: 'shipcue' });
   });
 });
