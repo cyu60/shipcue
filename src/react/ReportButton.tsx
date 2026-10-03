@@ -122,6 +122,16 @@ export interface ReportButtonProps {
    * Unset (the default): always shown.
    */
   showParam?: string;
+  /**
+   * Your own small controls in the Bug and Feature request form, e.g. a "Pin it" checkbox. Drawn
+   * under the text box, in the panel's quiet style; keep it to a line.
+   */
+  formExtras?: React.ReactNode;
+  /**
+   * Extra fields sent with each report, read the moment it is sent, e.g. () => ({ pinned: '1' }).
+   * They never replace shipcue's own fields (description, type, context, ...).
+   */
+  fields?: () => Record<string, string>;
 }
 
 /** Whether ?<param>=true turned shipcue on for this tab (remembered in sessionStorage). */
@@ -243,6 +253,8 @@ function ReportPanel({
   launcherIcon,
   icon = 'hat',
   movable = true,
+  formExtras,
+  fields,
 }: ReportButtonProps) {
   // The app's words over shipcue's (the older pastReportsLabel/seeReportsLabel props still work).
   const t = useMemo(
@@ -680,6 +692,7 @@ function ReportPanel({
       form.set('userAgent', navigator.userAgent);
       form.set('diagnostics', snapshot(diagnostics, captureErrors));
       files.forEach((f) => form.append(ACCEPT.includes(f.type) ? 'screenshot' : 'file', f, f.name));
+      for (const [key, value] of Object.entries(fields?.() ?? {})) if (!form.has(key)) form.set(key, value);
       const result = submit ? await submit(form) : await postTo(endpoint, form, reporter);
       if ('error' in result) {
         if (result.signIn) setSignInHref(result.signIn);
@@ -1141,6 +1154,7 @@ function ReportPanel({
                   {t.sendAnonymously}
                 </label>
               )}
+              {formExtras ? <div style={s.extras}>{formExtras}</div> : null}
               <div style={{ ...s.row, alignItems: 'center', marginTop: 12 }}>
                 <span style={{ ...s.hint, marginTop: 0 }}>
                   {pastReportsHref && (
@@ -1509,6 +1523,7 @@ function styles(accent: string) {
     keysKbd: { minWidth: 44, textAlign: 'center', padding: '1px 6px', border: '1px solid #e4e4e7', borderRadius: 4, background: '#fafafa', fontSize: 10, fontFamily: 'inherit' } as CSSProperties,
     linkBtn: { border: 0, background: 'transparent', color: '#71717a', padding: 0, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' } as CSSProperties,
     recording: { border: 0, borderRadius: 999, background: '#e11d48', color: '#fff', padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' } as CSSProperties,
+    extras: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#71717a', margin: '6px 0 0' } as CSSProperties,
     send: { border: 0, borderRadius: 8, background: accent, color: '#fff', padding: '6px 12px', fontSize: 14, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,
     fab: {
       width: 48,
