@@ -1494,7 +1494,16 @@ function ReportPanel({
                   )}
                 </span>
                 <button type="button" onClick={send} disabled={!canSend} style={canSend ? s.send : { ...s.send, opacity: 0.5, cursor: 'not-allowed' }}>
-                  {busy ? t.sending : t.send}
+                  {/* Both labels share one grid cell, the other one invisible, so the button keeps the width
+                      of the longer one and never wraps or grows while sending (shipcue report 81ff37de). */}
+                  <span style={s.sendLabels}>
+                    <span style={busy ? s.sendLabelHidden : s.sendLabel} aria-hidden={busy || undefined}>
+                      {t.send}
+                    </span>
+                    <span style={busy ? s.sendLabel : s.sendLabelHidden} aria-hidden={!busy || undefined}>
+                      {t.sending}
+                    </span>
+                  </span>
                   <span style={s.kbd} aria-hidden="true">{isMac() ? '⌘↵' : 'Ctrl+↵'}</span>
                 </button>
               </div>
@@ -2089,7 +2098,10 @@ function styles(accent: string) {
     linkBtn: { border: 0, background: 'transparent', color: '#71717a', padding: 0, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' } as CSSProperties,
     recording: { border: 0, borderRadius: 999, background: '#e11d48', color: '#fff', padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' } as CSSProperties,
     extras: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#71717a', margin: '6px 0 0' } as CSSProperties,
-    send: { border: 0, borderRadius: 8, background: accent, color: '#fff', padding: '6px 12px', fontSize: 14, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,
+    send: { display: 'inline-flex', alignItems: 'center', flex: 'none', whiteSpace: 'nowrap', border: 0, borderRadius: 8, background: accent, color: '#fff', padding: '6px 12px', fontSize: 14, fontWeight: 500, fontFamily: font, cursor: 'pointer' } as CSSProperties,
+    sendLabels: { display: 'inline-grid' } as CSSProperties,
+    sendLabel: { gridArea: '1 / 1' } as CSSProperties,
+    sendLabelHidden: { gridArea: '1 / 1', visibility: 'hidden' } as CSSProperties,
     fab: {
       width: 48,
       height: 48,
