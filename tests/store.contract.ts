@@ -94,5 +94,111 @@ export function storeContract(name: string, makeStore: () => Promise<ReportStore
       expect(await store.attachVideo(r.id, 'https://cdn.example.com/other.webm')).toBeNull();
       expect(await store.attachVideo('00000000-0000-0000-0000-000000000000', 'x')).toBeNull();
     });
+    describe('claims by people and agents', () => {
+      const ada = { kind: 'person' as const, id: 'ada@example.com', name: 'Ada' };
+      const bot = { kind: 'agent' as const, id: 'agent-1', name: 'claude-code' };
+      const bot2 = { kind: 'agent' as const, id: 'agent-2', name: 'codex' };
+
+      it('records who claimed it, a person or an agent', async () => {
+        const r = await store.create(sample());
+        const claimed = await store.claim(r.id, ada);
+        expect(claimed).toMatchObject({ status: 'claimed', claimedBy: 'Ada', claimantKind: 'person', claimantId: 'ada@example.com', leaseExpiresAt: null });
+        // A plain name still works, as an agent.
+        const other = await store.create(sample());
+        expect(await store.claim(other.id, 'mcp@laptop')).toMatchObject({ claimedBy: 'mcp@laptop', claimantKind: 'agent', claimantId: 'mcp@laptop' });
+      });
+
+      it('gives an agent claim a lease that a heartbeat renews and that runs out', async () => {
+        const r = await store.create(sample());
+        const claimed = await store.claim(r.id, bot, { leaseSeconds: 60 });
+        expect(Date.parse(claimed!.leaseExpiresAt!)).toBeGreaterThan(Date.now() + 50_000);
+        expect(await store.heartbeat!(r.id, bot2.id, 60)).toBeNull();
+        expect(await store.heartbeat!(r.id, bot.id, 600)).not.toBeNull();
+        expect(await store.expire!()).toEqual([]);
+        const short = await store.create(sample());
+        await store.claim(short.id, bot2, { leaseSeconds: -1 });
+        const expired = await store.expire!();
+        expect(expired.map((x) => x.id)).toEqual([short.id]);
+        expect(await store.get(short.id)).toMatchObject({ status: 'open', claimedBy: null, claimantId: null, leaseExpiresAt: null });
+        expect((await store.events!(short.id)).map((e) => e.action)).toEqual(['claimed', 'expired']);
+      });
+
+      it('queues a report assigned to an agent for that agent only', async () => {
+        const top = await store.create(sample({ priority: 'blocking' }));
+        const mine = await store.create(sample({ priority: 'low' }));
+        const assigned = await store.assign!(mine.id, bot, ada);
+        expect(assigned).toMatchObject({ status: 'open', claimantId: 'agent-1', claimedBy: 'claude-code', claimedAt: null });
+        // Assigned work comes first, ahead of a more urgent unassigned report.
+        expect((await store.claimNext(bot))?.id).toBe(mine.id);
+        // Another agent cannot take it; it gets the unassigned one.
+        expect(await store.claim(mine.id, bot2)).toBeNull();
+        expect((await store.claimNext(bot2))?.id).toBe(top.id);
+      });
+
+      it('in push mode an agent only takes what was assigned to it', async () => {
+        await store.create(sample());
+        expect(await store.claimNext(bot, { pull: false })).toBeNull();
+        const r = await store.create(sample());
+        await store.assign!(r.id, bot, ada);
+        expect((await store.claimNext(bot, { pull: false }))?.id).toBe(r.id);
+      });
+
+      it('claimNext keeps to the types an agent may take', async () => {
+        await store.create(sample({ type: 'task', priority: 'blocking' }));
+        const bug = await store.create(sample({ type: 'bug', priority: 'low' }));
+        expect((await store.claimNext(bot, { types: ['bug', 'feature'] }))?.id).toBe(bug.id);
+      });
+
+      it('assigning to a person claims it for them; unassigning puts it back', async () => {
+        const r = await store.create(sample());
+        await store.claim(r.id, bot, { leaseSeconds: 60 });
+        const handed = await store.assign!(r.id, ada, ada);
+        expect(handed).toMatchObject({ status: 'claimed', claimantKind: 'person', claimedBy: 'Ada', leaseExpiresAt: null });
+        // The agent that lost it can no longer close, release or renew it.
+        expect(await store.close(r.id, 'fixed', 'x', { holder: bot.id })).toBeNull();
+        expect(await store.release(r.id, { holder: bot.id })).toBeNull();
+        expect(await store.heartbeat!(r.id, bot.id, 60)).toBeNull();
+        const back = await store.assign!(r.id, null, ada);
+        expect(back).toMatchObject({ status: 'open', claimantId: null, claimedBy: null });
+      });
+
+      it('review sets in_review with the PR link, and close keeps who did it', async () => {
+        const r = await store.create(sample());
+        await store.claim(r.id, bot, { leaseSeconds: 60 });
+        expect(await store.review!(r.id, 'https://github.com/o/r/pull/2', { holder: bot2.id })).toBeNull();
+        const inReview = await store.review!(r.id, 'https://github.com/o/r/pull/2', { holder: bot.id, by: bot });
+        expect(inReview).toMatchObject({ status: 'in_review', prUrl: 'https://github.com/o/r/pull/2', leaseExpiresAt: null });
+        // No lease while a PR waits, so it never expires.
+        expect(await store.expire!()).toEqual([]);
+        const closed = await store.close(r.id, 'fixed', 'merged', { holder: bot.id, by: bot });
+        expect(closed).toMatchObject({ status: 'fixed', claimedBy: 'claude-code', prUrl: 'https://github.com/o/r/pull/2' });
+        const reopened = await store.reopen!(r.id, ada);
+        expect(reopened).toMatchObject({ status: 'open', claimedBy: null, resolution: null });
+        expect((await store.events!(r.id)).map((e) => e.action)).toEqual(['claimed', 'review', 'closed', 'reopened']);
+      });
+
+      it('changes priority and logs who did what', async () => {
+        const r = await store.create(sample({ priority: 'low' }));
+        expect((await store.setPriority!(r.id, 'high', ada))?.priority).toBe('high');
+        await store.assign!(r.id, bot, ada);
+        const events = await store.events!(r.id);
+        expect(events.map((e) => [e.action, e.actor?.name])).toEqual([['priority', 'Ada'], ['assigned', 'Ada']]);
+        expect(events[1]?.detail).toMatchObject({ to: { kind: 'agent', id: 'agent-1', name: 'claude-code' } });
+      });
+
+      it('when two claimants race for one report, exactly one gets it', async () => {
+        const r = await store.create(sample());
+        const results = await Promise.all([store.claim(r.id, bot), store.claim(r.id, bot2), store.claimNext(ada)]);
+        expect(results.filter(Boolean).length).toBe(1);
+        expect((await store.events!(r.id)).filter((e) => e.action === 'claimed').length).toBe(1);
+      });
+
+      it('lists one claimant\'s reports', async () => {
+        const a = await store.create(sample());
+        await store.create(sample());
+        await store.claim(a.id, ada);
+        expect((await store.list({ claimant: ada.id })).map((r) => r.id)).toEqual([a.id]);
+      });
+    });
   });
 }

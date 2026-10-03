@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/cloud/:rest(.*)",
+      "destination": "/api/cloud?__p=:rest"
+    },
+    {
       "source": "/api/shipcue/:rest(.*)",
       "destination": "/api/shipcue?__p=:rest"
     }
@@ -24,6 +28,11 @@
     {
       "source": "/cue/",
       "destination": "/cuelog/",
+      "permanent": true
+    },
+    {
+      "source": "/app",
+      "destination": "/app/",
       "permanent": true
     }
   ]

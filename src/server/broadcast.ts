@@ -5,8 +5,25 @@
 import { createHmac } from 'node:crypto';
 import type { Report } from '../core';
 
-export type ShipcueEventType = 'report.filed' | 'report.claimed' | 'report.released' | 'report.closed' | 'report.video';
-export const EVENT_TYPES: ShipcueEventType[] = ['report.filed', 'report.claimed', 'report.released', 'report.closed', 'report.video'];
+export type ShipcueEventType =
+  | 'report.filed'
+  | 'report.claimed'
+  | 'report.assigned'
+  | 'report.released'
+  | 'report.review'
+  | 'report.closed'
+  | 'report.reopened'
+  | 'report.video';
+export const EVENT_TYPES: ShipcueEventType[] = [
+  'report.filed',
+  'report.claimed',
+  'report.assigned',
+  'report.released',
+  'report.review',
+  'report.closed',
+  'report.reopened',
+  'report.video',
+];
 
 export interface ShipcueEvent {
   type: ShipcueEventType;
@@ -33,8 +50,14 @@ export function describeEvent(e: ShipcueEvent): string {
       return `${kind} filed (${r.priority}): ${what}`;
     case 'report.claimed':
       return `${r.claimedBy ?? 'An agent'} took: ${what}`;
+    case 'report.assigned':
+      return r.claimedBy ? `Assigned to ${r.claimedBy}: ${what}` : `Unassigned: ${what}`;
     case 'report.released':
       return `Back in the queue: ${what}`;
+    case 'report.review':
+      return `In review${r.prUrl ? ` (${r.prUrl})` : ''}: ${what}`;
+    case 'report.reopened':
+      return `Reopened: ${what}`;
     case 'report.closed':
       return r.status === 'fixed' ? `Fixed: ${r.resolution ?? what}` : `Won't fix: ${what}${r.resolution ? ` (${r.resolution})` : ''}`;
     case 'report.video':

@@ -53,7 +53,7 @@ describe('agent client (what the MCP tools call)', () => {
     const { client, add } = await setup();
     const r = await add('low');
     await client.claim(r.id);
-    await expect(client.claim(r.id)).rejects.toThrow('Someone else has it');
+    await expect(client.claim(r.id)).rejects.toThrow('has it now');
   });
 
   it('fails clearly on a wrong token', async () => {
@@ -65,5 +65,16 @@ describe('agent client (what the MCP tools call)', () => {
       fetch: (u, i) => handler(new Request(u, i)),
     });
     await expect(client.list()).rejects.toThrow('Unauthorized');
+  });
+
+  it('reviews with a PR, lists its own work, and reads the history', async () => {
+    const { client, add } = await setup();
+    const r = await add('blocking');
+    await client.claim(r.id);
+    expect((await client.mine()).map((x) => x.id)).toEqual([r.id]);
+    expect((await client.heartbeat(r.id)).status).toBe('claimed');
+    expect(await client.review(r.id, 'https://github.com/o/r/pull/9')).toMatchObject({ status: 'in_review', prUrl: 'https://github.com/o/r/pull/9' });
+    expect((await client.close(r.id, 'fixed', 'merged', 'https://github.com/o/r/pull/9')).status).toBe('fixed');
+    expect((await client.events(r.id)).map((e) => e.action)).toEqual(['claimed', 'review', 'closed']);
   });
 });

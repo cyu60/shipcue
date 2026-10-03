@@ -16,7 +16,7 @@ if (!url || !token) {
 }
 
 const client = createAgentClient({ url, token, agent: process.env.SHIPCUE_AGENT ?? `mcp@${hostname()}` });
-const server = new McpServer({ name: 'shipcue', version: '0.5.2' });
+const server = new McpServer({ name: 'shipcue', version: '0.13.0' });
 
 const text = (value: unknown) => ({
   content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
@@ -26,7 +26,7 @@ server.registerTool(
   'list_reports',
   {
     description: 'List bug reports and feature requests, most urgent first.',
-    inputSchema: { status: z.enum(['open', 'claimed', 'fixed', 'wontfix']).optional() },
+    inputSchema: { status: z.enum(['open', 'claimed', 'in_review', 'fixed', 'wontfix']).optional() },
   },
   async ({ status }) => {
     const reports = await client.list(status ?? 'open');
@@ -40,7 +40,10 @@ server.registerTool(
 
 server.registerTool(
   'claim_next_report',
-  { description: 'Take the most urgent open report. Returns a task prompt with the page, screenshots and app snapshot.' },
+  {
+    description:
+      'Take the next report: one assigned to you first, then the most urgent open one. Returns a task prompt with the page, screenshots and app snapshot. If the queue gives claims a lease, call heartbeat_report while you work.',
+  },
   async () => {
     const claimed = await client.claimNext();
     return text(claimed ? claimed.prompt : 'Nothing open. The queue is empty.');
@@ -68,10 +71,41 @@ server.registerTool(
 server.registerTool(
   'close_report',
   {
-    description: 'Close a report as fixed or wontfix. Put the PR link or the reason in resolution.',
-    inputSchema: { id: z.string(), status: z.enum(['fixed', 'wontfix']), resolution: z.string().optional() },
+    description: 'Close a report as fixed or wontfix. Put what you did or the reason in resolution, and the PR in pr_url.',
+    inputSchema: { id: z.string(), status: z.enum(['fixed', 'wontfix']), resolution: z.string().optional(), pr_url: z.string().optional() },
   },
-  async ({ id, status, resolution }) => text(await client.close(id, status, resolution)),
+  async ({ id, status, resolution, pr_url }) => text(await client.close(id, status, resolution, pr_url)),
+);
+
+server.registerTool(
+  'submit_for_review',
+  {
+    description: 'You opened a PR for a report you hold: it moves to In review with the link, and no longer needs heartbeats. Close it once merged.',
+    inputSchema: { id: z.string(), pr_url: z.string() },
+  },
+  async ({ id, pr_url }) => text(await client.review(id, pr_url)),
+);
+
+server.registerTool(
+  'heartbeat_report',
+  { description: 'Tell the queue you are still working on a report you hold, so your claim does not run out.', inputSchema: { id: z.string() } },
+  async ({ id }) => {
+    const r = await client.heartbeat(id);
+    return text(r.leaseExpiresAt ? `Still yours until ${r.leaseExpiresAt}.` : 'Still yours.');
+  },
+);
+
+server.registerTool(
+  'list_my_reports',
+  { description: 'Reports you hold or that someone assigned to you.' },
+  async () => {
+    const reports = await client.mine();
+    return text(
+      reports.length
+        ? reports.map((r) => `${r.id}  ${r.status} [${r.priority}] ${r.type} · ${r.description.split('\n')[0]?.slice(0, 80)}`).join('\n')
+        : 'Nothing is assigned to you.',
+    );
+  },
 );
 
 await server.connect(new StdioServerTransport());

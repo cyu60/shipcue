@@ -58,6 +58,7 @@ export interface ShipcueText {
   askedFor: string;
   done: string;
   inProgress: string;
+  inReview: string;
   pills: string;
   tabs: string;
   cards: string;
@@ -120,6 +121,7 @@ export const DEFAULT_TEXT: ShipcueText = {
   askedFor: 'Asked for:',
   done: 'Done',
   inProgress: 'In progress',
+  inReview: 'In review',
   pills: 'Pills',
   tabs: 'Tabs',
   cards: 'Cards',

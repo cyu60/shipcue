@@ -292,6 +292,7 @@ function Item({ r, t, accent, changelog = false, done = false, compact = false }
         <span style={{ ...s.tag, borderColor: accent, color: accent }}>{typeLabel(t, r.type)}</span>
         {done && <span style={s.tag}>{t.done}</span>}
         {!changelog && r.status === 'claimed' && <span style={s.tag}>{t.inProgress}</span>}
+        {!changelog && r.status === 'in_review' && <span style={s.tag}>{t.inReview}</span>}
         {!changelog && (r.priority === 'high' || r.priority === 'blocking') && <span style={s.tag}>{r.priority}</span>}
         <span>{day(changelog ? r.updatedAt : r.createdAt)}</span>
       </div>
