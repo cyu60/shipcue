@@ -469,6 +469,11 @@ export function createCloudHandler(opts) {
     const path = new URL(req.url).pathname;
     const teamPath = path.startsWith(`${base}/p/${key}/team/`);
     if (teamPath && !jsonWrite(req)) return fail('Send JSON.', 415);
+    // The button files a form, which browsers send cross-site without asking (no preflight), so CORS alone
+    // would let any page file into the queue. A browser always names its page's origin: hold it to the list.
+    const origin = req.headers.get('origin');
+    const filing = req.method === 'POST' && (path === `${base}/p/${key}/reports` || /^\/reports\/[^/]+\/video$/.test(path.slice(`${base}/p/${key}`.length)));
+    if (filing && origin && !p.allowed_origins.includes(origin)) return fail("This site is not on the project's list of sites.", 403);
     const s = teamPath ? await session(req) : null;
     const handler = createShipcueHandler({
       store: postgresStore(db, 'shipcue_reports', { project: p.id }),

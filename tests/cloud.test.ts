@@ -251,3 +251,26 @@ describe('insforgeAuth: OAuth over REST', () => {
     await expect(a.oauthUrl('google', 'https://x', 'c')).rejects.toThrow();
   });
 });
+
+describe('shipcue Cloud: the sites a project lists', () => {
+  it('takes reports only from the sites listed, not from any page that posts a form', async () => {
+    await signUp('ada@example.com');
+    const { data: made } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Sites' } });
+    await call('POST', `/projects/${made.project.id}/settings`, { as: 'ada@example.com', body: { allowedOrigins: ['https://app.example.com'] } });
+    const file = (origin?: string) => {
+      const form = new FormData();
+      form.set('type', 'bug');
+      form.set('description', 'The save button does nothing at all');
+      return handle(new Request(`${BASE}/p/${made.project.publicKey}/reports`, { method: 'POST', body: form, headers: origin ? { origin } : {} }));
+    };
+    expect((await file('https://app.example.com')).status).toBe(201);
+    // A form post is a "simple" request: the browser sends it without asking first, so CORS alone does not stop it.
+    const foreign = await file('https://elsewhere.example');
+    expect(foreign.status).toBe(403);
+    expect(foreign.headers.get('access-control-allow-origin')).toBeNull();
+    // No Origin header: not a browser (a script or a server), which the list cannot speak for.
+    expect((await file()).status).toBe(201);
+    const { data } = await call('GET', `/p/${made.project.publicKey}/team/reports`, { as: 'ada@example.com' });
+    expect(data.reports).toHaveLength(2);
+  });
+});

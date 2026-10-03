@@ -1309,6 +1309,9 @@ function createCloudHandler(opts) {
     const path = new URL(req.url).pathname;
     const teamPath = path.startsWith(`${base}/p/${key}/team/`);
     if (teamPath && !jsonWrite(req)) return fail2("Send JSON.", 415);
+    const origin = req.headers.get("origin");
+    const filing = req.method === "POST" && (path === `${base}/p/${key}/reports` || /^\/reports\/[^/]+\/video$/.test(path.slice(`${base}/p/${key}`.length)));
+    if (filing && origin && !p.allowed_origins.includes(origin)) return fail2("This site is not on the project's list of sites.", 403);
     const s = teamPath ? await session(req) : null;
     const handler2 = createShipcueHandler({
       store: postgresStore(db, "shipcue_reports", { project: p.id }),
