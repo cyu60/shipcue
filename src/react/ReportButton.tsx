@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, type Hotkeys } from './hotkeys';
+import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, SELECT_AREA_EVENT, type Hotkeys } from './hotkeys';
 import { useLightbox } from './Lightbox';
 import { PinIcon } from './PinIcon';
 import { loadStars, rememberMine, starredFirst, toggleStar, useStars } from './stars';
@@ -16,7 +16,7 @@ import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from 
 import { afterPaint, canCaptureTab, captureArea, captureError, type Rect } from './capture';
 import { AreaSelect } from './AreaSelect';
 import { Annotator } from './Annotator';
-import { agentPrompt } from './agentPrompt';
+import { agentPrompt, type AgentPromptAuth } from './agentPrompt';
 
 /** signIn: where to sign in, when the handler wants that before it takes more (anonymousLimit). */
 export type SubmitResult = { id: string } | { error: string; signIn?: string | null };
@@ -74,6 +74,12 @@ export interface ReportButtonProps {
    * it off if your app has its own pin control (say through formExtras).
    */
   pin?: boolean;
+  /**
+   * When your endpoint needs auth (say a Bearer API token), so "Copy prompt for my agent" tells
+   * the agent: the header goes on its curl, the token on its claude mcp add line, and `where` says
+   * where to get one. Never put a real token here; it is copied into the prompt as written.
+   */
+  agentPromptAuth?: AgentPromptAuth;
   /** The floating button's size; each person can change it in the panel's Display settings. */
   buttonSize?: Size;
   /** How big the panel's text is; each person can change it in the panel's Display settings. */
@@ -270,6 +276,7 @@ function ReportPanel({
   limits,
   onEditShortcuts,
   pin = true,
+  agentPromptAuth,
   buttonSize: buttonSizeProp = 'medium',
   textSize: textSizeProp = 'medium',
   watermark = true,
@@ -551,9 +558,13 @@ function ReportPanel({
     const onClose = () => closeRef.current();
     // Capture phase: the page's own key handlers (an editor, a popup) never swallow the chord.
     window.addEventListener('keydown', onKey, true);
+    // selectArea() from the app (a command palette, say): Select area, as the tile does.
+    const onSelectArea = () => startSelectRef.current();
     window.addEventListener(OPEN_EVENT, onOpen);
     window.addEventListener(CLOSE_EVENT, onClose);
+    window.addEventListener(SELECT_AREA_EVENT, onSelectArea);
     return () => {
+      window.removeEventListener(SELECT_AREA_EVENT, onSelectArea);
       window.removeEventListener(CLOSE_EVENT, onClose);
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener(OPEN_EVENT, onOpen);
@@ -872,6 +883,7 @@ function ReportPanel({
       text,
       context,
       diagnostics: snapshot(diagnostics, captureErrors),
+      auth: agentPromptAuth,
       reporter,
     });
     try {

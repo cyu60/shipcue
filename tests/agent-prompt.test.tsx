@@ -82,3 +82,29 @@ describe('copy a prompt for my agent (report 9f533ece)', () => {
     expect(screen.getByRole('button', { name: 'Let my agent do it' })).toBeInTheDocument();
   });
 });
+
+describe('agentPromptAuth: endpoints that need a token', () => {
+  it('puts the header on the curl, the token on the MCP line, and says where to get one', async () => {
+    render(<ReportButton endpoint="/api/v1/reports-shipcue" areas={[]} captureErrors={false} agentPromptAuth={{ header: 'Authorization: Bearer <token>', where: 'https://app.example.com/settings/tokens' }} />);
+    fireEvent.click(fab());
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy prompt for my agent' }));
+    await waitFor(() => expect(copied).not.toBe(''));
+    expect(copied).toContain('## Auth');
+    expect(copied).toContain('Authorization: Bearer <token>');
+    expect(copied).toContain('https://app.example.com/settings/tokens');
+    expect(copied).toContain("-H 'Authorization: Bearer <token>'");
+    expect(copied).toContain('-e SHIPCUE_TOKEN=<token>');
+  });
+
+  it('says nothing about auth when the endpoint needs none', async () => {
+    render(<ReportButton endpoint="/api/shipcue" areas={[]} captureErrors={false} />);
+    fireEvent.click(fab());
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy prompt for my agent' }));
+    await waitFor(() => expect(copied).not.toBe(''));
+    expect(copied).not.toContain('## Auth');
+    expect(copied).not.toContain('SHIPCUE_TOKEN');
+  });
+});
+
