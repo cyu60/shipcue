@@ -119,8 +119,9 @@ export interface ReportButtonProps {
   /** shipcue's own mark on the button: the hard hat (default) or the original sailboat. */
   icon?: 'hat' | 'ship';
   /**
-   * People can drag the floating button anywhere on the page; where they leave it is kept in
-   * their browser. On by default; false pins it bottom-right.
+   * People can drag the floating button anywhere on the page, and the panel by its title; where
+   * they leave them is kept in their browser (Reset position, or ⌃⇧H, puts both back). On by
+   * default; false pins them in place.
    */
   movable?: boolean;
   /**
@@ -739,7 +740,13 @@ function ReportPanel({
   const current = TYPES.find((t) => t.value === type)!;
   const s = styles(accentColor);
   const drag = useDraggableButton(canMove, buttonPx);
-  resetPositionRef.current = drag.reset;
+  const panelDrag = useDraggablePanel(movable, panelRef);
+  // Reset puts the button and the panel back where they started.
+  const resetPosition = () => {
+    drag.reset();
+    panelDrag.reset();
+  };
+  resetPositionRef.current = resetPosition;
 
   return (
     <div data-shipcue={variant} style={variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap}>
@@ -748,7 +755,7 @@ function ReportPanel({
           ref={panelRef}
           role="dialog"
           aria-label={extra ? (extra.title ?? extra.label) : HEADING[type][0]}
-          style={{ ...(variant === 'floating' ? s.panel : s.inlinePanel), ...(textZoom !== 1 ? { zoom: textZoom } : null) }}
+          style={{ ...(variant === 'floating' ? s.panel : s.inlinePanel), ...(textZoom !== 1 ? { zoom: textZoom } : null), ...panelDrag.style }}
           onDragOver={(e) => {
             if (!extra && e.dataTransfer.types.includes('Files')) e.preventDefault();
           }}
@@ -759,7 +766,7 @@ function ReportPanel({
           }}
         >
           <div ref={contentRef}>
-          <div style={s.row}>
+          <div style={{ ...s.row, ...panelDrag.handleStyle }} {...panelDrag.handlers} title={movable ? t.dragPanel : undefined}>
             <div>
               <h3 style={s.h3}>{extra ? (extra.title ?? extra.label) : HEADING[type][0]}</h3>
               <p style={s.sub}>
@@ -1146,7 +1153,7 @@ function ReportPanel({
                     ))}
                   {canMove && (
                     <div style={s.keysRow}>
-                      <button type="button" onClick={() => drag.reset()} style={s.linkBtn}>
+                      <button type="button" onClick={resetPosition} style={s.linkBtn}>
                         {t.resetPosition}
                       </button>
                       {keys.resetPosition?.[0] && <kbd style={s.keysKbd}>{display(keys.resetPosition[0])}</kbd>}
@@ -1348,6 +1355,87 @@ const EDGE = 8;
  * centre; the wrapper is anchored to the nearest corner, so the panel opens towards the middle
  * of the screen and never off it.
  */
+const PANEL_OFFSET_KEY = 'shipcue:panel-offset';
+const NOT_A_HANDLE = 'button, a, input, select, textarea, label, [role="radio"], [contenteditable="true"]';
+
+/**
+ * Drag the panel by its title (shipcue report 76015f97). It moves on its own, away from the
+ * button, and is kept on screen; the spot is remembered in this browser.
+ */
+function useDraggablePanel(enabled: boolean, panelRef: React.RefObject<HTMLDivElement | null>) {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const start = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(PANEL_OFFSET_KEY) ?? 'null') as { x?: unknown; y?: unknown } | null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only there in the browser
+      if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') setOffset({ x: saved.x, y: saved.y });
+    } catch {
+      // Storage blocked: where it opens by default.
+    }
+  }, [enabled]);
+  /** Nudge the offset so the whole panel stays inside the window. */
+  const keepOnScreen = (next: { x: number; y: number }) => {
+    const el = panelRef.current;
+    if (!el || typeof window === 'undefined') return next;
+    const r = el.getBoundingClientRect();
+    const baseLeft = r.left - offset.x;
+    const baseTop = r.top - offset.y;
+    const minX = EDGE - baseLeft;
+    const maxX = window.innerWidth - EDGE - r.width - baseLeft;
+    const minY = EDGE - baseTop;
+    const maxY = window.innerHeight - EDGE - Math.min(r.height, window.innerHeight - 2 * EDGE) - baseTop;
+    return { x: Math.min(Math.max(next.x, minX), Math.max(minX, maxX)), y: Math.min(Math.max(next.y, minY), Math.max(minY, maxY)) };
+  };
+  const handlers = enabled
+    ? {
+        onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+          if (e.button !== 0 || (e.target as Element).closest(NOT_A_HANDLE)) return;
+          start.current = { px: e.clientX, py: e.clientY, x: offset.x, y: offset.y };
+          setDragging(true);
+          try {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+          } catch {
+            // An unknown pointer (some synthetic events).
+          }
+        },
+        onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+          const st = start.current;
+          if (!st) return;
+          setOffset({ x: st.x + e.clientX - st.px, y: st.y + e.clientY - st.py });
+        },
+        onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => {
+          const st = start.current;
+          start.current = null;
+          setDragging(false);
+          if (!st) return;
+          const next = keepOnScreen({ x: st.x + e.clientX - st.px, y: st.y + e.clientY - st.py });
+          setOffset(next);
+          try {
+            localStorage.setItem(PANEL_OFFSET_KEY, JSON.stringify(next));
+          } catch {
+            // Storage blocked: the spot lasts until the page reloads.
+          }
+        },
+      }
+    : {};
+  return {
+    style: (offset.x || offset.y ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : {}) as CSSProperties,
+    handleStyle: (enabled ? { cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none', userSelect: 'none' } : {}) as CSSProperties,
+    handlers,
+    reset: () => {
+      setOffset({ x: 0, y: 0 });
+      try {
+        localStorage.removeItem(PANEL_OFFSET_KEY);
+      } catch {
+        // Storage blocked: nothing was saved.
+      }
+    },
+  };
+}
+
 function useDraggableButton(enabled: boolean, FAB: number) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
