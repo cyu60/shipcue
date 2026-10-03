@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ReportButton, Lightbox, selectArea } from '../src/react';
 import { captureArea } from '../src/react/capture';
@@ -24,7 +24,13 @@ class FakeImage {
   }
 }
 const stop = vi.fn();
-const getDisplayMedia = vi.fn(async (_o?: unknown) => ({ getTracks: () => [{ stop }], getVideoTracks: () => [{ stop }] }));
+// Each share is its own track, so a test can end one ("Stop sharing") and see a fresh request.
+const tracks: { stop: () => void; readyState: string }[] = [];
+const getDisplayMedia = vi.fn(async (_o?: unknown) => {
+  const track = { readyState: 'live', stop: () => ((track.readyState = 'ended'), stop()) };
+  tracks.push(track);
+  return { getTracks: () => [track], getVideoTracks: () => [track] };
+});
 
 beforeAll(() => {
   URL.createObjectURL = vi.fn(() => 'blob:preview');
@@ -46,6 +52,7 @@ beforeEach(() => {
   drawImage.mockClear();
   stop.mockClear();
   getDisplayMedia.mockClear();
+  tracks.length = 0;
 });
 afterEach(() => {
   cleanup();
@@ -60,6 +67,8 @@ async function openPanel(props: Partial<Parameters<typeof ReportButton>[0]> = {}
   await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
   return submit;
 }
+const toolbar = () => screen.getByRole('toolbar', { name: 'Selection' });
+const captureAndAnnotate = () => userEvent.click(within(toolbar()).getByRole('button', { name: 'Capture & annotate' }));
 const drag = (from: [number, number], to: [number, number]) => {
   const layer = screen.getByRole('dialog', { name: 'Select an area' });
   fireEvent.pointerDown(layer, { button: 0, clientX: from[0], clientY: from[1], pointerId: 1 });
@@ -104,13 +113,15 @@ describe('Select area', () => {
     expect(screen.getByLabelText('Shortcuts')).toHaveTextContent('Select area');
   });
 
-  it('captures the tab once, crops at devicePixelRatio, stops sharing, and opens the annotator', async () => {
+  it('captures the tab once, crops at devicePixelRatio, opens the annotator, and stops sharing when the panel closes', async () => {
     const submit = await openPanel();
     await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
     drag([100, 50], [300, 150]);
+    await captureAndAnnotate();
     expect(await screen.findByRole('dialog', { name: 'Mark up the screenshot' })).toBeInTheDocument();
     expect(getDisplayMedia).toHaveBeenCalledWith(expect.objectContaining({ video: { displaySurface: 'browser' }, preferCurrentTab: true, selfBrowserSurface: 'include' }));
-    expect(stop).toHaveBeenCalled();
+    // Kept for the next capture while the panel is open (shipcue report 03de1f12).
+    expect(stop).not.toHaveBeenCalled();
     // An 800px viewport captured at 1600px: 2x.
     expect(drawImage.mock.calls[0]!.slice(1)).toEqual([200, 100, 400, 200, 0, 0, 400, 200]);
     await userEvent.type(screen.getByPlaceholderText(/for screen readers/), 'Save button greyed out');
@@ -122,6 +133,8 @@ describe('Select area', () => {
     const form = submit.mock.calls[0]![0];
     expect(form.getAll('screenshot')).toHaveLength(1);
     expect(form.getAll('screenshotAlt')).toEqual(['Save button greyed out']);
+    // Sent: the panel closed, and sharing stopped with it.
+    await waitFor(() => expect(stop).toHaveBeenCalled());
   });
 
   it('says so in one line when the person declines to share', async () => {
@@ -129,6 +142,7 @@ describe('Select area', () => {
     await openPanel();
     await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
     drag([100, 50], [300, 150]);
+    await userEvent.keyboard('{Enter}');
     expect(await screen.findByRole('alert')).toHaveTextContent('Screen capture was not allowed. Paste a screenshot instead.');
     expect(screen.queryByRole('dialog', { name: 'Mark up the screenshot' })).toBeNull();
   });
@@ -147,6 +161,7 @@ describe('Select area', () => {
     await screen.findByAltText('Screenshot 1');
     await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
     drag([0, 0], [100, 100]);
+    await captureAndAnnotate();
     await userEvent.click(await screen.findByRole('button', { name: 'Add to report' }));
     expect(await screen.findByText(/That is all the screenshots one report can carry/)).toBeInTheDocument();
     expect(screen.getAllByAltText(/^Screenshot \d$/)).toHaveLength(1);
@@ -257,6 +272,7 @@ describe('capture on open (shipcue report 503aa011)', () => {
     expect(document.querySelector('[data-shipcue-selection]')).toHaveStyle({ left: '100px', top: '50px', width: '200px', height: '100px' });
     expect(screen.getByText('200 × 100')).toBeInTheDocument();
     fireEvent.pointerUp(el, { clientX: 300, clientY: 150, pointerId: 1 });
+    await captureAndAnnotate();
     expect(await screen.findByRole('dialog', { name: 'Mark up the screenshot' })).toBeInTheDocument();
     expect(getDisplayMedia).toHaveBeenCalledTimes(1);
     expect(drawImage.mock.calls[0]!.slice(1)).toEqual([200, 100, 400, 200, 0, 0, 400, 200]);
@@ -326,6 +342,7 @@ describe('capture on open (shipcue report 503aa011)', () => {
     expect(tint()).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
     drag([100, 50], [300, 150]);
+    await captureAndAnnotate();
     expect(await screen.findByRole('dialog', { name: 'Mark up the screenshot' })).toBeInTheDocument();
   });
 
@@ -341,6 +358,193 @@ describe('capture on open (shipcue report 503aa011)', () => {
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined });
     await openPanel();
     expect(tint()).toBeNull();
+  });
+});
+
+describe('adjust before capturing (shipcue report 03de1f12)', () => {
+  const sel = () => document.querySelector('[data-shipcue-selection]') as HTMLElement;
+  const layer = () => screen.getByRole('dialog', { name: 'Select an area' });
+  const startSelecting = async (props: Partial<Parameters<typeof ReportButton>[0]> = {}) => {
+    const submit = await openPanel(props);
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([100, 50], [300, 150]);
+    return submit;
+  };
+  const press = (el: Element, from: [number, number], to: [number, number]) => {
+    fireEvent.pointerDown(el, { button: 0, clientX: from[0], clientY: from[1], pointerId: 1 });
+    fireEvent.pointerMove(el, { clientX: to[0], clientY: to[1], pointerId: 1 });
+    fireEvent.pointerUp(el, { clientX: to[0], clientY: to[1], pointerId: 1 });
+  };
+
+  it('letting go keeps the selection, with handles and a toolbar, and asks for nothing yet', async () => {
+    await startSelecting();
+    expect(sel()).toHaveStyle({ left: '100px', top: '50px', width: '200px', height: '100px' });
+    expect(document.querySelectorAll('[data-shipcue-handle]')).toHaveLength(8);
+    expect(within(toolbar()).getByRole('textbox', { name: 'Width' })).toHaveValue('200');
+    expect(within(toolbar()).getByRole('textbox', { name: 'Height' })).toHaveValue('100');
+    expect(within(toolbar()).getByRole('button', { name: 'Capture' })).toBeInTheDocument();
+    expect(within(toolbar()).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    // Just below the selection.
+    expect(toolbar()).toHaveStyle({ top: '158px' });
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Mark up the screenshot' })).toBeNull();
+  });
+
+  it('flips the toolbar above a selection near the bottom edge', async () => {
+    await openPanel();
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([100, 450], [300, 590]);
+    expect(parseFloat(toolbar().style.top)).toBeLessThan(450);
+  });
+
+  it('resizes from a handle and from the size fields, inside the viewport', async () => {
+    await startSelecting();
+    press(document.querySelector('[data-shipcue-handle="se"]')!, [300, 150], [360, 190]);
+    expect(sel()).toHaveStyle({ left: '100px', top: '50px', width: '260px', height: '140px' });
+    press(document.querySelector('[data-shipcue-handle="nw"]')!, [100, 50], [80, 40]);
+    expect(sel()).toHaveStyle({ left: '80px', top: '40px', width: '280px', height: '150px' });
+    fireEvent.change(within(toolbar()).getByRole('textbox', { name: 'Width' }), { target: { value: '320' } });
+    fireEvent.change(within(toolbar()).getByRole('textbox', { name: 'Height' }), { target: { value: '9999' } });
+    // From the top-left; the height stops at the bottom of the viewport.
+    expect(sel()).toHaveStyle({ left: '80px', top: '40px', width: '320px', height: '560px' });
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+  });
+
+  it('moves when dragged from inside, and with the arrow keys', async () => {
+    await startSelecting();
+    press(sel(), [150, 100], [250, 140]);
+    expect(sel()).toHaveStyle({ left: '200px', top: '90px', width: '200px', height: '100px' });
+    // Never off the page.
+    press(sel(), [250, 140], [2000, 140]);
+    expect(sel()).toHaveStyle({ left: '600px' });
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(sel()).toHaveStyle({ left: '590px' });
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+  });
+
+  it('a new drag outside the selection starts a fresh one; a click keeps it', async () => {
+    await startSelecting();
+    fireEvent.pointerDown(layer(), { button: 0, clientX: 500, clientY: 400, pointerId: 1 });
+    fireEvent.pointerUp(layer(), { button: 0, clientX: 500, clientY: 400, pointerId: 1 });
+    expect(sel()).toHaveStyle({ left: '100px', top: '50px' });
+    press(layer(), [400, 300], [600, 450]);
+    expect(sel()).toHaveStyle({ left: '400px', top: '300px', width: '200px', height: '150px' });
+  });
+
+  it('Enter captures it (one share request) and attaches it without the annotator', async () => {
+    await startSelecting();
+    await userEvent.keyboard('{Enter}');
+    expect(await screen.findByAltText('Screenshot 1')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Mark up the screenshot' })).toBeNull();
+    expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+    expect(drawImage.mock.calls[0]!.slice(1)).toEqual([200, 100, 400, 200, 0, 0, 400, 200]);
+  });
+
+  it('a second capture in the same open panel reuses the share; closing the panel stops it', async () => {
+    await startSelecting();
+    await userEvent.keyboard('{Enter}');
+    await screen.findByAltText('Screenshot 1');
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([10, 10], [110, 60]);
+    await userEvent.click(within(toolbar()).getByRole('button', { name: 'Capture' }));
+    expect(await screen.findByAltText('Screenshot 2')).toBeInTheDocument();
+    expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+    expect(drawImage.mock.calls[1]!.slice(1)).toEqual([20, 20, 200, 100, 0, 0, 200, 100]);
+    expect(stop).not.toHaveBeenCalled();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Report a bug' })).toBeNull();
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks again when sharing was stopped from the browser', async () => {
+    await startSelecting();
+    await userEvent.keyboard('{Enter}');
+    await screen.findByAltText('Screenshot 1');
+    tracks[0]!.readyState = 'ended';
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([10, 10], [110, 60]);
+    await userEvent.keyboard('{Enter}');
+    expect(await screen.findByAltText('Screenshot 2')).toBeInTheDocument();
+    expect(getDisplayMedia).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops sharing when the page is hidden, and after captureKeepAlive ms idle', async () => {
+    await startSelecting();
+    await userEvent.keyboard('{Enter}');
+    await screen.findByAltText('Screenshot 1');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    fireEvent(document, new Event('visibilitychange'));
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    expect(stop).toHaveBeenCalledTimes(1);
+    cleanup();
+    stop.mockClear();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await startSelecting({ captureKeepAlive: 1000 });
+      await userEvent.keyboard('{Enter}');
+      await screen.findByAltText('Screenshot 1');
+      expect(stop).not.toHaveBeenCalled();
+      act(() => void vi.advanceTimersByTime(1500));
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Esc cancels back to the form without asking to share', async () => {
+    await startSelecting();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Select an area' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Report a bug' })).toBeInTheDocument();
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+  });
+
+  it('Cancel in the toolbar does the same', async () => {
+    await startSelecting();
+    await userEvent.click(within(toolbar()).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Select an area' })).toBeNull();
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+  });
+
+  it('Capture & annotate opens the annotator on the capture', async () => {
+    await startSelecting();
+    await captureAndAnnotate();
+    expect(await screen.findByRole('dialog', { name: 'Mark up the screenshot' })).toBeInTheDocument();
+    expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+  });
+
+  describe('on the tint that comes with the panel', () => {
+    const tint = () => document.querySelector('[data-shipcue-capture]') as HTMLElement;
+    it('keeps the selection adjustable too, then Enter captures and a second one reuses the share', async () => {
+      await openPanel();
+      press(tint(), [100, 50], [300, 150]);
+      expect(getDisplayMedia).not.toHaveBeenCalled();
+      expect(document.querySelectorAll('[data-shipcue-handle]')).toHaveLength(8);
+      press(document.querySelector('[data-shipcue-handle="e"]')!, [300, 100], [340, 100]);
+      expect(sel()).toHaveStyle({ width: '240px', height: '100px' });
+      expect(within(toolbar()).getByRole('textbox', { name: 'Width' })).toHaveValue('240');
+      await userEvent.keyboard('{Enter}');
+      expect(await screen.findByAltText('Screenshot 1')).toBeInTheDocument();
+      expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+      await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+      drag([10, 10], [110, 60]);
+      await captureAndAnnotate();
+      expect(await screen.findByRole('dialog', { name: 'Mark up the screenshot' })).toBeInTheDocument();
+      expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+    });
+
+    it('Esc drops the selection first, keeping the tint; typing in the panel still never captures', async () => {
+      await openPanel();
+      press(tint(), [100, 50], [300, 150]);
+      await userEvent.keyboard('{Escape}');
+      expect(document.querySelector('[data-shipcue-handle]')).toBeNull();
+      expect(tint()).not.toBeNull();
+      expect(screen.getByRole('dialog', { name: 'Report a bug' })).toBeInTheDocument();
+      press(tint(), [100, 50], [300, 150]);
+      await userEvent.click(screen.getByRole('textbox', { name: 'Description' }));
+      await userEvent.keyboard('typed{Enter}');
+      expect(getDisplayMedia).not.toHaveBeenCalled();
+    });
   });
 });
 

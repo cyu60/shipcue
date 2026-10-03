@@ -13,7 +13,7 @@ import { shrinkImage } from './shrink';
 import { isOutlineText, OutlinePreview } from './outline';
 import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
-import { afterPaint, canCaptureTab, captureArea, captureError, type Rect } from './capture';
+import { afterPaint, CAPTURE_KEEP_ALIVE_MS, canCaptureTab, captureError, tabCapture, type Rect, type TabCapture } from './capture';
 import { AreaSelect } from './AreaSelect';
 import { Annotator } from './Annotator';
 import { agentPrompt, type AgentPromptAuth } from './agentPrompt';
@@ -162,6 +162,13 @@ export interface ReportButtonProps {
    */
   captureOnOpen?: boolean;
   /**
+   * How long (ms) the tab share the browser granted for a capture is kept for the next one while
+   * the panel is open (shipcue report 03de1f12), so Chrome asks once per session rather than on
+   * every capture. Sharing always stops when the panel closes or the page is hidden. 0 stops it
+   * after each capture. Default 120000 (two minutes).
+   */
+  captureKeepAlive?: number;
+  /**
    * Deprecated since 0.21 in favour of captureOnOpen. Tints the page while the panel is open,
    * without blocking it (shipcue report 58b727d9). With captureOnOpen on, this plain tint shows
    * only once the capture tint is lifted. Off by default.
@@ -294,6 +301,7 @@ function ReportPanel({
   fields,
   dimOnOpen = false,
   captureOnOpen: captureOnOpenProp,
+  captureKeepAlive = CAPTURE_KEEP_ALIVE_MS,
 }: ReportButtonProps) {
   const captureOnOpen = captureOnOpenProp ?? variant === 'floating';
   const endpoint = endpointProp ?? '/api/shipcue';
@@ -772,16 +780,40 @@ function ReportPanel({
   const startSelectRef = useRef(startSelect);
   startSelectRef.current = startSelect;
 
-  // The tint and the panel are gone before the frame is taken, so neither is in the picture.
-  const captureSelection = async (rect: Rect) => {
+  // One tab share for the open panel (shipcue report 03de1f12): asked for at the first capture,
+  // reused after, stopped when the panel closes, the page hides, or captureKeepAlive runs out.
+  const tabRef = useRef<{ keepAlive: number; capture: TabCapture } | null>(null);
+  const tab = () => {
+    if (tabRef.current?.keepAlive !== captureKeepAlive) {
+      tabRef.current?.capture.stop();
+      tabRef.current = { keepAlive: captureKeepAlive, capture: tabCapture({ keepAliveMs: captureKeepAlive }) };
+    }
+    return tabRef.current.capture;
+  };
+  useEffect(() => {
+    if (!open) tabRef.current?.capture.stop();
+  }, [open]);
+  useEffect(() => {
+    const onHide = () => document.visibilityState === 'hidden' && tabRef.current?.capture.stop();
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      tabRef.current?.capture.stop();
+    };
+  }, []);
+
+  // The tint, the selection and its toolbar, and the panel are gone before the frame is taken,
+  // so none of them is in the picture. Capture attaches it; Capture & annotate opens the annotator.
+  const captureSelection = async (rect: Rect, { annotate }: { annotate: boolean }) => {
     setSelecting(false);
     // Back at the panel afterwards with the page usable; Select area captures another.
     setTintLifted(true);
     setCapturing(true);
     try {
       await afterPaint();
-      const blob = await captureArea(rect);
-      setAnnotating({ src: URL.createObjectURL(blob), index: null, alt: '', name: 'area.png', own: true });
+      const blob = await tab().grab(rect);
+      if (annotate) setAnnotating({ src: URL.createObjectURL(blob), index: null, alt: '', name: 'area.png', own: true });
+      else await addFiles([new File([blob], 'area.png', { type: 'image/png' })]);
     } catch (e) {
       const problem = captureError(e);
       if (problem) setError(problem === 'declined' ? t.captureDeclined : problem === 'unsupported' ? t.captureUnsupported : t.captureFailed);
@@ -902,10 +934,10 @@ function ReportPanel({
   return (
     <div ref={wrapRef} data-shipcue={variant} style={{ ...(variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap), ...(selecting || capturing ? { visibility: 'hidden' } : null) }}>
       {ambient && typeof document !== 'undefined' && (
-        <AreaSelect ambient hint={t.captureOnOpenHint} onSelect={(r) => void captureSelection(r)} onCancel={() => setTintLifted(true)} onDismiss={() => setTintLifted(true)} />
+        <AreaSelect ambient hint={t.captureOnOpenHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setTintLifted(true)} onDismiss={() => setTintLifted(true)} />
       )}
       {dimOnOpen && open && !ambient && !selecting && !capturing && typeof document !== 'undefined' && createPortal(<div data-shipcue-dim="" aria-hidden="true" style={s.dim} />, document.body)}
-      {selecting && <AreaSelect hint={t.selectAreaHint} onSelect={(r) => void captureSelection(r)} onCancel={() => setSelecting(false)} />}
+      {selecting && <AreaSelect hint={t.selectAreaHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setSelecting(false)} />}
       {annotating && (
         <Annotator
           src={annotating.src}

@@ -37,6 +37,14 @@ export interface ShipcueText {
   selectAreaHint: string;
   /** The line on the tint that comes with the open panel (captureOnOpen). */
   captureOnOpenHint: string;
+  /** The line once a selection is drawn and can be moved and resized (shipcue report 03de1f12). */
+  adjustHint: string;
+  /** The toolbar under a drawn selection: its name, the size fields and the two captures. */
+  selectionToolbar: string;
+  selectionWidth: string;
+  selectionHeight: string;
+  captureNow: string;
+  captureAnnotate: string;
   captureDeclined: string;
   captureUnsupported: string;
   captureFailed: string;
@@ -156,6 +164,12 @@ export const DEFAULT_TEXT: ShipcueText = {
   selectArea: 'Select area',
   selectAreaHint: 'Drag to select an area · Enter captures · Esc cancels',
   captureOnOpenHint: 'Drag to capture part of the page · click to dismiss',
+  adjustHint: 'Drag to move · handles resize · Enter captures · Esc cancels',
+  selectionToolbar: 'Selection',
+  selectionWidth: 'Width',
+  selectionHeight: 'Height',
+  captureNow: 'Capture',
+  captureAnnotate: 'Capture & annotate',
   captureDeclined: 'Screen capture was not allowed. Paste a screenshot instead.',
   captureUnsupported: 'This browser cannot capture the page. Paste a screenshot instead.',
   captureFailed: 'Could not capture that area. Paste a screenshot instead.',
