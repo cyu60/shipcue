@@ -310,6 +310,40 @@ function Hosted({ detail, save }) {
   );
 }
 
+/** The activity digest (shipcue report 5f4d339b): one summary an hour or a day instead of a message per event. */
+function Digest({ detail, save }) {
+  const p = detail.project;
+  const d = detail.digest ?? { available: false, email: false };
+  const where = p.digestTo === 'email' ? "the owner's email" : p.slackConnected ? 'Slack' : 'Slack (connect it above first)';
+  return (
+    <section style={s.card}>
+      <h3 style={{ margin: 0 }}>6. Digest</h3>
+      <p style={s.small}>
+        One summary instead of a message per event: what was filed, fixed (with the fix line and PR), reopened, claims stuck past their lease, how many are still open
+        and the oldest waiting. Quiet periods send nothing. Never who filed it or the app snapshot.
+      </p>
+      {!d.available && <p style={s.small}>Not available on this server yet.</p>}
+      <div style={s.row}>
+        <select style={s.input} value={p.digestEvery} disabled={!d.available && p.digestEvery === 'off'} onChange={(e) => save({ digestEvery: e.target.value })} aria-label="How often">
+          <option value="off">Off</option>
+          <option value="hour">Hourly</option>
+          <option value="day">Daily</option>
+        </select>
+        <select style={s.input} value={p.digestTo} onChange={(e) => save({ digestTo: e.target.value })} aria-label="Where it goes">
+          <option value="slack">To the Slack channel above</option>
+          {(d.email || p.digestTo === 'email') && <option value="email">To the owner's email</option>}
+        </select>
+      </div>
+      {p.digestEvery !== 'off' && (
+        <p style={s.small}>
+          Goes to {where} {p.digestEvery === 'hour' ? 'every hour' : 'once a day'}
+          {p.digestSentAt ? `; last period ended ${new Date(p.digestSentAt).toLocaleString()}` : ''}.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Setup({ detail, reload, onProjects }) {
   const p = detail.project;
   const owner = detail.role === 'owner';
@@ -453,6 +487,8 @@ function Setup({ detail, reload, onProjects }) {
           </div>
         </section>
       )}
+
+      {owner && <Digest detail={detail} save={save} />}
 
       {owner && (
         <section style={s.card}>

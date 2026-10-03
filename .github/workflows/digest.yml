@@ -1,0 +1,20 @@
+# shipcue Cloud's hourly digests (shipcue report 5f4d339b). Vercel Cron on this plan runs once a day
+# (website/vercel.json), so this calls the same route every hour; it only sends digests that are due.
+name: Cloud digests
+on:
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send due digests
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DIGEST_URL: ${{ vars.SHIPCUE_DIGEST_URL || 'https://shipcue.ibuildathing.com/api/cloud/digest' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET is not set; skipping."; exit 0; fi
+          curl -fsS -X POST "$DIGEST_URL" -H "Authorization: Bearer $CRON_SECRET" -o /dev/null -w "%{http_code}\n"

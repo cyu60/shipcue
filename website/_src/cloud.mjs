@@ -2,8 +2,8 @@
 // queue lives in the shared shipcue_reports table under its project_id, served at
 // {base}/p/<public key>/... with the same routes as a self-hosted handler (button, agent API, team API).
 // Sign-in is InsForge auth on shipcue's project, kept server-side in httpOnly cookies.
-import { createHash, randomBytes } from 'node:crypto';
-import { EVENT_TYPES, broadcast, createShipcueHandler, postgresStore, slack, webhook } from '../../src/server';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { DIGEST_PERIOD_MS, EVENT_TYPES, broadcast, createShipcueHandler, digest, emailDigest, postgresStore, slack, slackDigest, webhook } from '../../src/server';
 import { resolveConfig } from '../../src/core';
 import { triageReport } from './hosted.mjs';
 
@@ -121,6 +121,38 @@ export async function cloudUserFrom(req, auth) {
   return null;
 }
 
+/** Sends one email with InsForge's emails on shipcue's project; null without a key. */
+export function insforgeEmail(baseUrl, apiKey, fetchImpl = fetch) {
+  if (!apiKey) return null;
+  return async (m) => {
+    const res = await fetchImpl(`${baseUrl}/api/email/send-raw`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ to: m.to, subject: m.subject, html: m.html, from: 'shipcue' }),
+    });
+    if (!res.ok) throw new Error(`email: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  };
+}
+
+const DIGEST_EVERY = ['off', 'hour', 'day'];
+const DIGEST_TO = ['slack', 'email'];
+// A cron's runs wander (Vercel's daily cron anywhere in its hour), so a period counts as done this close to its end.
+const DIGEST_EARLY_SHARE = 0.1;
+
+/**
+ * Whether a project's digest is due now (shipcue report 5f4d339b), and the period it covers: from the
+ * end of the last one sent, or one period back when none was sent lately (so turning it on, or a long
+ * gap, never digests weeks of history).
+ */
+export function digestDue(p, now = new Date()) {
+  const period = DIGEST_PERIOD_MS[p?.digest_every];
+  if (!period) return null;
+  const last = p.digest_sent_at ? new Date(p.digest_sent_at).getTime() : null;
+  const gap = last === null ? Infinity : now.getTime() - last;
+  if (gap < period * (1 - DIGEST_EARLY_SHARE)) return null;
+  return { since: new Date(gap <= 2 * period ? last : now.getTime() - period), until: now };
+}
+
 /**
  * @param {{ db: { query(text: string, params?: unknown[]): Promise<{ rows: any[] }> }, auth: ReturnType<typeof insforgeAuth>,
  *   base?: string, beta?: string[], secureCookies?: boolean, refreshDays?: number, cookiePath?: string, appPath?: string }} opts
@@ -128,6 +160,8 @@ export async function cloudUserFrom(req, auth) {
  *   beta: emails that may create projects during the invite-only beta. Everyone else joins by invite.
  *   hosted: the hosted agent's OpenAI settings (hostedFromEnv in hosted.mjs), or null to leave it off on this server.
  *   background: keeps work running after the response (Vercel: waitUntil); by default it just runs.
+ *   cronSecret: turns on GET|POST {base}/digest for a cron (Authorization: Bearer <cronSecret>), which sends due digests.
+ *   sendEmail: sends one email ({ to, subject, html, text }), for digests to the owner's email; null leaves email off.
  */
 export function createCloudHandler(opts) {
   const { db, auth } = opts;
@@ -142,6 +176,7 @@ export function createCloudHandler(opts) {
   const secure = opts.secureCookies !== false;
   const refreshDays = opts.refreshDays ?? 30;
   const q = async (text, params = []) => (await db.query(text, params)).rows;
+  const sendEmail = opts.sendEmail ?? null;
 
   // Path /api: the site's own report button (/api/shipcue) knows who is signed in too.
   const cookiePath = opts.cookiePath ?? '/api';
@@ -212,6 +247,9 @@ export function createCloudHandler(opts) {
     notifyEvents: p.notify_events ?? ['report.filed', 'report.closed'],
     hostedAgent: !!p.hosted_agent,
     hostedAutoTriage: !!p.hosted_auto_triage,
+    digestEvery: p.digest_every ?? 'off',
+    digestTo: p.digest_to ?? 'slack',
+    digestSentAt: p.digest_sent_at ? new Date(p.digest_sent_at).toISOString() : null,
     createdAt: new Date(p.created_at).toISOString(),
   });
 
@@ -372,6 +410,8 @@ export function createCloudHandler(opts) {
         })),
         // Whether this server can run the hosted agent, and its daily cap per project.
         hosted: { available: !!hosted, name: HOSTED_NAME, dailyLimit: hosted?.dailyLimit ?? null },
+        // Whether this server can send digests, and by email.
+        digest: { available: !!opts.cronSecret, email: !!sendEmail },
       });
     }
     if (req.method !== 'POST') return fail('Not found', 404);
@@ -457,6 +497,16 @@ export function createCloudHandler(opts) {
         set('hosted_agent', hostedOn);
       }
       if (b.hostedAutoTriage !== undefined) set('hosted_auto_triage', b.hostedAutoTriage === true);
+      // The activity digest (shipcue report 5f4d339b): how often, and to Slack or the owner's email.
+      if (b.digestEvery !== undefined) {
+        if (!DIGEST_EVERY.includes(b.digestEvery)) return fail('A digest goes out off, hourly or daily.');
+        set('digest_every', b.digestEvery);
+      }
+      if (b.digestTo !== undefined) {
+        if (!DIGEST_TO.includes(b.digestTo)) return fail('A digest goes to Slack or email.');
+        if (b.digestTo === 'email' && !sendEmail) return fail('Email digests are not available on this server.', 409);
+        set('digest_to', b.digestTo);
+      }
       if (!sets.length) return fail('Nothing to change.');
       const [row] = await q(`UPDATE cloud_projects SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, params);
       if (hostedOn === true && !(await q(`SELECT 1 FROM cloud_agents WHERE project_id = $1 AND hosted AND revoked_at IS NULL`, [id])).length) {
@@ -647,12 +697,63 @@ export function createCloudHandler(opts) {
     return withCookies(await handler(req), s?.set);
   }
 
+  /** Where a project's digest goes: its Slack channel, or its first owner's email. Null when that is not set up. */
+  async function digestSender(p) {
+    if (p.digest_to === 'email') {
+      if (!sendEmail) return null;
+      const owner = (await q(`SELECT email FROM cloud_members WHERE project_id = $1 AND role = 'owner' AND NOT is_deleted ORDER BY created_at LIMIT 1`, [p.id]))[0];
+      return owner ? emailDigest({ to: owner.email, send: sendEmail }) : null;
+    }
+    return p.slack_webhook_url ? slackDigest({ webhookUrl: p.slack_webhook_url }) : null;
+  }
+
+  /**
+   * {base}/digest, for the cron (shipcue report 5f4d339b): sends every due digest and records the period
+   * sent. A period is taken before it is sent, so two runs at once never send it twice; a failed send
+   * gives it back for the next run.
+   */
+  async function runDigests(req) {
+    if (!opts.cronSecret) return fail('Not found', 404);
+    const given = Buffer.from(req.headers.get('authorization') ?? '');
+    const expected = Buffer.from(`Bearer ${opts.cronSecret}`);
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return fail('Unauthorized', 401);
+    const now = new Date();
+    const link = new URL(appPath, req.url).toString();
+    const results = [];
+    for (const p of await q(`SELECT * FROM cloud_projects WHERE digest_every <> 'off' AND NOT is_deleted ORDER BY digest_sent_at NULLS FIRST`)) {
+      const due = digestDue(p, now);
+      if (!due) continue;
+      const taken = await q(`UPDATE cloud_projects SET digest_sent_at = $2 WHERE id = $1 AND digest_sent_at IS NOT DISTINCT FROM $3::timestamptz RETURNING id`, [p.id, due.until, p.digest_sent_at ?? null]);
+      if (!taken.length) continue;
+      try {
+        const sender = await digestSender(p);
+        if (!sender) {
+          results.push({ project: p.id, sent: false, reason: 'no destination' });
+          continue;
+        }
+        const message = await digest(postgresStore(db, 'shipcue_reports', { project: p.id }), { ...due, format: sender.format, appName: p.name, link });
+        if (message.summary.empty) {
+          results.push({ project: p.id, sent: false, reason: 'no activity' });
+          continue;
+        }
+        await sender.send(message);
+        results.push({ project: p.id, sent: true });
+      } catch (err) {
+        console.error('shipcue cloud: digest failed', p.id, err instanceof Error ? err.message : err);
+        await q(`UPDATE cloud_projects SET digest_sent_at = $3::timestamptz WHERE id = $1 AND digest_sent_at = $2`, [p.id, due.until, p.digest_sent_at ?? null]);
+        results.push({ project: p.id, sent: false, reason: 'failed' });
+      }
+    }
+    return json({ sent: results.filter((r) => r.sent).length, results });
+  }
+
   async function route(req) {
     const path = new URL(req.url).pathname;
     if (!path.startsWith(`${base}/`)) return fail('Not found', 404);
     const parts = path.slice(base.length + 1).split('/').filter(Boolean);
     const [head, ...rest] = parts;
     if (head === 'p' && rest[0]) return projectQueue(req, rest[0]);
+    if (head === 'digest' && !rest.length && (req.method === 'GET' || req.method === 'POST')) return runDigests(req);
     if (!jsonWrite(req)) return fail('Send JSON.', 415);
     if (head === 'auth') return authRoutes(req, rest[0], rest[1]);
     const s = await session(req);

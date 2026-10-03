@@ -35,5 +35,11 @@
       "destination": "/app/",
       "permanent": true
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cloud/digest",
+      "schedule": "0 14 * * *"
+    }
   ]
 }

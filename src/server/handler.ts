@@ -3,6 +3,7 @@ import { altFragment, BLOCKED_FILE_TYPES, MAX_RESOLUTION, PRIORITIES, formatByte
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 import { findGitHubLink, publicGitHubLinks } from './links';
+import { DIGEST_PERIOD_MS, digest as buildDigestMessage, type DigestFormat, type DigestPeriod, type DigestSender } from './digest';
 
 const IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -113,6 +114,27 @@ export interface HandlerOptions {
    * like shipcue Cloud; off by default, so a self-hosted handler answers its own site only.
    */
   cors?: string[] | ((origin: string, req: Request) => boolean | Promise<boolean>);
+  /**
+   * The activity digest (shipcue report 5f4d339b): POST {base}/digest, with the agent token,
+   * builds one summary of the last period (filed, fixed with their fix lines and PRs, reopened,
+   * claims stuck past their lease, how many are still open, the oldest waiting) and sends it
+   * with `send` (slackDigest, emailDigest or your own), or returns it as Markdown. Call it from
+   * a cron (Vercel Cron, GitHub Actions, launchd) every hour or day. Off unless given.
+   */
+  digest?: DigestHandlerOptions;
+}
+
+export interface DigestHandlerOptions {
+  /** The period one call covers when it names no since. 'day' by default. */
+  every?: DigestPeriod;
+  /** Where the digest goes. Without it the route returns the digest (Markdown unless asked otherwise). */
+  send?: DigestSender;
+  /** Your app's name in the heading. */
+  appName?: string;
+  /** Where the queue can be seen, linked at the end. */
+  link?: string;
+  /** Send even when nothing happened in the period. Off by default. */
+  sendEmpty?: boolean;
 }
 
 /** Who an agent token belongs to (see HandlerOptions.agents). */
@@ -363,12 +385,41 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     return fail(r.claimedBy ? `${r.claimedBy} has it now.` : verb, 409);
   }
 
-  async function agentApi(req: Request, parts: string[]): Promise<Response> {
-    if (!opts.agentToken && !opts.agents) return fail('Not found', 404);
+  /** The bearer token's agent, the shared token's 'shared', or null. */
+  async function agentAuth(req: Request): Promise<AgentIdentity | 'shared' | null> {
     const auth = req.headers.get('authorization') ?? '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
     const identity = token && opts.agents ? await opts.agents(token, req) : null;
-    if (!identity && !(token && opts.agentToken && sameToken(token, opts.agentToken))) return fail('Unauthorized', 401);
+    if (identity) return identity;
+    return token && opts.agentToken && sameToken(token, opts.agentToken) ? 'shared' : null;
+  }
+
+  /** POST {base}/digest: the last period's digest, sent or returned (shipcue report 5f4d339b). */
+  async function digestRoute(req: Request): Promise<Response> {
+    const d = opts.digest;
+    if (!d || (!opts.agentToken && !opts.agents)) return fail('Not found', 404);
+    if (!(await agentAuth(req))) return fail('Unauthorized', 401);
+    const body = await readJson(req);
+    const time = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v) : null);
+    const every: DigestPeriod = body.every === 'hour' || body.every === 'day' ? body.every : (d.every ?? 'day');
+    if ((body.since != null && !time(body.since)) || (body.until != null && !time(body.until))) return fail('since and until are ISO times.');
+    const until = time(body.until) ?? new Date();
+    const since = time(body.since) ?? new Date(until.getTime() - DIGEST_PERIOD_MS[every]);
+    if (since >= until) return fail('since must be before until.');
+    const asked = (['slack', 'email', 'markdown'] as const).find((f) => f === body.format);
+    const format: DigestFormat = d.send ? d.send.format : (asked ?? 'markdown');
+    const message = await buildDigestMessage(store, { since, until, format, appName: d.appName, link: d.link });
+    const out = { subject: message.subject, text: message.text, format, empty: message.summary.empty, summary: message.summary };
+    if (!d.send || (message.summary.empty && !d.sendEmpty)) return json({ ...out, sent: false });
+    await d.send.send(message);
+    return json({ ...out, sent: true });
+  }
+
+  async function agentApi(req: Request, parts: string[]): Promise<Response> {
+    if (!opts.agentToken && !opts.agents) return fail('Not found', 404);
+    const who = await agentAuth(req);
+    if (!who) return fail('Unauthorized', 401);
+    const identity = who === 'shared' ? null : who;
 
     const [id, action] = parts;
     const body = req.method === 'POST' ? await readJson(req) : {};
@@ -702,6 +753,14 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         return await teamApi(req, path.slice(`${base}/team`.length).split('/').filter(Boolean));
       } catch (err) {
         console.error('shipcue: team api failed', err);
+        return fail('Something went wrong. Please try again.', 500);
+      }
+    }
+    if (req.method === 'POST' && path === `${base}/digest`) {
+      try {
+        return await digestRoute(req);
+      } catch (err) {
+        console.error('shipcue: digest failed', err);
         return fail('Something went wrong. Please try again.', 500);
       }
     }

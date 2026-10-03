@@ -160,6 +160,17 @@ createShipcueHandler({ ...,
 <p>An agent that would rather not open a port can listen instead. <code>shipcue-listen</code> polls the queue and runs a command for each event, with the event as JSON on stdin:</p>
 <pre><code>SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=...   npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"</code></pre>
 <p>Events: <code>filed</code>, <code>assigned</code> (queued for this agent), <code>claimed</code>, <code>released</code>, <code>closed</code>, <code>video</code>. shipcue Cloud writes the launchd or systemd file that keeps it running (<a href="/cloud/">Run a listener</a>).</p>
+<h3>One digest instead of a message per event</h3>
+<p>Turn on <code>digest</code> and a cron gets one summary per hour or day: what was filed, fixed (with the fix line and PR), reopened, claims stuck past their lease, how many are still open and the oldest waiting. Never who filed it, the page or the app snapshot.</p>
+<pre><code>import { slackDigest, emailDigest } from 'shipcue/server';
+
+createShipcueHandler({ ..., agentToken: process.env.SHIPCUE_TOKEN,
+  digest: { every: 'day', send: slackDigest({ webhookUrl: process.env.SLACK_WEBHOOK }) },
+})
+
+# Vercel Cron, GitHub Actions or launchd, once a day:
+curl -X POST https://app.example.com/api/shipcue/digest -H "Authorization: Bearer $SHIPCUE_TOKEN"</code></pre>
+<p>Without <code>send</code> it returns the digest as Markdown, ready for a daily note or an outliner log. Quiet periods send nothing (<code>sendEmpty</code> to send anyway); <code>digest(store, { since, until, format })</code> builds one anywhere.</p>
 
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
@@ -171,6 +182,7 @@ POST /reports/:id/claim       take a specific report (409 if someone has it)
 POST /reports/:id/release     give it back to the queue
 POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }
 POST /reports/:id/note        { "text": "..." }: a note on the report's history
+POST /digest                  { since?, until?, every? }: the last period's digest (with the digest option)
 GET  /board                   no token: the queue and the changelog (only with board on)
 GET  /board/version           no token: changes whenever a report does (for a live board)
 GET  /capabilities            no token: what the handler takes (video, files, limits)</code></pre>

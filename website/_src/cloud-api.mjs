@@ -1,7 +1,7 @@
 // The Vercel function behind /api/cloud/...: shipcue Cloud (see cloud.mjs).
 import pg from 'pg';
 import { waitUntil } from '@vercel/functions';
-import { createCloudHandler, insforgeAuth } from './cloud.mjs';
+import { createCloudHandler, insforgeAuth, insforgeEmail } from './cloud.mjs';
 import { hostedFromEnv } from './hosted.mjs';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
@@ -16,6 +16,10 @@ const handler = createCloudHandler({
   hosted: hostedFromEnv(),
   // Its OpenAI call runs after the response.
   background: (work) => waitUntil(work),
+  // The activity digest (shipcue report 5f4d339b): Vercel Cron (vercel.json) calls /api/cloud/digest with CRON_SECRET,
+  // and email digests go out with InsForge emails, like the fix emails in api.mjs.
+  cronSecret: process.env.CRON_SECRET,
+  sendEmail: insforgeEmail(process.env.SHIPCUE_CLOUD_AUTH_URL, process.env.SHIPCUE_EMAIL_API_KEY),
 });
 
 // vercel.json sends /api/cloud/<rest> here as ?__p=<rest>; put the path back.
