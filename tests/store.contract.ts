@@ -29,6 +29,36 @@ export function storeContract(name: string, makeStore: () => Promise<ReportStore
       expect((await store.get(r.id))?.context).toBe('- a block\n  - its child');
     });
 
+    describe('retry-safe filing (idempotencyKey, shipcue report 9833fd28)', () => {
+      it('files a key once and answers a repeat with the original report', async () => {
+        const first = await store.create(sample({ idempotencyKey: 'draft-key-1' }));
+        expect(first.replayed).toBeUndefined();
+        expect(first).not.toHaveProperty('idempotencyKey');
+        const again = await store.create(sample({ idempotencyKey: 'draft-key-1', description: 'Sent again after a timeout' }));
+        expect(again.id).toBe(first.id);
+        expect(again.replayed).toBe(true);
+        expect(again.description).toBe(first.description);
+        expect((await store.list()).filter((r) => r.id === first.id)).toHaveLength(1);
+        expect((await store.list()).filter((r) => r.description === 'Sent again after a timeout')).toHaveLength(0);
+      });
+
+      it('files one row when the same key arrives at once', async () => {
+        const before = (await store.list()).length;
+        const all = await Promise.all([1, 2, 3, 4].map(() => store.create(sample({ idempotencyKey: 'draft-key-race' }))));
+        expect(new Set(all.map((r) => r.id)).size).toBe(1);
+        expect(all.filter((r) => !r.replayed)).toHaveLength(1);
+        expect((await store.list()).length).toBe(before + 1);
+      });
+
+      it('files different keys, and no key, as separate reports', async () => {
+        const a = await store.create(sample({ idempotencyKey: 'draft-key-a' }));
+        const b = await store.create(sample({ idempotencyKey: 'draft-key-b' }));
+        const c = await store.create(sample());
+        const d = await store.create(sample());
+        expect(new Set([a.id, b.id, c.id, d.id]).size).toBe(4);
+      });
+    });
+
     it('creates an open report and reads it back', async () => {
       const r = await store.create(sample({ screenshots: ['data:image/png;base64,AAA'] }));
       expect(r.status).toBe('open');

@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { ACTIVE_STATUSES, altFragment, BLOCKED_FILE_TYPES, conflictWarning, conflictsOf, findConflicts, validateScope, type ConflictReport, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, SHIPCUE_VERSION, toAgentPrompt, toBoardItem, toMineItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
+import { ACTIVE_STATUSES, altFragment, cleanIdempotencyKey, BLOCKED_FILE_TYPES, conflictWarning, conflictsOf, findConflicts, validateScope, type ConflictReport, MAX_RESOLUTION, PRIORITIES, formatBytes, resolveConfig, SHIPCUE_VERSION, toAgentPrompt, toBoardItem, toMineItem, validateEdit, validateReport, videoExtension, videoType, withShotAlt, type Board, type Capabilities, type Claimant, type ReportType, type ShipcueConfig, type Report } from '../core';
 import type { ReportStore } from './store';
 import { broadcast, type Broadcaster, type ShipcueEventType } from './broadcast';
 import { findGitHubLink, publicGitHubLinks } from './links';
@@ -212,7 +212,7 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
 /**
  * One fetch-style handler for both sides of the queue:
  *
- *   POST {base}/reports                 the button files a report (multipart form)
+ *   POST {base}/reports                 the button files a report (multipart form; a repeat idempotencyKey returns the first report, 200)
  *   GET  {base}/capabilities            what this handler takes (videos, other files), for the button
  *   POST {base}/reports/:id/video       the button attaches a video (multipart "video", or JSON { url })
  *   GET  {base}/reports?status=open     agent: the queue, most urgent first
@@ -338,7 +338,17 @@ export function createShipcueHandler(opts: HandlerOptions): ShipcueHandler {
 
     // Signed in, they may still leave their name off it.
     const anonymous = !!reporter && opts.anonymousLimit !== undefined && form.get('anonymous') === '1';
-    const report = await store.create({ ...checked.value, reporter: anonymous ? null : reporter, screenshots, ...(clientKey ? { clientKey } : {}) });
+    // One per draft, the same on a retry (shipcue report 9833fd28); an odd one is ignored.
+    const idempotencyKey = cleanIdempotencyKey(form.get('idempotencyKey'));
+    const { replayed, ...report } = await store.create({
+      ...checked.value,
+      reporter: anonymous ? null : reporter,
+      screenshots,
+      ...(clientKey ? { clientKey } : {}),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
+    // Already filed (the first send got through, its answer did not): the same id, and nobody is told twice.
+    if (replayed) return json({ id: report.id, replayed: true }, 200);
     if (opts.onReport) {
       try {
         await opts.onReport(report);

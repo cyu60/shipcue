@@ -1,6 +1,6 @@
 {
   "name": "shipcue",
-  "version": "0.26.2",
+  "version": "0.27.0",
   "description": "A drop-in bug report and feature request button whose inbox is a queue that people and coding agents both work from.",
   "license": "MIT",
   "type": "module",

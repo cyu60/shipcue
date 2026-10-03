@@ -4,7 +4,7 @@
 
 <br>
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-559%20passing-2E5BFF?style=flat-square" alt="559 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16203A?style=flat-square" alt="MIT license"></a> <img src="https://img.shields.io/badge/tests-580%20passing-2E5BFF?style=flat-square" alt="580 tests passing"> <img src="https://img.shields.io/badge/MCP-ready-FFD43B?style=flat-square&labelColor=16203A" alt="MCP ready"> <img src="https://img.shields.io/badge/Postgres-self--hosted-16203A?style=flat-square" alt="Self-hosted on Postgres">
 
 # shipcue: Bug Reports Your Coding Agents Can Fix
 
@@ -87,6 +87,8 @@ export { handler as GET, handler as POST };
 
 The handler is a plain `(Request) => Promise<Response>`, so it also works in Hono, Remix, Bun, Deno and Cloudflare Workers. Screenshots are stored as data URLs unless you pass `saveScreenshot(file, key)` to upload them to S3, Supabase Storage or similar.
 
+**Retry-safe filing.** The panel sends an `idempotencyKey` form field with each report: one per draft, the same on every retry of it (a failed send, a timeout), new after a successful send or for a new report. A repeat key gets the report already filed (same id, status 200, `replayed: true`) instead of a copy, and `onReport` and broadcasters hear about it once. Both built-in stores do this; `postgresStore` needs the "Upgrading from 0.26" block of `sql/schema.sql` (a nullable `idempotency_key` column and a unique index per project), and without it reports file as before, without the protection. Custom stores get `NewReport.idempotencyKey` and return the first report with `replayed: true` on a repeat. Keys that are too long (over 100 characters) or have odd characters are ignored, never refused.
+
 **Your reports on any device.** When `getReporter` reads a verified session, add `reporterPortal: true`: `GET /mine` returns the signed-in reporter's own reports (status, fix line, PR; never anyone else's, never diagnostics) and the panel's Yours list adds them. Not for a reporter the browser says itself (the button's `reporter` prop), so shipcue Cloud projects skip it.
 
 **Videos.** Pass `saveVideo(file, key)` to turn on `POST /reports/:id/video`: whoever filed a report can attach one screen recording or video (WebM, MP4 or MOV, up to 40 MB) within 30 minutes. Hosts that cap request bodies (Vercel: 4.5 MB) should upload from the browser instead, with the button's `uploadVideo` prop and a presigned URL.
@@ -103,7 +105,7 @@ import { ReportButton } from 'shipcue/react';
 />
 ```
 
-Use `variant="inline"` for a header or toolbar button on phones, where a floating bubble covers the controls. Pass `submit={(form) => myServerAction(form)}` to send through a server action instead of `fetch`. Pass `reporter={user.email}` to say who is signed in on your site: it goes with each report in the `x-shipcue-user` header, shipcue Cloud shows it as the reporter, and your own handler can read it in `getReporter`.
+Use `variant="inline"` for a header or toolbar button on phones, where a floating bubble covers the controls. Pass `submit={(form) => myServerAction(form)}` to send through a server action instead of `fetch`; the form carries `idempotencyKey` (one per draft, the same on a retry), so file a key once and answer a repeat with the report already filed. Pass `reporter={user.email}` to say who is signed in on your site: it goes with each report in the `x-shipcue-user` header, shipcue Cloud shows it as the reporter, and your own handler can read it in `getReporter`.
 
 What else the panel does:
 
@@ -333,6 +335,8 @@ Release tarballs for GitHub: `npm run pack:release` (builds, then `npm pack`).
 
 ## Changelog
 
+- **0.27.0**: retry-safe filing (shipcue report 9833fd28): one report per draft, even when the network or database stalls. The panel sends an `idempotencyKey` with each report, kept across retries of the same draft (a failed send, a timeout) and renewed after a successful send or for a new report (a fresh open, a cleared draft); custom `submit` props get it in their FormData. The handler passes it to the store, which files a key once per project and answers a repeat with the original report (same id, `200 { id, replayed: true }`; no second row, `onReport`, broadcast or reporter email), race-safe (`INSERT … ON CONFLICT DO NOTHING`, then the row already there). Invalid keys (over 100 characters, odd characters) are ignored. Stores: `NewReport.idempotencyKey`, `CreatedReport` (`replayed?: true`); core: `cleanIdempotencyKey`, `newIdempotencyKey`. No new dependency, no fuzzy duplicate matching, no offline queue. **Upgrading (postgresStore, e.g. Stanford Founders network): run the new "Upgrading from 0.26" block of `sql/schema.sql` (or the whole file again; it is safe to repeat) to get the protection. It only adds a nullable `idempotency_key` column and a partial unique index. Without it nothing breaks: reports file as before, just without the dedupe.** Cloud: also in `sql/cloud.sql` (unique per project).
+
 - **0.26.2**: `sql/schema.sql` can be run again on a database whose history already has `edited` entries (the 0.18 block no longer narrows the action check before the 0.20/0.21 block widens it). `shipcue doctor` finds a Pages Router route (`pages/` or `src/pages/api/shipcue/[...path].ts`).
 - **0.26.1**: the resize grip is easier to find: a bigger corner target (22px, 32px on touch) with a darker glyph, and Display now says which corner to drag ("Resize the panel by dragging its top-left corner").
 - **0.26.0**: one view of every queue (shipcue report e4e1a85e). `/capabilities` returns `version`, the installed shipcue, from `SHIPCUE_VERSION` (exported from `shipcue`, set from package.json at build time), with `compareVersions`. shipcue Cloud opens on **All projects** for anyone on two or more: per project open / claimed / in review, "waiting 2d" for the oldest open report, claims stuck past their lease, and a **Nobody has looked** filter (open, never claimed, assigned or noted), each linking to its CueLog; an optional app URL per project (Setup → Settings) shows "shipcue 0.17.0 · behind 0.25.0", read server-side with a short timeout and cached, "unknown" when the app does not answer. The CueLog's "Claimed by" filter gains *Nobody has looked* (`nobodyLooked`). **Upgrading (Cloud):** run the new `app_url` line in `sql/cloud.sql`.
@@ -406,7 +410,6 @@ If an idea fails these, it belongs in your app (through `formExtras`, `fields`, 
 The backlog lives on [shipcue's own CueLog](https://shipcue.ibuildathing.com/cuelog/) as low-priority reports, each with its smallest version and what it leaves out:
 
 - Publish to npm (the package is ready; `shipcue doctor` shipped in 0.25.0)
-- Retry-safe filing: one report per draft, even when the network or database stalls
 - Swarm mode: work-area claims are in ([docs/swarm.md](docs/swarm.md)); "Work this queue" is next
 
 ## License

@@ -28,7 +28,7 @@
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
 <p>Until it's on npm, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
-<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.26.2/shipcue-0.26.2.tgz</code></pre>
+<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v0.27.0/shipcue-0.27.0.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 <p>Stuck at any step? <code>npx shipcue doctor</code> says what is missing and how to fix it (see <a href="#doctor">Check your setup</a>). On shipcue Cloud, with no database of your own, <code>npx shipcue init --cloud pk_…</code> gives you the button for your project.</p>
 
@@ -54,6 +54,7 @@ const handler = createShipcueHandler({
 
 export { handler as GET, handler as POST };</code></pre>
 <p>Screenshots are stored as small data URLs unless you pass <code>saveScreenshot(file, key)</code> to upload them to S3 or Supabase Storage. A failure inside <code>onReport</code> never fails the report.</p>
+<p><strong>Retry-safe filing.</strong> The panel sends an <code>idempotencyKey</code> with each report: one per draft, the same on every retry of it. When a send times out but the report was saved (a stalled database), the retry gets the same report back (same id, status 200) instead of filing a copy, and <code>onReport</code> and broadcasters hear about it once. <code>postgresStore</code> needs the "Upgrading from 0.26" block of <code>sql/schema.sql</code> (one nullable column and a unique index per project); until you run it, reports file as before without the protection.</p>
 <p>Pass <code>saveVideo(file, key)</code> to let reporters attach a screen recording or video (WebM, MP4 or MOV, up to 40 MB) through <code>POST /reports/:id/video</code>. On hosts that cap request bodies, upload from the browser with the button's <code>uploadVideo</code> prop instead.</p>
 <p><strong>Reporter portal.</strong> When <code>getReporter</code> reads a verified session (your auth cookie), add <code>reporterPortal: true</code>: <code>GET /mine</code> returns the signed-in reporter's own reports (status, fix line, PR, dates; never anyone else's, never diagnostics), and the panel's Yours list adds them, so it works on any device. Pins stay in each browser. Pair it with <code>emailReporter({ mineLink })</code>, and see <a href="/app/mine/">My reports</a> on shipcue's own site. Never turn it on when the reporter comes from the browser (the button's <code>reporter</code> prop): anyone could read anyone's reports. That is why shipcue Cloud projects do not offer it.</p>
 
@@ -67,7 +68,7 @@ export { handler as GET, handler as POST };</code></pre>
 /&gt;</code></pre>
 <ul>
   <li><code>variant="inline"</code> puts a small button in your header, which works better on phones where a floating bubble covers the controls.</li>
-  <li><code>submit={(form) =&gt; action(form)}</code> sends through a Next.js server action instead of <code>fetch</code>.</li>
+  <li><code>submit={(form) =&gt; action(form)}</code> sends through a Next.js server action instead of <code>fetch</code>. The form carries <code>idempotencyKey</code> (one per draft, the same on a retry, new after a successful send): store it with a unique index and answer a repeat with the report already filed, and a stalled database can't leave copies.</li>
   <li><code>diagnostics</code> is a snapshot for whoever fixes the report. Keep it under 64 KB. If it throws, the report still goes through.</li>
   <li><code>reporter={user.email}</code> says who is signed in on your site. It goes with each report in the <code>x-shipcue-user</code> header; shipcue Cloud shows it as the reporter, and your own handler can read it in <code>getReporter</code>. Your site vouches for it.</li>
   <li>The panel has three tabs: Bug, Feature request and Agent task. An agent task is a direct instruction for an agent, and its prompt tells the agent the text came from whoever filed it. On a public page you may want <code>types={['bug', 'feature']}</code>.</li>

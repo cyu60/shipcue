@@ -365,6 +365,30 @@ export function validateReport(raw: Record<string, unknown>, config: ShipcueConf
 }
 
 /** The longest what-changed line a report keeps. */
+/**
+ * Retry-safe filing (shipcue report 9833fd28): the panel sends one idempotencyKey per draft and
+ * the same key again when that draft is re-sent, so a store files it once. Keys are 1 to 100
+ * letters, digits, `.`, `_`, `:` or `-`.
+ */
+export const MAX_IDEMPOTENCY_KEY = 100;
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,100}$/;
+
+/** The key when it is a safe one, else null (an odd key is ignored, never a reason to refuse a report). */
+export function cleanIdempotencyKey(v: unknown): string | null {
+  return typeof v === 'string' && IDEMPOTENCY_KEY.test(v) ? v : null;
+}
+
+/** A new random key for a draft. */
+export function newIdempotencyKey(): string {
+  const c = (globalThis as { crypto?: Crypto }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  // Pages served over plain http have getRandomValues but not randomUUID.
+  const bytes = new Uint8Array(16);
+  if (c?.getRandomValues) c.getRandomValues(bytes);
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export const MAX_RESOLUTION = 2000;
 
 /** What a team member may rewrite on a filed report (shipcue report 5c54da74). */

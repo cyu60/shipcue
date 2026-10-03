@@ -364,3 +364,37 @@ describe('taking reports from other sites (cors, for a hosted queue)', () => {
     expect((await plain.handle(from('https://a.example.org'))).headers.get('access-control-allow-origin')).toBeNull();
   });
 });
+
+describe('retry-safe filing (shipcue report 9833fd28)', () => {
+  it('files a draft once: a resend with the same idempotencyKey gets the same id, with no second onReport or broadcast', async () => {
+    const onReport = vi.fn(async () => undefined);
+    const heard: string[] = [];
+    const { store, handle } = setup({ onReport, broadcasters: [{ name: 'test', send: async (e) => void heard.push(e.type) }] });
+    const first = await handle(post('/reports', reportForm({ idempotencyKey: 'draft_1234-abcd' })));
+    expect(first.status).toBe(201);
+    const { id } = await first.json();
+    const again = await handle(post('/reports', reportForm({ idempotencyKey: 'draft_1234-abcd' })));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ id, replayed: true });
+    expect(await store.list()).toHaveLength(1);
+    expect(onReport).toHaveBeenCalledTimes(1);
+    expect(heard).toEqual(['report.filed']);
+  });
+
+  it('files two reports for two keys', async () => {
+    const { store, handle } = setup();
+    const a = await (await handle(post('/reports', reportForm({ idempotencyKey: 'key-a' })))).json();
+    const b = await (await handle(post('/reports', reportForm({ idempotencyKey: 'key-b' })))).json();
+    expect(a.id).not.toBe(b.id);
+    expect(await store.list()).toHaveLength(2);
+  });
+
+  it('ignores a key that is too long or has odd characters, and still files the report', async () => {
+    const { store, handle } = setup();
+    for (const bad of ['k'.repeat(101), 'has spaces', "x'; DROP TABLE", 'emoji-☃']) {
+      expect((await handle(post('/reports', reportForm({ idempotencyKey: bad })))).status).toBe(201);
+      expect((await handle(post('/reports', reportForm({ idempotencyKey: bad })))).status).toBe(201);
+    }
+    expect(await store.list()).toHaveLength(8);
+  });
+});
