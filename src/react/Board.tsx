@@ -2,7 +2,8 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { type Board, type BoardItem, type ReportType } from '../core';
 import { fill, resolveText, type ShipcueText } from './text';
 import { useLightbox } from './Lightbox';
-import { STAR_OFF, STAR_ON, starredFirst, useStars } from './stars';
+import { PinIcon } from './PinIcon';
+import { starredFirst, useStars } from './stars';
 
 type View = 'open' | 'fixed' | 'all' | 'changelog' | 'starred';
 export type BoardTabStyle = 'pills' | 'tabs';
@@ -295,13 +296,13 @@ function StarButton({ star, label }: { star: ItemStar; label: string }) {
   return (
     <button
       type="button"
-      aria-label={star.on ? `Unstar: ${label}` : `Star: ${label}`}
+      aria-label={star.on ? `Unpin: ${label}` : `Pin: ${label}`}
       aria-pressed={star.on}
-      title={star.on ? 'Unstar' : 'Star to pin it to the top'}
+      title={star.on ? 'Unpin' : 'Pin it to the top'}
       onClick={star.toggle}
-      style={{ ...s.pickBtn, opacity: 1, padding: 0, color: star.on ? '#d97706' : 'inherit', fontSize: '1.05em', lineHeight: 1, flex: 'none' }}
+      style={{ ...s.pickBtn, opacity: star.on ? 1 : 0.55, padding: 0, color: 'inherit', lineHeight: 1, flex: 'none' }}
     >
-      {star.on ? STAR_ON : STAR_OFF}
+      <PinIcon on={star.on} size={13} />
     </button>
   );
 }

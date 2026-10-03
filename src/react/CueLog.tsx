@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type DragEvent } from 'react';
 import { useLightbox } from './Lightbox';
-import { STAR_OFF, STAR_ON, starredFirst, useStars } from './stars';
+import { PinIcon } from './PinIcon';
+import { starredFirst, useStars } from './stars';
 import { PRIORITIES, PRIORITY_LABEL, TYPE_LABEL, sortQueue, type Claimant, type Priority, type Report, type ReportEvent, type ReportType, type Status } from '../core';
 
 // The CueLog: the team's table of every report, worked by people and agents together.
@@ -27,7 +28,7 @@ export interface CueLogFilter {
 
 export const CUELOG_TEXT = {
   title: 'CueLog',
-  tabs: { open: 'Open', mine: 'Mine', starred: 'Starred', in_review: 'In review', fixed: 'Fixed', all: 'All' } as Record<CueLogTab, string>,
+  tabs: { open: 'Open', mine: 'Mine', starred: 'Pinned', in_review: 'In review', fixed: 'Fixed', all: 'All' } as Record<CueLogTab, string>,
   status: { open: 'Open', claimed: 'Claimed', in_review: 'In review', fixed: 'Fixed', wontfix: "Won't fix" } as Record<Status, string>,
   nobody: 'Nobody yet',
   queuedFor: 'Queued for',
@@ -345,7 +346,7 @@ export function CueLogTable({
                       />
                     </th>
                   )}
-                  <th style={s.th} aria-label="Starred" />
+                  <th style={s.th} aria-label="Pinned" />
                   <th style={s.th}>Report</th>
                   <th style={s.th}>Priority</th>
                   <th style={s.th}>Status</th>
@@ -376,12 +377,12 @@ export function CueLogTable({
                     <td style={s.td}>
                       <button
                         type="button"
-                        aria-label={st.isStarred(r.id) ? `Unstar ${headline(r)}` : `Star ${headline(r)}`}
+                        aria-label={st.isStarred(r.id) ? `Unpin ${headline(r)}` : `Pin ${headline(r)}`}
                         aria-pressed={st.isStarred(r.id)}
                         onClick={() => st.toggle(r.id)}
-                        style={{ ...s.link, color: st.isStarred(r.id) ? '#d97706' : 'inherit', opacity: st.isStarred(r.id) ? 1 : 0.45 }}
+                        style={{ ...s.link, opacity: st.isStarred(r.id) ? 1 : 0.45 }}
                       >
-                        {st.isStarred(r.id) ? STAR_ON : STAR_OFF}
+                        <PinIcon on={st.isStarred(r.id)} size={13} />
                       </button>
                     </td>
                     <td style={{ ...s.td, ...s.headline }}>

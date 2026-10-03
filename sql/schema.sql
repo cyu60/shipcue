@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS shipcue_report_events (
   at          timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 CREATE INDEX IF NOT EXISTS shipcue_report_events_report ON shipcue_report_events (report_id, at);
+-- Keeps a report's history in the order it happened, even when two changes share a timestamp.
+ALTER TABLE shipcue_report_events ADD COLUMN IF NOT EXISTS seq bigint GENERATED ALWAYS AS IDENTITY;
 
 -- Upgrading from 0.13: anonymousLimit. Who sent a signed-out report, as a keyed hash of their
 -- address (never the address), so the handler can ask them to sign in after a few.

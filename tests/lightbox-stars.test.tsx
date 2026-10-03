@@ -42,10 +42,10 @@ describe('stars on the CueLog board (report 013562b6)', () => {
     render(<ShipcueBoard liveMs={0} refreshMs={0} />);
     await screen.findByText('First one');
     expect(screen.getByText('Yours')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Star: Second one' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pin: Second one' }));
     const items = screen.getAllByRole('listitem');
     expect(items[0]).toHaveTextContent('Second one');
-    expect(screen.getByRole('tab', { name: 'Starred 1' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Pinned 1' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Preview screenshot 1' }));
     expect(screen.getByRole('dialog', { name: 'Screenshot 1 of 1' })).toBeInTheDocument();
   });
@@ -68,7 +68,7 @@ describe('the report panel remembers what you sent', () => {
     await screen.findByRole('status');
     fireEvent.click(fab);
     fireEvent.click(await screen.findByRole('button', { name: /^Yours/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Star The save button does nothing at all' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pin The save button does nothing at all' }));
     expect(JSON.parse(localStorage.getItem('shipcue:stars')!)).toEqual(['r-1']);
   });
 });
@@ -98,4 +98,42 @@ describe('the sign-in nudge (report dce33fd0)', () => {
     await screen.findByRole('status');
     expect(sentAnonymous).toBe('1');
   });
+});
+
+describe('the Pin button next to Dictate (report a346d199)', () => {
+  it('pins the report as it is sent', async () => {
+    vi.stubGlobal('fetch', async (url: string) =>
+      String(url).endsWith('/capabilities') ? new Response('{}', { status: 404 }) : new Response(JSON.stringify({ id: 'r-9' }), { status: 201 }),
+    );
+    render(<ReportButton endpoint="/api/shipcue" />);
+    fireEvent.click(screen.getAllByRole('button').find((b) => b.querySelector('[data-icon="hat"]'))!);
+    const pin = await screen.findByRole('button', { name: 'Pin this report' });
+    expect(pin.querySelector('[data-icon="pin"]')).not.toBeNull();
+    fireEvent.click(pin);
+    expect(screen.getByRole('button', { name: 'Unpin this report' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'Pin this one please, it matters' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Send/ }));
+    await screen.findByRole('status');
+    expect(JSON.parse(localStorage.getItem('shipcue:stars')!)).toEqual(['r-9']);
+  });
+});
+
+it('pin={false} hides the Pin button, and a pinned send tells the backend', async () => {
+  let pinned: string | null = null;
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith('/capabilities')) return new Response('{}', { status: 404 });
+    pinned = (init?.body as FormData).get('pinned') as string | null;
+    return new Response(JSON.stringify({ id: 'r-10' }), { status: 201 });
+  });
+  const { unmount } = render(<ReportButton endpoint="/api/shipcue" pin={false} />);
+  fireEvent.click(screen.getAllByRole('button').find((b) => b.querySelector('[data-icon="hat"]'))!);
+  expect(screen.queryByRole('button', { name: 'Pin this report' })).toBeNull();
+  unmount();
+  render(<ReportButton endpoint="/api/shipcue" />);
+  fireEvent.click(screen.getAllByRole('button').find((b) => b.querySelector('[data-icon="hat"]'))!);
+  fireEvent.click(await screen.findByRole('button', { name: 'Pin this report' }));
+  fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'Pinned and sent to the backend' } });
+  fireEvent.click(screen.getByRole('button', { name: /^Send/ }));
+  await screen.findByRole('status');
+  expect(pinned).toBe('1');
 });
