@@ -366,3 +366,124 @@ describe('forwarding (Slack and a signed webhook)', () => {
     }
   });
 });
+
+describe('shipcue Cloud: the hosted agent (shipcue report 3d2dded6)', () => {
+  const GOOD = { summary: 'The save button does nothing.', area: 'other', priority: 'high', priorityReason: 'Nobody can save.', steps: ['Click Save'], missing: [], plan: ['Find the save handler', 'Fix it'] };
+  let pending: Promise<unknown>[];
+  let openaiCalls: number;
+  async function hostedProject(opts: { available?: boolean } = {}) {
+    pending = [];
+    openaiCalls = 0;
+    handle = createCloudHandler({
+      db: { query: (t: string, p?: unknown[]) => db.query(t, p) },
+      auth,
+      beta: ['ada@example.com'],
+      secureCookies: false,
+      hosted:
+        opts.available === false
+          ? null
+          : {
+              apiKey: 'sk-test',
+              model: 'gpt-test',
+              timeoutMs: 1000,
+              dailyLimit: 2,
+              fetchImpl: async () => {
+                openaiCalls++;
+                return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(GOOD) } }] }));
+              },
+            },
+      background: (work: Promise<unknown>) => pending.push(work),
+    });
+    await signUp('ada@example.com');
+    const { data } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Hosted' } });
+    await call('POST', `/projects/${data.project.id}/invites`, { as: 'ada@example.com', body: { email: 'bob@example.com', role: 'member' } });
+    await signUp('bob@example.com');
+    await call('GET', '/me', { as: 'bob@example.com' });
+    return data.project as { id: string; publicKey: string };
+  }
+  const file = (key: string, description = 'The save button does nothing at all') => {
+    const form = new FormData();
+    form.set('type', 'bug');
+    form.set('description', description);
+    return handle(new Request(`${BASE}/p/${key}/reports`, { method: 'POST', body: form }));
+  };
+  const settle = async () => {
+    while (pending.length) await Promise.all(pending.splice(0));
+  };
+
+  it('owners turn it on and off; it is not offered where the server has no key', async () => {
+    const p = await hostedProject();
+    expect((await call('POST', `/projects/${p.id}/settings`, { as: 'bob@example.com', body: { hostedAgent: true } })).res.status).toBe(403);
+    const { data } = await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { hostedAgent: true, hostedAutoTriage: true } });
+    expect(data.project).toMatchObject({ hostedAgent: true, hostedAutoTriage: true });
+    const { data: detail } = await call('GET', `/projects/${p.id}`, { as: 'ada@example.com' });
+    expect(detail.hosted).toEqual({ available: true, name: 'shipcue-agent', dailyLimit: 2 });
+    // It is not one of the agents people connect (no token, no Disconnect), but it can be assigned work.
+    expect(detail.agents).toEqual([]);
+    const { data: me } = await call('GET', `/p/${p.publicKey}/team/me`, { as: 'ada@example.com' });
+    expect(me.claimants.filter((c: { kind: string }) => c.kind === 'agent').map((c: { name: string }) => c.name)).toEqual(['shipcue-agent']);
+    const rows = await db.query<{ token_hash: string | null; hosted: boolean }>('SELECT token_hash, hosted FROM cloud_agents WHERE revoked_at IS NULL');
+    expect(rows.rows).toEqual([{ token_hash: null, hosted: true }]);
+    // Turning it on twice keeps one; nobody can take its name.
+    await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { hostedAgent: true } });
+    expect((await db.query('SELECT 1 FROM cloud_agents WHERE hosted AND revoked_at IS NULL')).rows).toHaveLength(1);
+    expect((await call('POST', `/projects/${p.id}/agents`, { as: 'bob@example.com', body: { name: 'shipcue-agent' } })).res.status).toBe(400);
+
+    // Off: it leaves the claimant list, and what was queued for it goes back to the queue.
+    await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { hostedAutoTriage: false } });
+    await file(p.publicKey);
+    const { data: list } = await call('GET', `/p/${p.publicKey}/team/reports`, { as: 'ada@example.com' });
+    const id = list.reports[0].id;
+    const bot = me.claimants.find((c: { kind: string }) => c.kind === 'agent');
+    // Still queued for it (say its triage is under way) when it is turned off.
+    await db.query(`UPDATE shipcue_reports SET claimant_kind = 'agent', claimant_id = $1, claimed_by = 'shipcue-agent' WHERE id = $2`, [bot.id, id]);
+    await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { hostedAgent: false } });
+    const { data: after } = await call('GET', `/p/${p.publicKey}/team/reports/${id}`, { as: 'ada@example.com' });
+    expect(after.report).toMatchObject({ status: 'open', claimantId: null });
+    expect(after.events.map((e: { action: string }) => e.action)).toEqual(['released']);
+    expect((await call('GET', `/p/${p.publicKey}/team/me`, { as: 'ada@example.com' })).data.claimants.some((c: { kind: string }) => c.kind === 'agent')).toBe(false);
+    expect((await call('POST', `/p/${p.publicKey}/team/reports/${id}/assign`, { as: 'ada@example.com', body: { to: { kind: 'agent', id: bot.id } } })).res.status).toBe(400);
+    expect(openaiCalls).toBe(0);
+
+    const p2 = await hostedProject({ available: false });
+    expect((await call('POST', `/projects/${p2.id}/settings`, { as: 'ada@example.com', body: { hostedAgent: true } })).res.status).toBe(409);
+    expect((await call('GET', `/projects/${p2.id}`, { as: 'ada@example.com' })).data.hosted.available).toBe(false);
+  });
+
+  it('assigned a report from the CueLog, it triages after the response, notes it and puts it back', async () => {
+    const p = await hostedProject();
+    await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { hostedAgent: true } });
+    expect((await file(p.publicKey)).status).toBe(201);
+    await settle();
+    expect(openaiCalls).toBe(0); // auto-triage is off
+    const { data: list } = await call('GET', `/p/${p.publicKey}/team/reports`, { as: 'ada@example.com' });
+    const id = list.reports[0].id;
+    const { data: me } = await call('GET', `/p/${p.publicKey}/team/me`, { as: 'ada@example.com' });
+    const bot = me.claimants.find((c: { kind: string }) => c.kind === 'agent');
+    const assigned = await call('POST', `/p/${p.publicKey}/team/reports/${id}/assign`, { as: 'ada@example.com', body: { to: { kind: 'agent', id: bot.id } } });
+    expect(assigned.res.status).toBe(200);
+    expect(pending).toHaveLength(1);
+    await settle();
+    const { data: after } = await call('GET', `/p/${p.publicKey}/team/reports/${id}`, { as: 'ada@example.com' });
+    expect(after.report).toMatchObject({ status: 'open', claimantId: null });
+    expect(after.events.map((e: { action: string }) => e.action)).toEqual(['assigned', 'claimed', 'note', 'released']);
+    const note = after.events.find((e: { action: string }) => e.action === 'note');
+    expect(note.actor).toMatchObject({ kind: 'agent', name: 'shipcue-agent' });
+    expect(note.detail.text).toContain('Suggested priority: high. Nobody can save.');
+  });
+
+  it('auto-triage notes every new report, up to the daily cap', async () => {
+    const p = await hostedProject();
+    await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { hostedAgent: true, hostedAutoTriage: true } });
+    for (let i = 0; i < 3; i++) {
+      expect((await file(p.publicKey, `The save button does nothing, take ${i}`)).status).toBe(201);
+      await settle();
+    }
+    expect(openaiCalls).toBe(2);
+    const notes = await db.query<{ text: string }>(`SELECT detail->>'text' AS text FROM shipcue_report_events WHERE action = 'note' ORDER BY seq`);
+    expect(notes.rows).toHaveLength(3);
+    expect(notes.rows[2]!.text).toMatch(/today's limit of 2/);
+    const reports = await db.query<{ status: string; claimant_id: string | null }>('SELECT status, claimant_id FROM shipcue_reports');
+    expect(reports.rows.every((r) => r.status === 'open' && r.claimant_id === null)).toBe(true);
+  });
+});

@@ -3,8 +3,9 @@
 // {base}/p/<public key>/... with the same routes as a self-hosted handler (button, agent API, team API).
 // Sign-in is InsForge auth on shipcue's project, kept server-side in httpOnly cookies.
 import { createHash, randomBytes } from 'node:crypto';
-import { EVENT_TYPES, createShipcueHandler, postgresStore, slack, webhook } from '../../src/server';
+import { EVENT_TYPES, broadcast, createShipcueHandler, postgresStore, slack, webhook } from '../../src/server';
 import { resolveConfig } from '../../src/core';
+import { triageReport } from './hosted.mjs';
 
 const ROLES = ['owner', 'member', 'viewer'];
 const TYPES = ['bug', 'feature', 'task'];
@@ -20,6 +21,8 @@ const OAUTH_PROVIDERS = ['google', 'github'];
 // Who is filing, as the site's button says (ReportButton's `reporter`): printable text, capped.
 const REPORTER_HEADER = 'x-shipcue-user';
 const MAX_REPORTER = 200;
+// The hosted agent's name in the CueLog (shipcue report 3d2dded6); no one else's agent can take it.
+const HOSTED_NAME = 'shipcue-agent';
 
 const json = (body, status = 200, headers = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
@@ -123,9 +126,17 @@ export async function cloudUserFrom(req, auth) {
  *   base?: string, beta?: string[], secureCookies?: boolean, refreshDays?: number, cookiePath?: string, appPath?: string }} opts
  *   appPath: where Continue with Google lands, signed in or with ?error= (default /app/).
  *   beta: emails that may create projects during the invite-only beta. Everyone else joins by invite.
+ *   hosted: the hosted agent's OpenAI settings (hostedFromEnv in hosted.mjs), or null to leave it off on this server.
+ *   background: keeps work running after the response (Vercel: waitUntil); by default it just runs.
  */
 export function createCloudHandler(opts) {
   const { db, auth } = opts;
+  const hosted = opts.hosted ?? null;
+  const background =
+    opts.background ??
+    ((work) => {
+      void work;
+    });
   const base = (opts.base ?? '/api/cloud').replace(/\/$/, '');
   const beta = new Set((opts.beta ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean));
   const secure = opts.secureCookies !== false;
@@ -199,6 +210,8 @@ export function createCloudHandler(opts) {
     slackConnected: !!p.slack_webhook_url,
     webhookUrl: p.webhook_url ?? null,
     notifyEvents: p.notify_events ?? ['report.filed', 'report.closed'],
+    hostedAgent: !!p.hosted_agent,
+    hostedAutoTriage: !!p.hosted_auto_triage,
     createdAt: new Date(p.created_at).toISOString(),
   });
 
@@ -341,7 +354,7 @@ export function createCloudHandler(opts) {
       const [members, invites, agents] = await Promise.all([
         q(`SELECT id, user_id, email, name, role FROM cloud_members WHERE project_id = $1 AND NOT is_deleted ORDER BY created_at`, [id]),
         owner ? q(`SELECT id, email, role, created_at FROM cloud_invites WHERE project_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL ORDER BY created_at`, [id]) : [],
-        q(`SELECT id, name, owner_user_id, owner_name, pull, types, last_seen_at, created_at FROM cloud_agents WHERE project_id = $1 AND revoked_at IS NULL ORDER BY created_at`, [id]),
+        q(`SELECT id, name, owner_user_id, owner_name, pull, types, last_seen_at, created_at FROM cloud_agents WHERE project_id = $1 AND revoked_at IS NULL AND NOT hosted ORDER BY created_at`, [id]),
       ]);
       return json({
         project: publicProject(p),
@@ -357,6 +370,8 @@ export function createCloudHandler(opts) {
           types: a.types,
           lastSeenAt: a.last_seen_at ? new Date(a.last_seen_at).toISOString() : null,
         })),
+        // Whether this server can run the hosted agent, and its daily cap per project.
+        hosted: { available: !!hosted, name: HOSTED_NAME, dailyLimit: hosted?.dailyLimit ?? null },
       });
     }
     if (req.method !== 'POST') return fail('Not found', 404);
@@ -431,8 +446,32 @@ export function createCloudHandler(opts) {
         if (!events || !events.every((e) => EVENT_TYPES.includes(e))) return fail(`Events are ${EVENT_TYPES.join(', ')}.`);
         set('notify_events', [...new Set(events)]);
       }
+      // The hosted agent (shipcue report 3d2dded6): turning it on makes its agent row, off retires it.
+      let hostedOn;
+      if (b.hostedAgent !== undefined) {
+        hostedOn = b.hostedAgent === true;
+        if (hostedOn && !hosted) return fail('The hosted agent is not available on this server.', 409);
+        if (hostedOn && (await q(`SELECT 1 FROM cloud_agents WHERE project_id = $1 AND name = $2 AND revoked_at IS NULL AND NOT hosted`, [id, HOSTED_NAME])).length) {
+          return fail(`Disconnect your agent named ${HOSTED_NAME} first.`, 409);
+        }
+        set('hosted_agent', hostedOn);
+      }
+      if (b.hostedAutoTriage !== undefined) set('hosted_auto_triage', b.hostedAutoTriage === true);
       if (!sets.length) return fail('Nothing to change.');
       const [row] = await q(`UPDATE cloud_projects SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, params);
+      if (hostedOn === true && !(await q(`SELECT 1 FROM cloud_agents WHERE project_id = $1 AND hosted AND revoked_at IS NULL`, [id])).length) {
+        await q(
+          `INSERT INTO cloud_agents (project_id, name, token_hash, owner_user_id, owner_name, pull, hosted) VALUES ($1, $2, NULL, $3, $4, false, true)`,
+          [id, HOSTED_NAME, user.id, m.name],
+        );
+      }
+      if (hostedOn === false) {
+        const gone = await q(`UPDATE cloud_agents SET revoked_at = now() WHERE project_id = $1 AND hosted AND revoked_at IS NULL RETURNING id`, [id]);
+        // Reports still queued for it go back to the queue.
+        const store = postgresStore(db, 'shipcue_reports', { project: id });
+        const by = { kind: 'person', id: user.id, name: m.name };
+        for (const a of gone) for (const r of await store.list({ claimant: a.id })) await store.release(r.id, { by });
+      }
       return json({ project: publicProject(row), ...(webhookSecret ? { webhookSecret } : {}) });
     }
 
@@ -479,7 +518,7 @@ export function createCloudHandler(opts) {
       if (m.role === 'viewer') return fail('Viewers cannot connect agents.', 403);
       if (subId && subAction === 'revoke') {
         if (!UUID.test(subId)) return fail('Not found', 404);
-        const a = (await q(`SELECT owner_user_id FROM cloud_agents WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL`, [subId, id]))[0];
+        const a = (await q(`SELECT owner_user_id FROM cloud_agents WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL AND NOT hosted`, [subId, id]))[0];
         if (!a) return fail('Not found', 404);
         if (!owner && a.owner_user_id !== user.id) return fail('Only an owner or whoever connected it can disconnect it.', 403);
         await q(`UPDATE cloud_agents SET revoked_at = now() WHERE id = $1`, [subId]);
@@ -487,6 +526,7 @@ export function createCloudHandler(opts) {
       }
       const name = String(b.name ?? '').trim().toLowerCase();
       if (!AGENT_NAME.test(name)) return fail('Agent names are lowercase letters, numbers and . _ @ - (up to 60).');
+      if (name === HOSTED_NAME) return fail(`${HOSTED_NAME} is the hosted agent's name. Pick another.`);
       const types = b.types == null ? null : Array.isArray(b.types) && b.types.length && b.types.every((t) => TYPES.includes(t)) ? b.types : undefined;
       if (types === undefined) return fail('Types are bug, feature and task.');
       const pull = b.pull === true ? true : b.pull === false ? false : null;
@@ -500,6 +540,48 @@ export function createCloudHandler(opts) {
       return json({ agent: a, token }, 201);
     }
     return fail('Not found', 404);
+  }
+
+  /**
+   * The hosted agent as a broadcaster (shipcue report 3d2dded6): a report assigned to it, or any new one
+   * with auto-triage, is triaged after the response (background), so filing and assigning never wait on OpenAI.
+   */
+  async function hostedBroadcaster(p, store, config, forwarders) {
+    if (!hosted || !p.hosted_agent) return [];
+    const row = (await q(`SELECT id, name FROM cloud_agents WHERE project_id = $1 AND hosted AND revoked_at IS NULL`, [p.id]))[0];
+    if (!row) return [];
+    const agent = { kind: 'agent', id: row.id, name: row.name };
+    return [
+      {
+        name: 'hosted agent',
+        events: ['report.filed', 'report.assigned'],
+        async send(e) {
+          const assigned = e.type === 'report.assigned' && e.report.status === 'open' && e.report.claimantId === agent.id;
+          if (!assigned && !(e.type === 'report.filed' && p.hosted_auto_triage)) return;
+          const work = triageReport({
+            store,
+            reportId: e.report.id,
+            agent,
+            areas: config.areas,
+            held: assigned,
+            openai: hosted,
+            dailyLimit: hosted.dailyLimit,
+            // The cap counts its notes in the last 24 hours.
+            usedToday: async () =>
+              Number(
+                (
+                  await q(
+                    `SELECT count(*)::int AS n FROM shipcue_report_events WHERE project_id = $1 AND action = 'note' AND actor_id = $2 AND at > now() - interval '1 day'`,
+                    [p.id, agent.id],
+                  )
+                )[0].n,
+              ),
+            onReleased: (r) => broadcast(forwarders, { type: 'report.released', at: new Date().toISOString(), report: r }),
+          }).catch((err) => console.error('shipcue cloud: hosted agent failed', err));
+          background(work);
+        },
+      },
+    ];
   }
 
   /** The project's own shipcue handler: the button, the agent API and the team API. */
@@ -516,9 +598,16 @@ export function createCloudHandler(opts) {
     const filing = req.method === 'POST' && (path === `${base}/p/${key}/reports` || /^\/reports\/[^/]+\/video$/.test(path.slice(`${base}/p/${key}`.length)));
     if (filing && origin && !p.allowed_origins.includes(origin)) return fail("This site is not on the project's list of sites.", 403);
     const s = teamPath ? await session(req) : null;
+    const store = postgresStore(db, 'shipcue_reports', { project: p.id });
+    const config = resolveConfig({ areas: Array.isArray(p.areas) ? p.areas : [] });
+    // Each project's own forwarding: a Slack channel and/or a signed webhook.
+    const forwarders = [
+      ...(p.slack_webhook_url ? [slack({ webhookUrl: p.slack_webhook_url, events: p.notify_events })] : []),
+      ...(p.webhook_url ? [webhook({ url: p.webhook_url, secret: p.webhook_secret ?? undefined, events: p.notify_events })] : []),
+    ];
     const handler = createShipcueHandler({
-      store: postgresStore(db, 'shipcue_reports', { project: p.id }),
-      config: resolveConfig({ areas: Array.isArray(p.areas) ? p.areas : [] }),
+      store,
+      config,
       basePath: `${base}/p/${key}`,
       cors: p.allowed_origins,
       // The site vouches for who is signed in there; Cloud cannot check it.
@@ -530,15 +619,11 @@ export function createCloudHandler(opts) {
         return !!(sess && (await memberOf(p.id, sess.user.id)));
       },
       leaseSeconds: p.lease_seconds ?? undefined,
-      // Each project's own forwarding: a Slack channel and/or a signed webhook.
-      broadcasters: [
-        ...(p.slack_webhook_url ? [slack({ webhookUrl: p.slack_webhook_url, events: p.notify_events })] : []),
-        ...(p.webhook_url ? [webhook({ url: p.webhook_url, secret: p.webhook_secret ?? undefined, events: p.notify_events })] : []),
-      ],
+      broadcasters: [...forwarders, ...(await hostedBroadcaster(p, store, config, forwarders))],
       agents: async (token) => {
         const a = (
           await q(
-            `UPDATE cloud_agents SET last_seen_at = now() WHERE token_hash = $1 AND project_id = $2 AND revoked_at IS NULL RETURNING id, name, pull, types`,
+            `UPDATE cloud_agents SET last_seen_at = now() WHERE token_hash = $1 AND project_id = $2 AND revoked_at IS NULL AND NOT hosted RETURNING id, name, pull, types`,
             [sha256(token), p.id],
           )
         )[0];

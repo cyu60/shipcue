@@ -1,6 +1,8 @@
 // The Vercel function behind /api/cloud/...: shipcue Cloud (see cloud.mjs).
 import pg from 'pg';
+import { waitUntil } from '@vercel/functions';
 import { createCloudHandler, insforgeAuth } from './cloud.mjs';
+import { hostedFromEnv } from './hosted.mjs';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 const handler = createCloudHandler({
@@ -10,6 +12,10 @@ const handler = createCloudHandler({
   base: '/api/cloud',
   // Invite-only beta: the emails that may create projects, comma-separated.
   beta: (process.env.SHIPCUE_CLOUD_BETA ?? '').split(','),
+  // The hosted agent (shipcue report 3d2dded6): OPENAI_API_KEY, SHIPCUE_HOSTED_MODEL, SHIPCUE_HOSTED_DAILY_LIMIT.
+  hosted: hostedFromEnv(),
+  // Its OpenAI call runs after the response.
+  background: (work) => waitUntil(work),
 });
 
 // vercel.json sends /api/cloud/<rest> here as ?__p=<rest>; put the path back.

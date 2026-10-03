@@ -98,6 +98,10 @@ export function createAgentClient(opts: AgentClientOptions) {
     async heartbeat(id: string): Promise<Report> {
       return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/heartbeat`))!.report;
     },
+    /** Adds a note to the report's history, under this agent's name (shipcue report 3d2dded6). */
+    async note(id: string, text: string): Promise<ReportEvent> {
+      return (await post<{ event: ReportEvent }>(`/${encodeURIComponent(id)}/note`, { text, agent }))!.event;
+    },
     /** A PR is up: the report goes to in review. */
     async review(id: string, prUrl: string): Promise<Report> {
       return (await post<{ report: Report }>(`/${encodeURIComponent(id)}/review`, { prUrl }))!.report;

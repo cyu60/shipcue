@@ -178,6 +178,7 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
  *   POST {base}/reports/:id/heartbeat   agent: renew its lease
  *   POST {base}/reports/:id/review      agent: { prUrl }: a PR is up, the report is in review
  *   GET  {base}/reports/:id/events      agent: the report's history
+ *   POST {base}/reports/:id/note        agent: { text }: a note on the report's history
  *   GET  {base}/reports?mine=1          agent: what it holds or has queued
  *   GET|POST {base}/team/...            the CueLog table for signed-in members (see the team option)
  *
@@ -345,6 +346,14 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
     for (const r of await store.expire()) await emit('report.released', r);
   }
 
+  /** A note's text, trimmed and within config.maxNote, or an error (shipcue report 3d2dded6). */
+  const noteText = (v: unknown): { text: string } | { error: string } => {
+    const text = typeof v === 'string' ? v.trim() : '';
+    if (!text) return { error: 'Write the note.' };
+    if (text.length > config.maxNote) return { error: `Notes can be up to ${config.maxNote} characters.` };
+    return { text };
+  };
+
   const isPrUrl = (v: unknown): v is string => typeof v === 'string' && v.length <= 500 && /^https?:\/\/[^\s]+$/i.test(v);
 
   /** 409 naming the holder when there is one, else 404. */
@@ -430,6 +439,14 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
       const r = await store.close(id, body.status, resolution, { holder, by, prUrl: (body.prUrl as string | undefined) ?? null });
       await emit('report.closed', r);
       return r ? json({ report: r }) : identity ? lost(id) : fail('No such report', 404);
+    }
+    if (action === 'note') {
+      // Any agent may note any report; it goes in the history under its name (shipcue report 3d2dded6).
+      if (!store.note) return fail('Not found', 404);
+      const n = noteText(body.text);
+      if ('error' in n) return fail(n.error);
+      const event = await store.note(id, n.text, me);
+      return event ? json({ event }, 201) : fail('No such report', 404);
     }
     return fail('Not found', 404);
   }
@@ -525,6 +542,14 @@ export function createShipcueHandler(opts: HandlerOptions): (req: Request) => Pr
         const r = await store.review(id, body.prUrl, { by: me });
         await emit('report.review', r);
         return r ? json({ report: forTeam(r) }) : fail('Only open or claimed reports can go to review.', 409);
+      }
+      case 'note': {
+        if (!store.note) return fail('Not found', 404);
+        const n = noteText(body.text);
+        if ('error' in n) return fail(n.error);
+        const event = await store.note(id, n.text, me);
+        const r = event && (await store.get(id));
+        return r ? json({ event, report: forTeam(r) }, 201) : fail('No such report', 404);
       }
       case 'priority': {
         if (!store.setPriority) return fail('Not found', 404);

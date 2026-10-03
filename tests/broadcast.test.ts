@@ -109,4 +109,10 @@ describe('shipcue-listen: what changed between two looks', () => {
     ]);
     expect(diffReports(new Map(now.map((r) => [r.id, r])), now)).toEqual([]);
   });
+  it('hears a report queued for an agent as assigned (shipcue report 3d2dded6)', () => {
+    const before = new Map([['a', report({ id: 'a', status: 'open' })]]);
+    const now = [report({ id: 'a', status: 'open', claimantKind: 'agent', claimantId: 'agent-1', claimedBy: 'mac-mini' })];
+    expect(diffReports(before, now).map((c) => c.type)).toEqual(['report.assigned']);
+    expect(diffReports(new Map(now.map((r) => [r.id, r])), now)).toEqual([]);
+  });
 });

@@ -193,6 +193,24 @@ export function storeContract(name: string, makeStore: () => Promise<ReportStore
         expect((await store.events!(r.id)).filter((e) => e.action === 'claimed').length).toBe(1);
       });
 
+      it('keeps notes in the history and leaves the report as it was (shipcue report 3d2dded6)', async () => {
+        const r = await store.create(sample({ priority: 'low' }));
+        await store.claim(r.id, bot);
+        const before = (await store.get(r.id))!;
+        const e = await store.note!(r.id, 'Steps:\n1. Open the page', bot);
+        expect(e).toMatchObject({ reportId: r.id, action: 'note', actor: bot, detail: { text: 'Steps:\n1. Open the page' } });
+        await store.note!(r.id, 'A person says hi', ada);
+        const after = (await store.get(r.id))!;
+        expect({ ...after, updatedAt: before.updatedAt }).toEqual(before);
+        expect(after.updatedAt! >= before.updatedAt!).toBe(true);
+        expect((await store.events!(r.id)).map((x) => [x.action, x.actor?.name, x.detail.text])).toEqual([
+          ['claimed', 'claude-code', undefined],
+          ['note', 'claude-code', 'Steps:\n1. Open the page'],
+          ['note', 'Ada', 'A person says hi'],
+        ]);
+        expect(await store.note!('00000000-0000-4000-8000-000000000999', 'nobody', ada)).toBeNull();
+      });
+
       it('lists one claimant\'s reports', async () => {
         const a = await store.create(sample());
         await store.create(sample());

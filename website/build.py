@@ -275,6 +275,7 @@ createShipcueHandler({ ...,
 <p>An agent that would rather not open a port can listen instead. <code>shipcue-listen</code> polls the queue and runs a command for each event, with the event as JSON on stdin:</p>
 <pre><code>SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=... \
   npx shipcue-listen --on filed -- claude -p "Fix the newest report in the shipcue queue"</code></pre>
+<p>Events: <code>filed</code>, <code>assigned</code> (queued for this agent), <code>claimed</code>, <code>released</code>, <code>closed</code>, <code>video</code>. shipcue Cloud writes the launchd or systemd file that keeps it running (<a href="/cloud/">Run a listener</a>).</p>
 
 <h2>HTTP API</h2>
 <p>Everything except filing a report needs <code>Authorization: Bearer $SHIPCUE_TOKEN</code>. Leave <code>agentToken</code> unset to switch the agent API off.</p>
@@ -285,6 +286,7 @@ POST /reports/next/claim      take the most urgent open report (204 when empty)
 POST /reports/:id/claim       take a specific report (409 if someone has it)
 POST /reports/:id/release     give it back to the queue
 POST /reports/:id/close       { "status": "fixed" | "wontfix", "resolution": "PR link" }
+POST /reports/:id/note        { "text": "..." }: a note on the report's history
 GET  /board                   no token: the queue and the changelog (only with board on)
 GET  /board/version           no token: changes whenever a report does (for a live board)
 GET  /capabilities            no token: what the handler takes (video, files, limits)</code></pre>
@@ -315,6 +317,7 @@ CLOUD = """
   <li><strong>People and agents claim from the same table.</strong> Claim a report yourself, assign it to a teammate, or queue it for an agent. Each agent has its own token, so you can see which one holds what.</li>
   <li><strong>No double work.</strong> Claims are all-or-nothing. An agent's claim runs out if it stops checking in, and an open PR puts the report in review.</li>
   <li><strong>A team.</strong> Invite people as owners, members (work the queue) or viewers (see it).</li>
+  <li><strong>Notes.</strong> People and agents leave notes on a report (the <code>add_note</code> MCP tool); the CueLog shows them in its history.</li>
 </ul>
 <h2>Set up</h2>
 <ol>
@@ -322,12 +325,18 @@ CLOUD = """
   <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app, and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report.</li>
   <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
 </ol>
+<h2>Run a listener</h2>
+<p>Keep an agent working the queue on your own machine, like a daemon. In Setup, under <strong>Run a listener</strong>, pick an agent (or create one on the spot, and its token is filled in), choose the events (filed, assigned to it, claimed, released, closed, video) and what it runs for each one. By default that is:</p>
+<pre><code>claude -p "Use the shipcue MCP tools to claim the report in $SHIPCUE_REPORT_ID, fix it, open a PR and submit it for review"</code></pre>
+<p>Copy it as one command, as a macOS launchd agent (it keeps running, starts at login and logs to <code>~/Library/Logs/shipcue-listen-&lt;project&gt;.log</code>) or as a Linux systemd <code>--user</code> unit. The listener checks the queue every 15 seconds and needs no open port. For instant delivery, point the project's webhook (Forward reports) at that machine instead, say a Tailscale Funnel address.</p>
+<h2>Hosted agent</h2>
+<p>Every project can turn on <strong>shipcue-agent</strong>, an agent that runs on shipcue, so there is nothing to install. Assign a report to it in the CueLog (or switch on <em>Triage every new report</em>) and it reads the report with OpenAI and leaves a note: a one-paragraph summary, the likely area, a suggested priority with a reason, steps to reproduce or what is missing, and a short plan for a coding agent. Then it puts the report back in the queue for a person or a coding agent to fix. It never changes code, never sees screenshots or who filed the report, and treats the report's words as data, not instructions. Each project gets a daily allowance of triages.</p>
 <h2>What stays the same</h2>
 <p>The button, the API and the MCP tools are the same as the open source package, and the CueLog table is in it too (<code>CueLogTable</code> with the handler's <code>team</code> option). You can move between hosted and self-hosted at any time.</p>
 <h2>Later</h2>
 <ul>
-  <li>Sending reports on to GitHub Issues, Linear, Slack and email</li>
-  <li>An email to the reporter when their report is fixed</li>
+  <li>Sending reports on to GitHub Issues and Linear</li>
+  <li>A hosted agent that opens the PR too</li>
 </ul>
 </div>
 """

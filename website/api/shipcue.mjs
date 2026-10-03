@@ -68,7 +68,8 @@ function resolveConfig(partial = {}) {
     maxVideoBytes: partial.maxVideoBytes ?? 40 * 1024 * 1024,
     maxVideoSeconds: partial.maxVideoSeconds ?? 60,
     allowFiles: partial.allowFiles ?? false,
-    maxAltText: partial.maxAltText ?? 500
+    maxAltText: partial.maxAltText ?? 500,
+    maxNote: partial.maxNote ?? 4e3
   };
 }
 function toBoardItem(r, screenshots) {
@@ -371,6 +372,22 @@ function postgresStore(db, table = "shipcue_reports", opts = {}) {
       );
       return Number(rows[0]?.n ?? 0);
     },
+    async note(id, text, by) {
+      if (!isUuid(id)) return null;
+      const params = [id];
+      const proj = project == null ? "NULL::uuid" : `${p(params, project)}::uuid`;
+      const a = by ?? null;
+      const where = `id = $1 AND NOT is_deleted${scope(params)}`;
+      const values = [proj, `'note'`, p(params, a?.kind ?? null), p(params, a?.id ?? null), p(params, a?.name ?? null), `${p(params, JSON.stringify({ text }))}::jsonb`].join(", ");
+      const { rows } = await db.query(
+        `WITH r AS (UPDATE ${table} SET updated_at = now() WHERE ${where} RETURNING id),
+              e AS (INSERT INTO ${events} (report_id, project_id, action, actor_kind, actor_id, actor_name, detail) SELECT id, ${values} FROM r
+                    RETURNING id, report_id, action, actor_kind, actor_id, actor_name, detail, at)
+         SELECT * FROM e`,
+        params
+      );
+      return rows[0] ? toEvent(rows[0]) : null;
+    },
     async events(id) {
       if (!isUuid(id)) return [];
       const params = [id];
@@ -637,6 +654,12 @@ function createShipcueHandler(opts) {
     if (!store.expire) return;
     for (const r of await store.expire()) await emit("report.released", r);
   }
+  const noteText = (v) => {
+    const text = typeof v === "string" ? v.trim() : "";
+    if (!text) return { error: "Write the note." };
+    if (text.length > config.maxNote) return { error: `Notes can be up to ${config.maxNote} characters.` };
+    return { text };
+  };
   const isPrUrl = (v) => typeof v === "string" && v.length <= 500 && /^https?:\/\/[^\s]+$/i.test(v);
   async function lost(id, verb = "Someone else has it") {
     const r = await store.get(id);
@@ -715,6 +738,13 @@ function createShipcueHandler(opts) {
       const r = await store.close(id, body.status, resolution, { holder, by, prUrl: body.prUrl ?? null });
       await emit("report.closed", r);
       return r ? json({ report: r }) : identity ? lost(id) : fail("No such report", 404);
+    }
+    if (action === "note") {
+      if (!store.note) return fail("Not found", 404);
+      const n = noteText(body.text);
+      if ("error" in n) return fail(n.error);
+      const event = await store.note(id, n.text, me);
+      return event ? json({ event }, 201) : fail("No such report", 404);
     }
     return fail("Not found", 404);
   }
@@ -805,6 +835,14 @@ function createShipcueHandler(opts) {
         const r = await store.review(id, body.prUrl, { by: me });
         await emit("report.review", r);
         return r ? json({ report: forTeam(r) }) : fail("Only open or claimed reports can go to review.", 409);
+      }
+      case "note": {
+        if (!store.note) return fail("Not found", 404);
+        const n = noteText(body.text);
+        if ("error" in n) return fail(n.error);
+        const event = await store.note(id, n.text, me);
+        const r = event && await store.get(id);
+        return r ? json({ event, report: forTeam(r) }, 201) : fail("No such report", 404);
       }
       case "priority": {
         if (!store.setPriority) return fail("Not found", 404);

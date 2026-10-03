@@ -3,6 +3,7 @@
   "type": "module",
   "dependencies": {
     "@vercel/blob": "^2.8.0",
+    "@vercel/functions": "^3.9.11",
     "pg": "^8.16.3"
   }
 }

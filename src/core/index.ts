@@ -25,7 +25,8 @@ export function toClaimant(who: string | Claimant): Claimant {
   return typeof who === 'string' ? { kind: 'agent', id: who, name: who } : who;
 }
 
-export const EVENT_ACTIONS = ['claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority'] as const;
+// 'note': a comment on the report from a person, an agent or Cloud's hosted agent (shipcue report 3d2dded6).
+export const EVENT_ACTIONS = ['claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note'] as const;
 export type ReportEventAction = (typeof EVENT_ACTIONS)[number];
 
 /** One change to a report, for its history in the CueLog. */
@@ -83,6 +84,8 @@ export interface ShipcueConfig {
   allowFiles: boolean;
   /** Longest alt text a screenshot may carry (shipcue report 58b727d9). */
   maxAltText: number;
+  /** Longest note on a report's history (shipcue report 3d2dded6). */
+  maxNote: number;
 }
 
 /** What the handler takes, from GET {base}/capabilities, so the button only offers that. */
@@ -186,6 +189,7 @@ export function resolveConfig(partial: Partial<ShipcueConfig> = {}): ShipcueConf
     maxVideoSeconds: partial.maxVideoSeconds ?? 60,
     allowFiles: partial.allowFiles ?? false,
     maxAltText: partial.maxAltText ?? 500,
+    maxNote: partial.maxNote ?? 4000,
   };
 }
 
