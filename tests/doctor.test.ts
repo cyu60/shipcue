@@ -103,6 +103,9 @@ describe('handler route', () => {
     expect(checkRoute(has(['app/api/shipcue/[...path]/route.ts'])).status).toBe('ok');
     expect(checkRoute(has(['src/app/api/shipcue/[...path]/route.js'])).detail).toContain('src/app');
     expect(checkRoute(has(['server/shipcue.ts']), 'server/shipcue.ts').status).toBe('ok');
+    // The Pages Router's API route counts too (ai-me).
+    expect(checkRoute(has(['src/pages/api/shipcue/[...path].ts'])).detail).toBe('src/pages/api/shipcue/[...path].ts');
+    expect(checkRoute(has(['pages/api/shipcue/[...path].js'])).status).toBe('ok');
   });
 
   it('fails with where to put it', () => {

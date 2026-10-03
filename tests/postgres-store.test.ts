@@ -67,3 +67,16 @@ describe('postgres store, projects', () => {
     expect(() => postgresStore({ query: async () => ({ rows: [] }) }, 'shipcue_reports', { project: "x' OR 1=1" })).toThrow();
   });
 });
+
+describe('sql/schema.sql runs again safely', () => {
+  it('re-applies over a history that already has every action, including edited and note', async () => {
+    const db = new PGlite();
+    await db.exec(schema);
+    const store = postgresStore({ query: (text, params) => db.query(text, params) });
+    const r = await store.create({ type: 'bug', priority: 'medium', area: 'other', description: 'Saving loses the last block', pageUrl: '', userAgent: '', diagnostics: {}, screenshots: [], reporter: null });
+    await store.note!(r.id, 'looked at it', { kind: 'person', id: 'ada', name: 'Ada' });
+    await store.edit!(r.id, { description: 'Saving loses the last block (offline)' }, { kind: 'person', id: 'ada', name: 'Ada' });
+    await expect(db.exec(schema)).resolves.toBeDefined();
+    await expect(db.exec(schema)).resolves.toBeDefined();
+  });
+});
