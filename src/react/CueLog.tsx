@@ -51,6 +51,10 @@ export const CUELOG_TEXT = {
   history: 'History',
   addNote: 'Add note',
   notePlaceholder: 'A note for the team or the next agent',
+  // The hosted agent's suggestions on its note (shipcue report 1c0bf5be).
+  applyPriority: 'Apply priority',
+  applyArea: 'Apply area',
+  mergeInto: 'Merge into',
   stale: 'stale',
   lease: 'lease',
   selected: 'selected',
@@ -222,13 +226,14 @@ export function CueLogTable({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = (await res.json().catch(() => ({}))) as { report?: Report; error?: string };
+      const data = (await res.json().catch(() => ({}))) as { report?: Report; into?: Report; error?: string };
       if (!res.ok || !data.report) {
         setError(data.error ?? 'That did not work.');
         return null;
       }
       setError(null);
-      setReports((list) => list?.map((r) => (r.id === id ? data.report! : r)) ?? list);
+      // A merge also changes the report it went into.
+      setReports((list) => list?.map((r) => (r.id === id ? data.report! : r.id === data.into?.id ? data.into : r)) ?? list);
       return data.report;
     },
     [api, credentials],
@@ -896,6 +901,7 @@ function Drawer({
                 {eventText(e)} · {ago(e.at)} ago
                 {/* Notes show in full (shipcue report 3d2dded6). */}
                 {e.action === 'note' && typeof e.detail.text === 'string' && <div style={s.note}>{e.detail.text}</div>}
+                {canEdit && e.action === 'note' && <SuggestionChips raw={e.detail.suggest} r={r} areas={areas} areaLabel={areaLabel} t={t} act={act} />}
               </li>
             ))}
           </ol>
@@ -916,6 +922,54 @@ function Drawer({
       )}
       {lb.box}
     </aside>
+  );
+}
+
+export interface Suggestion {
+  priority?: Priority;
+  area?: string;
+  duplicateOf?: string;
+}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The hosted agent's suggestions on a note, kept to what makes sense for the report now: a known
+ * priority or area it does not already have, and another report's id while this one is still open.
+ * Null when nothing is left (shipcue report 1c0bf5be).
+ */
+export function readSuggestion(raw: unknown, r: Pick<Report, 'id' | 'priority' | 'area' | 'status'>, areas: readonly Area[]): Suggestion | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const d = raw as Record<string, unknown>;
+  const out: Suggestion = {};
+  const priority = PRIORITIES.find((p) => p === d.priority);
+  if (priority && priority !== r.priority) out.priority = priority;
+  if (typeof d.area === 'string' && d.area !== r.area && areas.some((a) => a.value === d.area)) out.area = d.area;
+  if (typeof d.duplicateOf === 'string' && UUID.test(d.duplicateOf) && d.duplicateOf !== r.id && r.status !== 'fixed' && r.status !== 'wontfix') out.duplicateOf = d.duplicateOf;
+  return Object.keys(out).length ? out : null;
+}
+
+/** Small Apply chips under a note; each goes through the team API under the member, so it is logged. */
+function SuggestionChips({ raw, r, areas, areaLabel, t, act }: { raw: unknown; r: Report; areas: Area[]; areaLabel: (v: string) => string; t: CueLogText; act: Act }) {
+  const sg = readSuggestion(raw, r, areas);
+  if (!sg) return null;
+  return (
+    <span style={{ ...s.inline, margin: '0 0 0.3em' }}>
+      {sg.priority && (
+        <button type="button" style={s.chip} onClick={() => void act(r.id, 'priority', { priority: sg.priority })}>
+          {t.applyPriority}: {PRIORITY_LABEL[sg.priority]}
+        </button>
+      )}
+      {sg.area && (
+        <button type="button" style={s.chip} onClick={() => void act(r.id, 'edit', { area: sg.area })}>
+          {t.applyArea}: {areaLabel(sg.area)}
+        </button>
+      )}
+      {sg.duplicateOf && (
+        <button type="button" style={s.chip} onClick={() => void act(r.id, 'merge', { into: sg.duplicateOf })}>
+          {t.mergeInto} #{sg.duplicateOf.slice(0, 8)}
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -1103,5 +1157,6 @@ const s: Record<string, CSSProperties> = {
   actions: { display: 'grid', gap: '0.4em', justifyItems: 'start' },
   inline: { display: 'inline-flex', flexWrap: 'wrap', gap: '0.3em', alignItems: 'center' },
   timeline: { margin: 0, paddingLeft: '1.1em', fontSize: '0.85em', display: 'grid', gap: '0.2em' },
+  chip: { font: 'inherit', fontSize: '0.8em', padding: '0.05em 0.6em', border: '1px solid rgba(128,128,128,0.45)', borderRadius: 999, background: 'transparent', color: 'inherit', cursor: 'pointer' },
   note: { margin: '0.2em 0 0.3em', padding: '0.4em 0.55em', whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: line, borderRadius: 6 },
 };

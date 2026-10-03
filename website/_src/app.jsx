@@ -293,7 +293,7 @@ function Hosted({ detail, save }) {
       <h3 style={{ margin: 0 }}>4. Hosted agent</h3>
       <p style={s.small}>
         {h.name} runs on shipcue (OpenAI), nothing to install. Assign a report to it in the CueLog and it adds a note: a summary, the likely area, a suggested priority
-        with a reason, steps to reproduce or what is missing, and a short plan for a coding agent. Then it puts the report back in the queue. It never changes code.
+        with a reason, steps to reproduce or what is missing, and a short plan for a coding agent, with one-click Apply chips (and Merge when it looks like a duplicate of an open report). Then it puts the report back in the queue. It never changes code.
         {h.dailyLimit ? ` Up to ${h.dailyLimit} a day per project.` : ''}
       </p>
       {!h.available && <p style={s.small}>Not available on this server yet.</p>}

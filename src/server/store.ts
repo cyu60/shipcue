@@ -80,8 +80,10 @@ export interface ReportStore {
   /**
    * Adds a note to a report's history (shipcue report 3d2dded6): a person, an agent or a hosted
    * agent saying something about it. The report itself only gets a new updatedAt. Null for an unknown id.
+   * `extra` is kept beside the text in the event's detail, e.g. the hosted agent's `suggest` or a
+   * merge's `mergedFrom` (shipcue report 1c0bf5be); it never replaces `text`.
    */
-  note?(id: string, text: string, by?: Claimant | null): Promise<ReportEvent | null>;
+  note?(id: string, text: string, by?: Claimant | null, extra?: Record<string, unknown>): Promise<ReportEvent | null>;
   /**
    * Rewrites a filed report's text, type, area or what-changed line, in any status (shipcue
    * report 5c54da74). The history gets an 'edited' event naming the fields. Null for an unknown id.
@@ -228,9 +230,9 @@ export function memoryStore(): ReportStore {
     async events(id) {
       return log.filter((e) => e.reportId === id).map((e) => ({ ...e }));
     },
-    async note(id, text, by) {
+    async note(id, text, by, extra) {
       if (!update(id, () => true, () => ({}))) return null;
-      return { ...record(id, 'note', by, { text }) };
+      return { ...record(id, 'note', by, { ...extra, text }) };
     },
     async edit(id, patch, by) {
       const fields = editedFields(patch);

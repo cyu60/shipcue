@@ -623,6 +623,7 @@ export function createCloudHandler(opts) {
             areas: config.areas,
             held: assigned,
             openai: hosted,
+            candidates: hosted.duplicateCandidates,
             dailyLimit: hosted.dailyLimit,
             // The cap counts its notes in the last 24 hours.
             usedToday: async () =>
