@@ -83,6 +83,8 @@ export interface ShipcueText {
   unpinIt: string;
   pinHint: string;
   dragPanel: string;
+  // The panel's resize grip (shipcue report ee970b18).
+  resizePanel: string;
   // Copy a prompt that has an agent fill the form out and file it (shipcue report 9f533ece).
   copyAgentPrompt: string;
   copyAgentPromptHint: string;
@@ -208,6 +210,7 @@ export const DEFAULT_TEXT: ShipcueText = {
   unpinIt: 'Unpin this report',
   pinHint: 'Pin it: once sent, it stays at the top of Yours and the CueLog',
   dragPanel: 'Drag to move',
+  resizePanel: 'Drag to resize (or use the arrow keys)',
   copyAgentPrompt: 'Copy prompt for my agent',
   copyAgentPromptHint: 'For Claude Code or Codex: it asks you what is missing, then files this report for you',
   copied: 'Copied',

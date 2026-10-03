@@ -111,3 +111,132 @@ describe('dragging the panel moves the whole widget (reports 76015f97, 30beb674)
     expect(screen.queryByTitle('Drag to move')).toBeNull();
   });
 });
+
+describe('resizing the panel by its free corner (report ee970b18)', () => {
+  // jsdom has no layout: a 1200×900 window and the panel in the default bottom-right corner, its
+  // right edge at 1184 and bottom at 828. Its natural size is 384×500 CSS px; a width or
+  // min-height set on it wins, as in a browser, and the whole box scales with the text zoom.
+  const SIZE_KEY = 'shipcue:panel-size';
+  const px = (v: string) => Number(/([\d.]+)px/.exec(v)?.[1] ?? 0);
+  const layout = (dialog: HTMLElement) => {
+    dialog.getBoundingClientRect = () => {
+      const zoom = Number((dialog.style as CSSStyleDeclaration & { zoom: string }).zoom) || 1;
+      const width = (px(dialog.style.width) || 384) * zoom;
+      const height = Math.max(px(dialog.style.minHeight), 500) * zoom;
+      return { left: 1184 - width, top: 828 - height, width, height, right: 1184, bottom: 828, x: 1184 - width, y: 828 - height, toJSON: () => ({}) } as DOMRect;
+    };
+  };
+  const openPanel = async (props: Partial<Parameters<typeof ReportButton>[0]> = {}) => {
+    const view = render(<ReportButton endpoint="/api/shipcue" {...props} />);
+    Object.assign(window, { innerWidth: 1200, innerHeight: 900 });
+    fireEvent.click(fab());
+    const dialog = await screen.findByRole('dialog');
+    layout(dialog);
+    return { ...view, dialog };
+  };
+  const grip = () => screen.getByRole('button', { name: /resize/i });
+  const dragGrip = (from: [number, number], to: [number, number]) => {
+    fireEvent.pointerDown(grip(), { button: 0, clientX: from[0], clientY: from[1], pointerId: 1 });
+    fireEvent.pointerMove(grip(), { clientX: to[0], clientY: to[1], pointerId: 1 });
+    fireEvent.pointerUp(grip(), { clientX: to[0], clientY: to[1], pointerId: 1 });
+  };
+
+  it('the grip sits on the corner away from the button, and dragging it grows the panel and its text box', async () => {
+    const { dialog } = await openPanel();
+    // Panel above and left of a bottom-right button: the free corner is the top-left one.
+    expect(grip().style.top).not.toBe('');
+    expect(grip().style.left).not.toBe('');
+    expect(grip().style.cursor).toBe('nwse-resize');
+    dragGrip([816, 328], [716, 228]);
+    expect(dialog.style.width).toBe('484px');
+    expect(px(dialog.style.minHeight)).toBe(600);
+    // The form is a column and the text box takes the extra height.
+    const textarea = screen.getByRole('textbox', { name: 'Description' });
+    expect(textarea.style.flexGrow).toBe('1');
+    expect(JSON.parse(localStorage.getItem(SIZE_KEY)!)).toEqual({ width: 484, height: 600 });
+  });
+
+  it('never smaller than the default, never off the screen', async () => {
+    const { dialog } = await openPanel();
+    dragGrip([816, 328], [1100, 800]);
+    expect(JSON.parse(localStorage.getItem(SIZE_KEY)!)).toEqual({ width: 384, height: 500 });
+    dragGrip([816, 328], [-5000, -5000]);
+    // Held 8px inside the left and top edges of the window.
+    expect(dialog.style.width).toBe('1176px');
+    expect(px(dialog.style.minHeight)).toBe(820);
+  });
+
+  it('is kept in this browser and comes back on reload', async () => {
+    const first = await openPanel();
+    dragGrip([816, 328], [716, 228]);
+    first.unmount();
+    const { dialog } = await openPanel();
+    expect(dialog.style.width).toBe('484px');
+    expect(px(dialog.style.minHeight)).toBe(600);
+  });
+
+  it('keeps working with the text zoom (sizes are CSS px before it)', async () => {
+    localStorage.setItem('shipcue:appearance', JSON.stringify({ textSize: 'large' }));
+    const { dialog } = await openPanel();
+    expect((dialog.style as CSSStyleDeclaration & { zoom: string }).zoom).toBe('1.18');
+    dragGrip([700, 238], [582, 120]);
+    expect(dialog.style.width).toBe('484px');
+    expect(px(dialog.style.minHeight)).toBe(600);
+  });
+
+  it('arrow keys on the focused grip resize it, Shift for bigger steps', async () => {
+    const { dialog } = await openPanel();
+    grip().focus();
+    fireEvent.keyDown(grip(), { key: 'ArrowUp' });
+    expect(px(dialog.style.minHeight)).toBe(508);
+    fireEvent.keyDown(grip(), { key: 'ArrowLeft', shiftKey: true });
+    expect(dialog.style.width).toBe('432px');
+    fireEvent.keyDown(grip(), { key: 'ArrowRight', shiftKey: true });
+    fireEvent.keyDown(grip(), { key: 'ArrowRight', shiftKey: true });
+    expect(dialog.style.width).toBe('384px');
+    expect(JSON.parse(localStorage.getItem(SIZE_KEY)!)).toEqual({ width: 384, height: 508 });
+  });
+
+  it('Reset position (hotkey or Display) puts the size back too', async () => {
+    const { dialog } = await openPanel();
+    dragGrip([816, 328], [716, 228]);
+    fireEvent.keyDown(window, { key: 'H', code: 'KeyH', altKey: true, shiftKey: true });
+    expect(localStorage.getItem(SIZE_KEY)).toBeNull();
+    expect(dialog.style.width).toBe('min(92vw, 24rem)');
+    expect(dialog.style.minHeight).toBe('');
+    dragGrip([816, 328], [716, 228]);
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset position' }));
+    expect(localStorage.getItem(SIZE_KEY)).toBeNull();
+    expect(dialog.style.width).toBe('min(92vw, 24rem)');
+  });
+
+  it('a grip drag does not move the widget', async () => {
+    const { container } = await openPanel();
+    dragGrip([816, 328], [716, 228]);
+    const wrap = container.firstElementChild as HTMLElement;
+    expect(wrap.style.transform).toBe('');
+    expect(localStorage.getItem('shipcue:button-position')).toBeNull();
+  });
+
+  it('movable={false} still resizes, and Reset position is offered for the size', async () => {
+    const { dialog } = await openPanel({ movable: false });
+    dragGrip([816, 328], [716, 228]);
+    expect(dialog.style.width).toBe('484px');
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset position' }));
+    expect(dialog.style.width).toBe('min(92vw, 24rem)');
+  });
+
+  it('resizable={false} has no grip', async () => {
+    await openPanel({ resizable: false });
+    expect(screen.queryByRole('button', { name: /resize/i })).toBeNull();
+  });
+
+  it('the inline variant has no grip', async () => {
+    render(<ReportButton endpoint="/api/shipcue" variant="inline" />);
+    fireEvent.click(screen.getAllByRole('button')[0]!);
+    await screen.findByRole('dialog');
+    expect(screen.queryByRole('button', { name: /resize/i })).toBeNull();
+  });
+});

@@ -6,7 +6,7 @@ import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadU
 import { useLightbox } from './Lightbox';
 import { PinIcon } from './PinIcon';
 import { loadStars, rememberMine, starredFirst, toggleStar, useStars } from './stars';
-import { BUTTON_PX, SIZES, TEXT_ZOOM, loadAppearance, saveAppearance, type Appearance, type Size } from './appearance';
+import { BUTTON_PX, RESIZE, SIZES, TEXT_ZOOM, loadAppearance, loadPanelSize, saveAppearance, savePanelSize, type Appearance, type PanelSize, type Size } from './appearance';
 import { BLOCKED_FILE_TYPES, formatBytes, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
@@ -135,6 +135,13 @@ export interface ReportButtonProps {
    * or ⌃⇧H, puts it back). On by default; false pins it in place.
    */
   movable?: boolean;
+  /**
+   * People can resize the floating panel by the small grip on its free corner (the one away from
+   * the button), or with the arrow keys once the grip is focused; the text box takes the extra
+   * height (shipcue report ee970b18). Kept in their browser; Reset position puts it back. On by
+   * default, also with movable={false}; false keeps the default size. The inline variant has none.
+   */
+  resizable?: boolean;
   /**
    * Hide shipcue (button and hotkeys) unless the page is opened with ?<showParam>=true, e.g.
    * showParam="shipcue" for ?shipcue=true. Remembered for the tab; ?shipcue=false hides it again.
@@ -297,6 +304,7 @@ function ReportPanel({
   launcherIcon,
   icon = 'hat',
   movable = true,
+  resizable = true,
   formExtras,
   fields,
   dimOnOpen = false,
@@ -441,6 +449,7 @@ function ReportPanel({
   }, []);
   // The floating widget can be dragged (by the button, or the panel's title), so it can be put back.
   const canMove = variant === 'floating' && movable;
+  const canResize = variant === 'floating' && resizable;
   const [appearance, setAppearanceState] = useState<Appearance>({});
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only there in the browser
@@ -452,6 +461,8 @@ function ReportPanel({
   };
   const buttonPx = BUTTON_PX[appearance.buttonSize ?? buttonSizeProp];
   const textZoom = TEXT_ZOOM[appearance.textSize ?? textSizeProp];
+  const resize = usePanelResize(canResize, panelRef, textZoom);
+  const panelSize = resize.size;
   const [editingDisplay, setEditingDisplay] = useState(false);
   const [anonymous, setAnonymous] = useState(false);
   // Pin the report being written, so it stays at the top of Yours and the CueLog (report a346d199).
@@ -478,9 +489,9 @@ function ReportPanel({
   const keys = useMemo<Hotkeys>(() => {
     if (hotkeys === false) return {};
     const all = { ...appKeys, ...userKeys };
-    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id), ...(speech ? ['dictate'] : []), ...(canMove ? ['resetPosition'] : []), 'selectArea'];
+    const ids = [...tabs.map((t) => t.value as string), ...(extraTabs ?? []).map((x) => x.id), ...(speech ? ['dictate'] : []), ...(canMove || canResize ? ['resetPosition'] : []), 'selectArea'];
     return Object.fromEntries(ids.map((id) => [id, (all as Hotkeys)[id] ?? []]));
-  }, [hotkeys, appKeys, userKeys, tabs, extraTabs, speech, canMove]);
+  }, [hotkeys, appKeys, userKeys, tabs, extraTabs, speech, canMove, canResize]);
 
   // Open on a tab with what the report is about: the text highlighted on the page (not in
   // the panel), or else what the app says is selected.
@@ -672,11 +683,13 @@ function ReportPanel({
   }, [open]);
 
   // The panel follows its content, growing and shrinking, with a short ease instead of a jump
-  // (shipcue report e8b2dedd; it used to only grow).
+  // (shipcue report e8b2dedd; it used to only grow). A resized panel (report ee970b18) is sized by
+  // CSS instead: at least the chosen height, more when the content needs it.
+  const sized = canResize && panelSize !== null;
   useEffect(() => {
     const el = panelRef.current;
     const inner = contentRef.current;
-    if (!open || !el || !inner || typeof ResizeObserver === 'undefined') return;
+    if (!open || sized || !el || !inner || typeof ResizeObserver === 'undefined') return;
     let frame = 0;
     let first = true;
     // Written on the next frame: changing the size inside the observer's own callback
@@ -698,7 +711,7 @@ function ReportPanel({
       el.style.height = '';
       el.style.transition = '';
     };
-  }, [open]);
+  }, [open, sized]);
 
   useEffect(() => {
     if (!open) return;
@@ -892,7 +905,11 @@ function ReportPanel({
   const current = TYPES.find((t) => t.value === type)!;
   const s = styles(accentColor);
   const drag = useDraggableWidget(canMove, buttonPx, wrapRef);
-  const resetPosition = drag.reset;
+  // Reset position also forgets the panel's size (shipcue report ee970b18).
+  const resetPosition = () => {
+    drag.reset();
+    resize.reset();
+  };
   resetPositionRef.current = resetPosition;
   // The prompt needs somewhere to send the report: the handler, or an endpoint the app named.
   const canCopyPrompt = !submit || endpointProp !== undefined;
@@ -950,11 +967,12 @@ function ReportPanel({
         />
       )}
       {open && recording === null && !selecting && !capturing && (
+        <ResizeBox on={canResize} grip={resize.grip(drag.corner, t.resizePanel)}>
         <div
           ref={panelRef}
           role="dialog"
           aria-label={extra ? (extra.title ?? extra.label) : HEADING[type][0]}
-          style={{ ...(variant === 'floating' ? s.panel : s.inlinePanel), ...(textZoom !== 1 ? { zoom: textZoom } : null) }}
+          style={{ ...(variant === 'floating' ? s.panel : s.inlinePanel), ...resize.panelStyle, ...(textZoom !== 1 ? { zoom: textZoom } : null) }}
           onDragOver={(e) => {
             if (!extra && e.dataTransfer.types.includes('Files')) e.preventDefault();
           }}
@@ -964,7 +982,7 @@ function ReportPanel({
             void addFiles(Array.from(e.dataTransfer.files));
           }}
         >
-          <div ref={contentRef}>
+          <div ref={contentRef} style={sized ? s.grow : undefined}>
           <div style={{ ...s.row, ...drag.handleStyle }} {...drag.panelHandlers} title={canMove ? t.dragPanel : undefined}>
             <div>
               <h3 style={s.h3}>{extra ? (extra.title ?? extra.label) : HEADING[type][0]}</h3>
@@ -1037,7 +1055,7 @@ function ReportPanel({
                 rows={4}
                 aria-label="Description"
                 placeholder={current.placeholder}
-                style={s.textarea}
+                style={sized ? { ...s.textarea, flex: '1 0 auto' } : s.textarea}
               />
               <div style={{ ...s.row, alignItems: 'center', marginTop: 6, minHeight: 18 }}>
               {context === null && (
@@ -1379,7 +1397,7 @@ function ReportPanel({
                         </span>
                       </div>
                     ))}
-                  {canMove && (
+                  {(canMove || canResize) && (
                     <div style={s.keysRow}>
                       <button type="button" onClick={resetPosition} style={s.linkBtn}>
                         {t.resetPosition}
@@ -1392,7 +1410,7 @@ function ReportPanel({
               )}
               {editingKeys && hotkeys !== false && (
                 <div style={s.keysBox} aria-label="Shortcuts">
-                  {[...tabs.map((x) => ({ id: x.value as string, label: x.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label })), ...(speech ? [{ id: 'dictate', label: t.dictate }] : []), ...(canMove ? [{ id: 'resetPosition', label: t.resetPosition }] : []), { id: 'selectArea', label: t.selectArea }].map(({ id, label }) => (
+                  {[...tabs.map((x) => ({ id: x.value as string, label: x.label })), ...(extraTabs ?? []).map((x) => ({ id: x.id, label: x.label })), ...(speech ? [{ id: 'dictate', label: t.dictate }] : []), ...(canMove || canResize ? [{ id: 'resetPosition', label: t.resetPosition }] : []), { id: 'selectArea', label: t.selectArea }].map(({ id, label }) => (
                     <div key={id} style={s.keysRow}>
                       <span>{label}</span>
                       <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1505,6 +1523,7 @@ function ReportPanel({
           )}
           </div>
         </div>
+        </ResizeBox>
       )}
 
       {sent && (
@@ -1740,8 +1759,14 @@ function useDraggableWidget(enabled: boolean, FAB: number, wrapRef: React.RefObj
       }
     : {};
 
+  // The button's quadrant: bottom-right until it is moved (the panel opens away from it).
+  const corner = enabled && pos && typeof window !== 'undefined'
+    ? (({ x, y }) => ({ right: x > window.innerWidth / 2, bottom: y > window.innerHeight / 2 }))(clamp(pos.x, pos.y))
+    : { right: true, bottom: true };
+
   return {
     wrapStyle,
+    corner,
     handlers,
     panelHandlers,
     dragging,
@@ -1762,6 +1787,182 @@ function useDraggableWidget(enabled: boolean, FAB: number, wrapRef: React.RefObj
       const was = dragged.current;
       dragged.current = false;
       return was;
+    },
+  };
+}
+
+/** The floating panel's default width; resizing never goes narrower. */
+const PANEL_WIDTH = 'min(92vw, 24rem)';
+/** The floating panel never grows past this, resized or not. */
+const PANEL_MAX_HEIGHT = 'calc(100dvh - 6rem)';
+
+/** The panel and its resize grip, laid over the free corner; just the panel when off. */
+function ResizeBox({ on, grip, children }: { on: boolean; grip: React.ReactNode; children: React.ReactNode }) {
+  return on ? (
+    <div style={{ position: 'relative' }}>
+      {children}
+      {grip}
+    </div>
+  ) : (
+    <>{children}</>
+  );
+}
+
+/**
+ * Resize the floating panel by its free corner (shipcue report ee970b18): the one away from the
+ * button, so it grows towards the middle of the screen while the button stays put. Sizes are CSS
+ * px before the textSize zoom, at least the panel's own default and at most what keeps it 8px
+ * inside the window; kept in this browser. Arrow keys on the focused grip resize it too.
+ */
+function usePanelResize(enabled: boolean, panelRef: React.RefObject<HTMLDivElement | null>, zoom: number) {
+  const [size, setSize] = useState<PanelSize | null>(null);
+  const [, setViewport] = useState(0);
+  const start = useRef<{ px: number; py: number; w: number; h: number; left: boolean; top: boolean; b: Bounds } | null>(null);
+  const [touch, setTouch] = useState(false);
+  useEffect(() => {
+    if (!enabled) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only there in the browser
+    setSize(loadPanelSize());
+    setTouch(typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
+    const onResize = () => setViewport((n) => n + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [enabled]);
+
+  type Bounds = { minW: number; maxW: number; minH: number; maxH: number };
+  /** The panel's size now, and how small and big it may get, in CSS px. */
+  const measure = (left: boolean, top: boolean) => {
+    const el = panelRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    // Its default size: the same panel without the chosen width and height.
+    const { width, minHeight } = el.style;
+    el.style.width = PANEL_WIDTH;
+    el.style.minHeight = '';
+    const d = el.getBoundingClientRect();
+    el.style.width = width;
+    el.style.minHeight = minHeight;
+    const minW = d.width / zoom;
+    const minH = d.height / zoom;
+    const b: Bounds = {
+      minW,
+      minH,
+      maxW: Math.max(minW, (left ? r.right - EDGE : window.innerWidth - EDGE - r.left) / zoom),
+      maxH: Math.max(minH, (top ? r.bottom - EDGE : window.innerHeight - EDGE - r.top) / zoom),
+    };
+    return { w: r.width / zoom, h: r.height / zoom, b };
+  };
+  const fit = (w: number, h: number, b: Bounds): PanelSize => ({
+    width: Math.round(Math.min(Math.max(w, b.minW), b.maxW)),
+    height: Math.round(Math.min(Math.max(h, b.minH), b.maxH)),
+  });
+
+  const panelStyle: CSSProperties =
+    enabled && size && typeof window !== 'undefined'
+      ? {
+          // Never wider than the window, even after it shrank.
+          width: Math.min(size.width, (window.innerWidth - 2 * EDGE) / zoom),
+          minHeight: `min(${size.height}px, ${PANEL_MAX_HEIGHT})`,
+          display: 'flex',
+          flexDirection: 'column',
+        }
+      : {};
+
+  /** The grip on the corner away from the button (`corner`: the button's quadrant). */
+  const grip = (corner: { right: boolean; bottom: boolean }, label: string) => {
+    if (!enabled) return null;
+    const left = corner.right;
+    const top = corner.bottom;
+    const hit = touch ? RESIZE.gripTouch : RESIZE.grip;
+    // The glyph is drawn for the bottom-right corner and turned to face this one.
+    const turn = top ? (left ? 'rotate(180deg)' : 'scaleY(-1)') : left ? 'scaleX(-1)' : '';
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        data-shipcue-resize=""
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const m = measure(left, top);
+          if (!m) return;
+          start.current = { px: e.clientX, py: e.clientY, w: m.w, h: m.h, left, top, b: m.b };
+          try {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+          } catch {
+            // An unknown pointer (some synthetic events).
+          }
+        }}
+        onPointerMove={(e) => {
+          const st = start.current;
+          if (!st) return;
+          const dx = (e.clientX - st.px) / zoom;
+          const dy = (e.clientY - st.py) / zoom;
+          setSize(fit(st.w + (st.left ? -dx : dx), st.h + (st.top ? -dy : dy), st.b));
+        }}
+        onPointerUp={(e) => {
+          const st = start.current;
+          start.current = null;
+          if (!st) return;
+          const dx = (e.clientX - st.px) / zoom;
+          const dy = (e.clientY - st.py) / zoom;
+          const next = fit(st.w + (st.left ? -dx : dx), st.h + (st.top ? -dy : dy), st.b);
+          setSize(next);
+          savePanelSize(next);
+        }}
+        onPointerCancel={() => {
+          start.current = null;
+        }}
+        onKeyDown={(e) => {
+          // The arrows move the corner: towards the middle of the screen grows the panel.
+          const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+          if (!d) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const m = measure(left, top);
+          if (!m) return;
+          const step = e.shiftKey ? RESIZE.bigStep : RESIZE.step;
+          const next = fit(m.w + d[0]! * step * (left ? -1 : 1), m.h + d[1]! * step * (top ? -1 : 1), m.b);
+          setSize(next);
+          savePanelSize(next);
+        }}
+        style={{
+          position: 'absolute',
+          [top ? 'top' : 'bottom']: 0,
+          [left ? 'left' : 'right']: 0,
+          width: hit,
+          height: hit,
+          padding: 0,
+          border: 0,
+          borderRadius: 4,
+          background: 'transparent',
+          color: '#a1a1aa',
+          opacity: 0.7,
+          display: 'flex',
+          alignItems: top ? 'flex-start' : 'flex-end',
+          justifyContent: left ? 'flex-start' : 'flex-end',
+          cursor: left === top ? 'nwse-resize' : 'nesw-resize',
+          touchAction: 'none',
+        }}
+      >
+        <svg data-icon="resize" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true" style={{ margin: 4, transform: turn }}>
+          <path d="M9 3 3 9M9 6.5 6.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      </button>
+    );
+  };
+
+  return {
+    size: enabled ? size : null,
+    panelStyle,
+    grip,
+    /** Back to the default size, and forget the saved one. */
+    reset: () => {
+      setSize(null);
+      start.current = null;
+      savePanelSize(null);
     },
   };
 }
@@ -1803,7 +2004,9 @@ function styles(accent: string) {
       gap: 8,
     } as CSSProperties,
     inlineWrap: { display: 'inline-block' } as CSSProperties,
-    panel: { ...card, width: 'min(92vw, 24rem)', maxHeight: 'calc(100dvh - 6rem)' } as CSSProperties,
+    panel: { ...card, width: PANEL_WIDTH, maxHeight: PANEL_MAX_HEIGHT } as CSSProperties,
+    /** A resized panel's form: a column whose text box takes the extra height (report ee970b18). */
+    grow: { flex: '1 0 auto', display: 'flex', flexDirection: 'column' } as CSSProperties,
     inlinePanel: {
       ...card,
       position: 'fixed',
