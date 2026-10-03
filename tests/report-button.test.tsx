@@ -116,6 +116,33 @@ describe('ReportButton', () => {
   });
 });
 
+describe('ReportButton: who is filing', () => {
+  it('sends the signed-in person from the reporter prop with the report', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ id: 'r9' }), { status: 201 }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ReportButton areas={areas} endpoint="/api/fq" reporter="ada@example.com" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    await userEvent.type(screen.getByRole('textbox'), 'Heading disappears on Enter');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(fetchMock.mock.calls.map((c) => c[0])).toContain('/api/fq/reports'));
+    const headers = new Headers(fetchMock.mock.calls.find((c) => c[0] === '/api/fq/reports')![1]?.headers);
+    expect(headers.get('x-shipcue-user')).toBe('ada@example.com');
+    vi.unstubAllGlobals();
+  });
+
+  it('sends no reporter header without the prop', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ id: 'r9' }), { status: 201 }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ReportButton areas={areas} endpoint="/api/fq" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug or request a feature' }));
+    await userEvent.type(screen.getByRole('textbox'), 'Heading disappears on Enter');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(fetchMock.mock.calls.map((c) => c[0])).toContain('/api/fq/reports'));
+    expect(new Headers(fetchMock.mock.calls.find((c) => c[0] === '/api/fq/reports')![1]?.headers).get('x-shipcue-user')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('ReportButton: video, page, errors and past reports', () => {
   const type = async () => userEvent.type(screen.getByRole('textbox'), 'The heading vanished on Enter');
   it('lets you leave the page address off', async () => {

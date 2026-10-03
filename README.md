@@ -99,7 +99,7 @@ import { ReportButton } from 'shipcue/react';
 />
 ```
 
-Use `variant="inline"` for a header or toolbar button on phones, where a floating bubble covers the controls. Pass `submit={(form) => myServerAction(form)}` to send through a server action instead of `fetch`.
+Use `variant="inline"` for a header or toolbar button on phones, where a floating bubble covers the controls. Pass `submit={(form) => myServerAction(form)}` to send through a server action instead of `fetch`. Pass `reporter={user.email}` to say who is signed in on your site: it goes with each report in the `x-shipcue-user` header, shipcue Cloud shows it as the reporter, and your own handler can read it in `getReporter`.
 
 What else the panel does:
 

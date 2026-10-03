@@ -198,6 +198,7 @@ export { handler as GET, handler as POST };</code></pre>
   <li><code>variant="inline"</code> puts a small button in your header, which works better on phones where a floating bubble covers the controls.</li>
   <li><code>submit={(form) =&gt; action(form)}</code> sends through a Next.js server action instead of <code>fetch</code>.</li>
   <li><code>diagnostics</code> is a snapshot for whoever fixes the report. Keep it under 64 KB. If it throws, the report still goes through.</li>
+  <li><code>reporter={user.email}</code> says who is signed in on your site. It goes with each report in the <code>x-shipcue-user</code> header; shipcue Cloud shows it as the reporter, and your own handler can read it in <code>getReporter</code>. Your site vouches for it.</li>
   <li>The panel has three tabs: Bug, Feature request and Agent task. An agent task is a direct instruction for an agent, and its prompt tells the agent the text came from whoever filed it. On a public page you may want <code>types={['bug', 'feature']}</code>.</li>
   <li>A small "Powered by shipcue · Star it on GitHub" line sits at the bottom of the panel. If shipcue helps you, a star really helps us; <code>watermark={false}</code> turns it off.</li>
   <li>Recent page errors are added to the snapshot as <code>recentErrors</code>. Turn this off with <code>captureErrors={false}</code>.</li>
@@ -315,7 +316,7 @@ CLOUD = """
 <h2>Set up</h2>
 <ol>
   <li><a href="/app/">Sign in</a> and create a project.</li>
-  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" /&gt;</code> to your app, and list the sites it runs on.</li>
+  <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app, and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report.</li>
   <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
 </ol>
 <h2>What stays the same</h2>
