@@ -82,6 +82,21 @@ export interface ShipcueText {
   pinIt: string;
   unpinIt: string;
   pinHint: string;
+  unpin: string;
+  // Open what you sent from Yours (shipcue report fec27a48).
+  /** {title} is the report's first line. */
+  openIt: string;
+  reportDetails: string;
+  back: string;
+  /** {when} is the date and time it was sent. */
+  filed: string;
+  screenshotAttached: string;
+  /** {n} is how many. */
+  screenshotsAttached: string;
+  fileAttached: string;
+  /** {n} is how many. */
+  filesAttached: string;
+  videoAttached: string;
   dragPanel: string;
   // The panel's resize grip (shipcue report ee970b18).
   resizePanel: string;
@@ -218,6 +233,16 @@ export const DEFAULT_TEXT: ShipcueText = {
   pinIt: 'Pin this report',
   unpinIt: 'Unpin this report',
   pinHint: 'Pin it: once sent, it stays at the top of Yours and the CueLog',
+  unpin: 'Unpin',
+  openIt: 'Open {title}',
+  reportDetails: 'Report details',
+  back: 'Back',
+  filed: 'Sent {when}',
+  screenshotAttached: '1 screenshot attached',
+  screenshotsAttached: '{n} screenshots attached',
+  fileAttached: '1 file attached',
+  filesAttached: '{n} files attached',
+  videoAttached: 'Video attached',
   dragPanel: 'Drag to move',
   resizePanel: 'Drag to resize (or use the arrow keys)',
   resizeHint: 'Resize the panel by dragging its {corner} corner.',

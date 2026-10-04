@@ -6,6 +6,7 @@ import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadU
 import { useLightbox } from './Lightbox';
 import { PinIcon } from './PinIcon';
 import { loadStars, mergeMine, rememberMine, starredFirst, toggleStar, useStars } from './stars';
+import { YoursList } from './MyReports';
 import { fixLabel } from './fixLink';
 import { BUTTON_PX, RESIZE, SIZES, TEXT_ZOOM, loadAppearance, loadPanelSize, saveAppearance, savePanelSize, type Appearance, type PanelSize, type Size } from './appearance';
 import { BLOCKED_FILE_TYPES, formatBytes, newIdempotencyKey, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type MineItem, type Status, type Priority, type ReportType } from '../core';
@@ -502,7 +503,6 @@ function ReportPanel({
     };
   }, [mineOn, showMine, endpoint]);
   const yours = mineOn ? mergeMine(starState.mine, serverMine) : starState.mine;
-  const statusWord: Record<Status, string> = { open: t.open, claimed: t.inProgress, in_review: t.inReview, fixed: t.fixed, wontfix: t.wontFix };
   const resetPositionRef = useRef<() => void>(() => undefined);
   const [editingKeys, setEditingKeys] = useState(false);
   const [keyFor, setKeyFor] = useState<string | null>(null);
@@ -914,6 +914,7 @@ function ReportPanel({
       draftKeyRef.current = null;
       // The report is filed either way; a failed video upload is said on the thanks screen.
       let videoFailed: string | null = null;
+      const sentVideo = !!video && videoOn;
       if (video && videoOn) {
         try {
           await (uploadVideo ? uploadVideo(result.id, video.blob) : postVideo(endpoint, result.id, video.blob, reporter));
@@ -922,7 +923,25 @@ function ReportPanel({
         }
       }
       setVideo(null);
-      rememberMine({ id: result.id, type: extra ? extra.id : type, title: (text.trim().split('\n')[0] ?? '').slice(0, 120), at: new Date().toISOString() });
+      // The full report, kept in this browser so Yours can open it (shipcue report fec27a48);
+      // counts only, never the screenshot or video data.
+      rememberMine({
+        id: result.id,
+        type: extra ? extra.id : type,
+        typeLabel: extra ? extra.label : current.label,
+        title: (text.trim().split('\n')[0] ?? '').slice(0, 120),
+        at: new Date().toISOString(),
+        description: text.trim(),
+        priority,
+        area,
+        areaLabel: config.areas.find((a) => a.value === area)?.label ?? area,
+        pageUrl: page ?? null,
+        context: context?.trim() || null,
+        screenshots: shots.length,
+        files: files.length - shots.length,
+        video: sentVideo,
+        ...(shots.some((f) => alts.get(f)?.trim()) ? { alts: shots.map((f) => alts.get(f)?.trim() ?? '') } : {}),
+      });
       if (pin && pinNext && !loadStars().includes(result.id)) toggleStar(result.id);
       setPinNext(false);
       setOpen(false);
@@ -1384,35 +1403,15 @@ function ReportPanel({
                 </p>
               )}
               {showMine && (
-                <div style={s.keysBox} aria-label={t.yourReports}>
-                  {yours.length === 0 ? (
-                    <p style={{ ...s.hint, marginTop: 0 }}>{mineOn ? t.noReportsYetAnywhere : t.noReportsYet}</p>
-                  ) : (
-                    starredFirst(yours, starState.stars).map((m) => (
-                      <div key={m.id} style={{ ...s.keysRow, gap: 8 }}>
-                        <button
-                          type="button"
-                          aria-label={starState.isStarred(m.id) ? `Unpin ${m.title}` : `Pin ${m.title}`}
-                          aria-pressed={starState.isStarred(m.id)}
-                          onClick={() => starState.toggle(m.id)}
-                          style={{ ...s.linkBtn, textDecoration: 'none', color: starState.isStarred(m.id) ? '#18181b' : '#a1a1aa' }}
-                        >
-                          <PinIcon on={starState.isStarred(m.id)} size={12} />
-                        </button>
-                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.resolution ? `${m.title}\n${m.resolution}` : m.title}>
-                          {m.title}
-                        </span>
-                        {m.status && <span style={{ color: m.status === 'fixed' ? '#18181b' : '#a1a1aa', flex: 'none' }}>{statusWord[m.status]}</span>}
-                        {m.prUrl && /^https:\/\//.test(m.prUrl) && (
-                          <a href={m.prUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#71717a', flex: 'none' }}>
-                            {fixLabel(m.prUrl)}
-                          </a>
-                        )}
-                        <span style={{ color: '#a1a1aa', flex: 'none' }}>{new Date(m.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-                      </div>
-                    ))
-                  )}
-                  <p style={{ ...s.hint, marginTop: 6 }}>{t.starsHint}</p>
+                <div style={s.keysBox}>
+                  <YoursList
+                    items={starredFirst(yours, starState.stars)}
+                    text={t}
+                    pins={starState}
+                    empty={mineOn ? t.noReportsYetAnywhere : t.noReportsYet}
+                    renderContext={renderContext}
+                    footer={<p style={{ ...s.hint, marginTop: 6 }}>{t.starsHint}</p>}
+                  />
                 </div>
               )}
               {editingDisplay && (
