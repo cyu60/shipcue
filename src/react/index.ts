@@ -9,7 +9,8 @@ export { OutlinePreview, parseOutline, isOutlineText, type OutlineNode } from '.
 export { DEFAULT_TEXT, type ShipcueText } from './text';
 export { CueLogTable, CUELOG_TEXT, filterReports, sortReports, nobodyLooked, readSuggestion, type Suggestion, type CueLogTableProps, type CueLogText, type CueLogTab, type CueLogSort, type CueLogFilter, type CueLogMember } from './CueLog';
 export { Lightbox, useLightbox, type LightboxProps } from './Lightbox';
-export { useStars, toggleStar, loadStars, loadMine, starredFirst, type MyReport } from './stars';
+export { useStars, toggleStar, loadStars, loadMine, starredFirst, MAX_MINE, type MyReport } from './stars';
+export { LocalReports, ReportDetail, type LocalReportsProps } from './MyReports';
 export { BUTTON_PX, TEXT_ZOOM, type Size as ShipcueSize } from './appearance';
 export { PinIcon } from './PinIcon';
 export { Annotator, type AnnotatorProps } from './Annotator';
