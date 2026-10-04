@@ -1,4 +1,4 @@
-export { ReportButton, HatIcon, shownByParam, type ReportButtonProps, type SubmitResult, type ExtraTab } from './ReportButton';
+export { ReportButton, HatIcon, shownByParam, type ReportButtonProps, type SubmitResult, type ExtraTab, type DescriptionEditorProps } from './ReportButton';
 export { shrinkImage } from './shrink';
 export { captureErrors, recentErrors, type RecentError } from './errors';
 export { canRecordScreen, recordScreen, shareError, type RecordingResult, type ScreenRecording } from './video';

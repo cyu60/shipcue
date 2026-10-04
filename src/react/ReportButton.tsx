@@ -125,6 +125,14 @@ export interface ReportButtonProps {
    */
   renderContext?: (text: string) => React.ReactNode;
   /**
+   * Draw the description your own way, e.g. your app's outline editor, in place of shipcue's text
+   * box. Gets the text and a setter, the tab, its placeholder, `submit` (what ⌘↵ does) and
+   * `addFiles` (what pasting a screenshot does), and `textarea`: shipcue's own text box, for a
+   * switch back to plain text. Drawn inside a `[data-shipcue-description]` box; what onChange
+   * gets is what is sent as the description.
+   */
+  renderDescription?: (props: DescriptionEditorProps) => React.ReactNode;
+  /**
    * false draws no button of its own: open the panel from your existing menu or help button with
    * openReport(), or with the hotkeys.
    */
@@ -223,6 +231,21 @@ export interface ExtraTab {
   render: (draft: { text: string; context: string | null; close: () => void }) => React.ReactNode;
 }
 
+/** What renderDescription gets: the report's text, and what the panel does with it. */
+export interface DescriptionEditorProps {
+  value: string;
+  onChange: (text: string) => void;
+  /** The tab the form is on: 'bug' or 'feature'. */
+  type: ReportType;
+  placeholder: string;
+  /** Send the report, as ⌘↵ in the text box does; nothing while it cannot be sent yet. */
+  submit: () => void;
+  /** Attach files as pasting or dropping them into the text box does. */
+  addFiles: (files: File[]) => void;
+  /** shipcue's own text box, wired to the same text. */
+  textarea: React.ReactNode;
+}
+
 const typesFor = (t: ShipcueText): { value: ReportType; label: string; placeholder: string }[] => [
   { value: 'bug', label: t.bugTab, placeholder: t.bugPlaceholder },
   { value: 'feature', label: t.featureTab, placeholder: t.featurePlaceholder },
@@ -307,6 +330,7 @@ function ReportPanel({
   onOpenChange,
   extraTabs,
   renderContext,
+  renderDescription,
   trigger = true,
   launcherIcon,
   icon = 'hat',
@@ -1093,28 +1117,54 @@ function ReportPanel({
                 <div style={{ marginTop: 12 }}>{extra.render({ text, context, close })}</div>
               ) : (
               <>
-              <textarea
-                ref={textareaRef}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    if (canSend) void send();
-                  }
-                }}
-                onPaste={(e) => {
-                  const pasted = Array.from(e.clipboardData.files);
-                  if (pasted.length) {
-                    e.preventDefault();
-                    void addFiles(pasted);
-                  }
-                }}
-                rows={4}
-                aria-label="Description"
-                placeholder={current.placeholder}
-                style={sized ? { ...s.textarea, flex: '1 0 auto' } : s.textarea}
-              />
+              {(() => {
+                // Inside renderDescription's box, which has the margin and takes the room.
+                const style = renderDescription
+                  ? { ...s.textarea, marginTop: 0, flex: '1 0 auto' }
+                  : sized
+                    ? { ...s.textarea, flex: '1 0 auto' }
+                    : s.textarea;
+                const box = (
+                <textarea
+                  ref={textareaRef}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      if (canSend) void send();
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = Array.from(e.clipboardData.files);
+                    if (pasted.length) {
+                      e.preventDefault();
+                      void addFiles(pasted);
+                    }
+                  }}
+                  rows={4}
+                  aria-label="Description"
+                  placeholder={current.placeholder}
+                  style={style}
+                />
+                );
+                if (!renderDescription) return box;
+                return (
+                  <div data-shipcue-description="" style={sized ? { ...s.descriptionBox, flex: '1 0 auto' } : s.descriptionBox}>
+                    {renderDescription({
+                      value: text,
+                      onChange: setText,
+                      type,
+                      placeholder: current.placeholder,
+                      submit: () => {
+                        if (canSend) void send();
+                      },
+                      addFiles: (picked) => void addFiles(picked),
+                      textarea: box,
+                    })}
+                  </div>
+                );
+              })()}
               <div style={{ ...s.row, alignItems: 'center', marginTop: 6, minHeight: 18 }}>
               {context === null && (
                 // Add context by hand on any tab (Habitect report 17748c25): what the app says is
@@ -2094,6 +2144,7 @@ function styles(accent: string) {
     segOn: { ...seg, background: '#fff', color: '#18181b', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } as CSSProperties,
     segOff: { ...seg, background: 'transparent', color: '#71717a' } as CSSProperties,
     textarea: { ...field, marginTop: 12, padding: '8px 12px', resize: 'none' } as CSSProperties,
+    descriptionBox: { marginTop: 12, display: 'flex', flexDirection: 'column' } as CSSProperties,
     grid: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 8, marginTop: 8 } as CSSProperties,
     label: { display: 'block', fontSize: 11, fontWeight: 500, color: '#71717a' } as CSSProperties,
     select: { ...field, marginTop: 4, padding: '6px 8px' } as CSSProperties,

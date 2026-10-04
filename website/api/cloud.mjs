@@ -6,7 +6,7 @@ import { waitUntil } from "@vercel/functions";
 import { createHash, randomBytes, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 
 // src/core/version.ts
-var SHIPCUE_VERSION = true ? "0.28.1" : "0.0.0";
+var SHIPCUE_VERSION = true ? "0.29.0" : "0.0.0";
 var SEMVER = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/;
 function parseVersion(v) {
   const m = typeof v === "string" ? SEMVER.exec(v.trim()) : null;
