@@ -173,3 +173,11 @@ describe('LocalReports', () => {
     expect(screen.getByText('Reports you send from this browser show up here.')).toBeInTheDocument();
   });
 });
+
+it('shows the first line once: as the title, not again at the top of the text', async () => {
+  localStorage.setItem('shipcue:mine', JSON.stringify([{ id: 'r-dup', type: 'bug', title: 'Saving loses the last block', at: '2026-10-03T10:00:00Z', description: 'Saving loses the last block\nIt happens when offline.' }]));
+  render(<LocalReports />);
+  fireEvent.click(await screen.findByRole('button', { name: /Open Saving loses the last block/ }));
+  expect(screen.getAllByText('Saving loses the last block')).toHaveLength(1);
+  expect(screen.getByText('It happens when offline.')).toBeInTheDocument();
+});

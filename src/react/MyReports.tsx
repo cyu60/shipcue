@@ -65,7 +65,10 @@ export function ReportDetail({ report: r, text: t, pins, onBack, renderContext }
     r.video ? t.videoAttached : null,
   ].filter((x): x is string => !!x);
   const alts = (r.alts ?? []).map((a, i) => [i, a.trim()] as const).filter(([, a]) => a);
-  const body = r.description && r.description.trim() !== r.title.trim() ? r.description : null;
+  // The title is the description's first line, so the body starts after it (never shown twice).
+  const rest = (r.description ?? '').trim();
+  const lead = r.title.trim();
+  const body = (rest.startsWith(lead) ? rest.slice(lead.length) : rest).replace(/^\s+/, '') || null;
   return (
     <div aria-label={t.reportDetails} style={{ fontFamily: font }}>
       <div style={{ ...s.row, justifyContent: 'space-between' }}>
