@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 
 import { createPortal } from 'react-dom';
 import { chordOf, CLOSE_EVENT, defaultHotkeys, display, hotkeyType, isMac, loadUserHotkeys, OPEN_EVENT, saveUserHotkeys, SELECT_AREA_EVENT, type Hotkeys } from './hotkeys';
 import { useLightbox } from './Lightbox';
+import { insertAt, isModifierOnly, keyComboText } from './keyText';
 import { PinIcon } from './PinIcon';
 import { loadStars, mergeMine, rememberMine, starredFirst, toggleStar, useStars } from './stars';
 import { YoursList } from './MyReports';
@@ -443,6 +444,48 @@ function ReportPanel({
   const [listening, setListening] = useState(false);
   const textRef = useRef('');
   textRef.current = text;
+  // Keys (shipcue report 2532c428): while on, each key combination pressed is written into the
+  // report as text ("⌘ + Enter") instead of doing what it does, until Esc or a second click.
+  const [recordingKeys, setRecordingKeys] = useState(false);
+  const recordingKeysRef = useRef(false);
+  recordingKeysRef.current = recordingKeys;
+  // Where the caret goes once the text box shows what Keys put in.
+  const keysCaretRef = useRef<number | null>(null);
+  useEffect(() => {
+    const at = keysCaretRef.current;
+    const el = textareaRef.current;
+    if (at === null || !el) return;
+    keysCaretRef.current = null;
+    el.setSelectionRange(at, at);
+  }, [text]);
+  // At the caret in shipcue's text box; with an app's own editor (renderDescription), after its
+  // text, through the same onChange that Dictate writes through.
+  const insertKeys = (combo: string) => {
+    const el = textareaRef.current;
+    const now = textRef.current;
+    const start = el ? el.selectionStart ?? now.length : now.length;
+    const end = el ? el.selectionEnd ?? start : now.length;
+    const next = insertAt(now, start, end, combo);
+    textRef.current = next.text;
+    if (el) keysCaretRef.current = next.caret;
+    setText(next.text);
+  };
+  useEffect(() => {
+    // On one of the app's own tabs there is no description to write into.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- follows the tab
+    if (extraId) setRecordingKeys(false);
+  }, [extraId]);
+  const insertKeysRef = useRef(insertKeys);
+  insertKeysRef.current = insertKeys;
+  const toggleKeys = () => {
+    if (recordingKeysRef.current) {
+      setRecordingKeys(false);
+      return;
+    }
+    setRecordingKeys(true);
+    // The text box keeps its caret while the keys go in.
+    textareaRef.current?.focus();
+  };
   // Retry-safe filing (shipcue report 9833fd28): one key per draft, kept while that draft is
   // re-sent after a failure, so a send that landed but timed out is never filed twice. A new
   // draft (after a successful send, a fresh open, or once the text is cleared) gets a new one.
@@ -592,6 +635,12 @@ function ReportPanel({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (recordingKeysRef.current && e.repeat) {
+        // A held key is written once.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       if (e.defaultPrevented || e.repeat) return;
       // Setting a shortcut: the next chord is the new one, Esc cancels.
       const rec = recordingRef.current;
@@ -608,6 +657,20 @@ function ReportPanel({
         e.stopPropagation();
         setUserKeyRef.current(rec, chord);
         setKeyFor(null);
+        return;
+      }
+      // Keys: the press is text for the report, never a shortcut (not even shipcue's own).
+      if (recordingKeysRef.current) {
+        if (e.isComposing) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.key === 'Escape' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+          setRecordingKeys(false);
+          return;
+        }
+        if (isModifierOnly(e)) return;
+        const combo = keyComboText(e);
+        if (combo) insertKeysRef.current(combo);
         return;
       }
       const t = hotkeyType(e, keys);
@@ -632,8 +695,15 @@ function ReportPanel({
     };
     const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: string }>).detail?.type, true);
     const onClose = () => closeRef.current();
+    // Keys: a key let go does nothing either (Space on a focused button clicks on keyup).
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!recordingKeysRef.current) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
     // Capture phase: the page's own key handlers (an editor, a popup) never swallow the chord.
     window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKeyUp, true);
     // selectArea() from the app (a command palette, say): Select area, as the tile does.
     const onSelectArea = () => startSelectRef.current();
     window.addEventListener(OPEN_EVENT, onOpen);
@@ -643,6 +713,7 @@ function ReportPanel({
       window.removeEventListener(SELECT_AREA_EVENT, onSelectArea);
       window.removeEventListener(CLOSE_EVENT, onClose);
       window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKeyUp, true);
       window.removeEventListener(OPEN_EVENT, onOpen);
     };
   }, [keys]);
@@ -724,6 +795,7 @@ function ReportPanel({
 
   const close = () => {
     recognitionRef.current?.abort();
+    setRecordingKeys(false);
     setOpen(false);
     setError(null);
   };
@@ -1202,6 +1274,23 @@ function ReportPanel({
                     {pinNext ? t.pinned : t.pin}
                   </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={toggleKeys}
+                    aria-pressed={recordingKeys}
+                    title={t.keysHint}
+                    style={{ ...s.linkBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, color: recordingKeys ? '#18181b' : '#71717a', fontWeight: recordingKeys ? 600 : undefined }}
+                  >
+                    {recordingKeys ? (
+                      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: '#18181b' }} />
+                    ) : (
+                      <svg data-icon="keyboard" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <rect x="2.5" y="6" width="19" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+                        <path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                      </svg>
+                    )}
+                    {recordingKeys ? t.keysRecording : t.keys}
+                  </button>
                   {speech && (
                     <button
                       type="button"

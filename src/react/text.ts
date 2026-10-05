@@ -21,6 +21,12 @@ export interface ShipcueText {
   context: string;
   addContext: string;
   dictate: string;
+  /** The small Keys button that writes key combinations into the report as text. */
+  keys: string;
+  /** Its label while it is listening for keys. */
+  keysRecording: string;
+  /** Its tooltip. */
+  keysHint: string;
   listening: string;
   micBlocked: string;
   preview: string;
@@ -177,6 +183,9 @@ export const DEFAULT_TEXT: ShipcueText = {
   context: 'Context',
   addContext: '+ Add context',
   dictate: 'Dictate',
+  keys: 'Keys',
+  keysRecording: 'Press keys… (Esc to stop)',
+  keysHint: 'Write the shortcuts you press into the report as text, until Esc',
   listening: 'Listening… click to stop',
   micBlocked: 'The microphone is blocked for this page. Allow it in the address bar, then try again.',
   preview: 'Preview',
