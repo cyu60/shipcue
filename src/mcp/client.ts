@@ -24,7 +24,69 @@ export interface NewReport {
   diagnostics?: string;
   /** Who it is from, sent as x-shipcue-user (the handler's getReporter decides whether to use it). */
   reporter?: string;
+  /** What to do when a host that dedupes finds a close match; without it the host answers LikelyDuplicateError. */
+  ifDuplicate?: DuplicateChoice;
 }
+
+/**
+ * The ways on from a close match, as hosts that dedupe read them (Habitect
+ * report db7cb16c): add it to the match as a note, do that and reopen the
+ * match if it is closed, or file it as a new report.
+ */
+export const DUPLICATE_CHOICES = ['addAsNote', 'reopen', 'fileAnyway'] as const;
+export type DuplicateChoice = (typeof DUPLICATE_CHOICES)[number];
+
+/** What filing answered: the new report, or the match it was added to as a note. */
+export interface Filed {
+  id: string;
+  duplicateOf?: string;
+  addedAsNote?: boolean;
+  reopened?: boolean;
+}
+
+/** The report a host found close to the one being filed, as it describes it. */
+export interface DuplicateMatch {
+  id: string;
+  status?: string;
+  description?: string;
+  resolution?: string | null;
+}
+
+/** A host answered 409 LIKELY_DUPLICATE: nothing was filed until the caller picks a DuplicateChoice. */
+export class LikelyDuplicateError extends Error {
+  readonly duplicateOf: string;
+  readonly match: DuplicateMatch | null;
+  readonly hint: string | null;
+  constructor(body: { duplicateOf: string; match?: DuplicateMatch | null; hint?: string | null }) {
+    super('LIKELY_DUPLICATE');
+    this.name = 'LikelyDuplicateError';
+    this.duplicateOf = body.duplicateOf;
+    this.match = body.match ?? null;
+    this.hint = body.hint ?? null;
+  }
+}
+
+/** The close match and the ways on, for the agent to choose from. */
+export function duplicateText(e: LikelyDuplicateError): string {
+  const m = e.match;
+  const status = m?.status ? ` (${m.status}${m.resolution ? `: ${m.resolution}` : ''})` : '';
+  return [
+    `Nothing filed: this looks like report ${e.duplicateOf}${status}.`,
+    ...(m?.description ? [`It says: ${m.description}`] : []),
+    ...(e.hint ? [e.hint] : []),
+    `Call file_report again with if_duplicate: ${DUPLICATE_CHOICES.join(', ')}. Use addAsNote if it is the same, reopen if it was closed and is back, fileAnyway only if it is a different report.`,
+  ].join('\n');
+}
+
+/** What filing did, in a sentence. */
+export function filedText(f: Filed): string {
+  if (!f.addedAsNote) return `Filed ${f.id}.`;
+  return `Added as a note to ${f.id}, which it repeats${f.reopened ? ', and reopened it' : ''}.`;
+}
+
+/** The form fields a choice sends; fileAnyway sends force too, the name some hosts read. */
+const choiceFields = (choice: DuplicateChoice | undefined): string[] =>
+  choice === 'fileAnyway' ? ['fileAnyway', 'force'] : choice ? [choice] : [];
 
 export interface Claimed {
   report: Report;
@@ -70,9 +132,11 @@ export function createAgentClient(opts: AgentClientOptions) {
     /**
      * File a report the way the panel does: a multipart POST to {url}/reports. Run from the
      * agent's machine, so the handler's browser CORS rules do not apply; its sign-in and
-     * anonymous limits still do. Needs no token, but sends it when there is one.
+     * anonymous limits still do. Needs no token, but sends it when there is one. It says it
+     * can answer a close match (canConfirm), so a host that dedupes answers LikelyDuplicateError
+     * instead of filing a duplicate; ifDuplicate is the answer.
      */
-    async file(r: NewReport): Promise<{ id: string }> {
+    async file(r: NewReport): Promise<Filed> {
       const form = new FormData();
       form.set('type', r.type);
       form.set('description', r.description);
@@ -82,10 +146,14 @@ export function createAgentClient(opts: AgentClientOptions) {
       form.set('context', r.context ?? '');
       form.set('userAgent', `shipcue-mcp (${agent})`);
       if (r.diagnostics) form.set('diagnostics', r.diagnostics);
+      form.set('canConfirm', '1');
+      for (const field of choiceFields(r.ifDuplicate)) form.set(field, '1');
       const res = await doFetch(`${base}/reports`, { method: 'POST', body: form, headers: { ...auth, ...(r.reporter ? { 'x-shipcue-user': r.reporter } : {}) } });
-      const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+      const body = (await res.json().catch(() => ({}))) as Partial<Filed> & { error?: string; match?: DuplicateMatch; hint?: string };
+      if (body.error === 'LIKELY_DUPLICATE' && body.duplicateOf) throw new LikelyDuplicateError({ duplicateOf: body.duplicateOf, match: body.match, hint: body.hint });
       if (!res.ok || !body.id) throw new Error(body.error ?? `shipcue responded ${res.status}`);
-      return { id: body.id };
+      const { id, duplicateOf, addedAsNote, reopened } = body;
+      return { id, ...(duplicateOf ? { duplicateOf } : {}), ...(addedAsNote ? { addedAsNote, reopened: reopened === true } : {}) };
     },
     async list(status?: Status): Promise<Report[]> {
       const q = status ? `?status=${encodeURIComponent(status)}` : '';

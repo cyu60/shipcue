@@ -8,7 +8,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { describeOverlaps, otherSide, PRIORITIES, validateScope } from '../core';
-import { createAgentClient } from './client';
+import { createAgentClient, DUPLICATE_CHOICES, duplicateText, filedText, LikelyDuplicateError } from './client';
 
 const url = process.env.SHIPCUE_URL;
 const token = process.env.SHIPCUE_TOKEN;
@@ -50,7 +50,7 @@ server.registerTool(
   'file_report',
   {
     description:
-      'File a bug report, feature request or agent task for a person, with the same fields the shipcue panel sends. Ask them for anything missing first (what happened and what they expected, or what they want and why). Returns the new report id.',
+      'File a bug report, feature request or agent task for a person, with the same fields the shipcue panel sends. Ask them for anything missing first (what happened and what they expected, or what they want and why). Returns the new report id. If the app finds a report like it already, nothing is filed and the match is returned: call again with if_duplicate to add it there as a note, reopen it, or file it anyway.',
     inputSchema: {
       type: z.enum(['bug', 'feature', 'task']),
       description: z.string().describe("The report in the person's words: for a bug, steps, what happened, what was expected."),
@@ -60,11 +60,21 @@ server.registerTool(
       context: z.string().optional().describe('What the report is about, e.g. text picked out on the page.'),
       diagnostics: z.string().optional().describe('The app snapshot from the prompt, as JSON text, unchanged.'),
       reporter: z.string().optional().describe('Who it is from, if the person says.'),
+      if_duplicate: z
+        .enum(DUPLICATE_CHOICES)
+        .optional()
+        .describe(
+          'Only after the app said this looks like an earlier report: addAsNote adds it to that report, reopen also reopens it if closed, fileAnyway files it as a new report.',
+        ),
     },
   },
-  async ({ type, description, priority, area, page_url, context, diagnostics, reporter }) => {
-    const { id } = await client.file({ type, description, priority, area, pageUrl: page_url, context, diagnostics, reporter });
-    return text(`Filed ${id}.`);
+  async ({ type, description, priority, area, page_url, context, diagnostics, reporter, if_duplicate }) => {
+    try {
+      return text(filedText(await client.file({ type, description, priority, area, pageUrl: page_url, context, diagnostics, reporter, ifDuplicate: if_duplicate })));
+    } catch (e) {
+      if (e instanceof LikelyDuplicateError) return text(duplicateText(e));
+      throw e;
+    }
   },
 );
 
