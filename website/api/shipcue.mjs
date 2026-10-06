@@ -2,7 +2,7 @@
 import pg from "pg";
 
 // src/core/version.ts
-var SHIPCUE_VERSION = true ? "0.30.0" : "0.0.0";
+var SHIPCUE_VERSION = true ? "0.31.0" : "0.0.0";
 
 // src/core/scope.ts
 var SCOPE_LIMITS = { areas: 20, paths: 50, item: 200 };
