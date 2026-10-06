@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createAgentClient } from '../src/mcp/client';
+import { createAgentClient, DUPLICATE_CHOICES, duplicateText, filedText, LikelyDuplicateError } from '../src/mcp/client';
 import { createShipcueHandler, memoryStore } from '../src/server';
 import { resolveConfig } from '../src/core';
 
@@ -130,5 +130,59 @@ describe('file() (the file_report MCP tool, report 9f533ece)', () => {
     const { id } = await client.file({ type: 'bug', description: 'The save button does nothing on Safari' });
     expect((await store.get(id))?.priority).toBe('medium');
     await expect(client.file({ type: 'bug', description: 'short' })).rejects.toThrow();
+  });
+});
+
+describe('file() and a likely duplicate (Habitect report db7cb16c)', () => {
+  const match = { id: 'r-earlier', status: 'fixed', description: 'Enter drops the heading', resolution: 'Enter keeps it now' };
+  const hint = 'This looks like report r-earlier. Send it again with addAsNote, reopen or fileAnyway.';
+
+  /** A host that dedupes: a close match is answered 409 until the sender chooses. */
+  function dedupingHost() {
+    const forms: Record<string, string>[] = [];
+    const fetch = async (_u: string, i?: RequestInit) => {
+      const form = Object.fromEntries((i!.body as FormData).entries()) as Record<string, string>;
+      forms.push(form);
+      if (form.addAsNote === '1' || form.reopen === '1') {
+        return Response.json({ id: match.id, duplicateOf: match.id, addedAsNote: true, reopened: form.reopen === '1' });
+      }
+      if (form.fileAnyway === '1') return Response.json({ id: 'r-new' });
+      return Response.json({ error: 'LIKELY_DUPLICATE', confirm: true, duplicateOf: match.id, match, related: [match], hint }, { status: 409 });
+    };
+    return { forms, client: createAgentClient({ url: 'https://x/api', agent: 'claude', fetch }) };
+  }
+
+  it('says it can answer a close match, so the host asks instead of filing a duplicate', async () => {
+    const { forms, client } = dedupingHost();
+    const error = await client.file({ type: 'bug', description: 'Enter at the end of a heading drops it' }).catch((e: unknown) => e);
+    expect(forms[0]).toMatchObject({ canConfirm: '1', userAgent: 'shipcue-mcp (claude)' });
+    expect(error).toBeInstanceOf(LikelyDuplicateError);
+    expect(error).toMatchObject({ duplicateOf: 'r-earlier', match, hint, message: 'LIKELY_DUPLICATE' });
+  });
+
+  it('writes the match and the three ways on for the agent', () => {
+    const text = duplicateText(new LikelyDuplicateError({ duplicateOf: match.id, match, hint }));
+    expect(text).toContain('r-earlier');
+    expect(text).toContain('Enter drops the heading');
+    expect(text).toContain('fixed');
+    expect(text).toContain('Enter keeps it now');
+    for (const choice of DUPLICATE_CHOICES) expect(text).toContain(choice);
+  });
+
+  it('files it anyway with fileAnyway (and force, for hosts that read that)', async () => {
+    const { forms, client } = dedupingHost();
+    expect(await client.file({ type: 'bug', description: 'Enter at the end of a heading drops it', ifDuplicate: 'fileAnyway' })).toEqual({ id: 'r-new' });
+    expect(forms[0]).toMatchObject({ fileAnyway: '1', force: '1' });
+  });
+
+  it('adds it to the match as a note, or reopens it, and says so', async () => {
+    const { forms, client } = dedupingHost();
+    const noted = await client.file({ type: 'bug', description: 'Enter at the end of a heading drops it', ifDuplicate: 'addAsNote' });
+    expect(noted).toEqual({ id: 'r-earlier', duplicateOf: 'r-earlier', addedAsNote: true, reopened: false });
+    expect(filedText(noted)).toBe('Added as a note to r-earlier, which it repeats.');
+    const reopened = await client.file({ type: 'bug', description: 'Enter at the end of a heading drops it', ifDuplicate: 'reopen' });
+    expect(forms[1]).toMatchObject({ reopen: '1' });
+    expect(filedText(reopened)).toBe('Added as a note to r-earlier, which it repeats, and reopened it.');
+    expect(filedText({ id: 'r-new' })).toBe('Filed r-new.');
   });
 });
