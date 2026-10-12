@@ -33,7 +33,7 @@ const LOCK = `importers:
   .:
     dependencies:
       shipcue:
-        specifier: https://github.com/cyu60/shipcue/releases/download/v0.17.0/shipcue-0.17.0.tgz
+        specifier: https://github.com/edumame/shipcue/releases/download/v0.17.0/shipcue-0.17.0.tgz
         version: ${SIGNED}(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
 packages:
   shipcue@${SIGNED}:
@@ -292,7 +292,7 @@ describe('shipcue doctor (CLI)', () => {
 
   it('a broken app: trap, no route, no token, outdated; live checks against fakes', async () => {
     const cwd = app({
-      'package.json': JSON.stringify({ dependencies: { shipcue: 'https://github.com/cyu60/shipcue/releases/download/v0.17.0/shipcue-0.17.0.tgz' } }),
+      'package.json': JSON.stringify({ dependencies: { shipcue: 'https://github.com/edumame/shipcue/releases/download/v0.17.0/shipcue-0.17.0.tgz' } }),
       'node_modules/shipcue/package.json': JSON.stringify({ name: 'shipcue', version: '0.17.0' }),
       'pnpm-lock.yaml': LOCK,
       '.env': 'DATABASE_URL=postgres://x\n',
@@ -314,7 +314,7 @@ describe('shipcue doctor (CLI)', () => {
       },
       queryDb: async () => ({ columns, rls: [{ table: 'shipcue_reports', on: false }], actionCheck: null }),
     });
-    expect(calls).toEqual(['GET https://api.github.com/repos/cyu60/shipcue/releases/latest', 'GET https://app.example.com/api/shipcue/capabilities']);
+    expect(calls).toEqual(['GET https://api.github.com/repos/edumame/shipcue/releases/latest', 'GET https://app.example.com/api/shipcue/capabilities']);
     const lines = output.split('\n').filter((l) => /^[✓✗!–] /.test(l));
     expect(lines).toEqual([
       '✓ shipcue installed: 0.17.0',
