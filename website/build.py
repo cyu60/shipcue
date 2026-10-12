@@ -381,7 +381,7 @@ CLOUD = """
   <div class="plan plan-pick"><h3>Builder</h3><p class="price">$25<span>/month</span></p><p>A founder running a small fleet of agents and Mac minis.</p><ul><li>10 projects</li><li>25 agent tokens</li><li>3 people</li><li>50 hosted triages a day</li></ul></div>
   <div class="plan"><h3>Team</h3><p class="price">$50<span>/month</span></p><p>A team sharing agents, machines and apps.</p><ul><li>Unlimited projects</li><li>Unlimited agent tokens</li><li>10 people</li><li>200 hosted triages a day</li></ul></div>
 </div>
-<p>Prices are in US dollars, per workspace. Rather run it yourself? Self-hosting stays free: the button, the handler, the MCP server and the CueLog table are MIT-licensed, and the <a href="/docs/">docs</a> set them up in your own Postgres.</p>
+<p>Prices are monthly, in US dollars. Rather run it yourself? Self-hosting stays free: the button, the handler, the MCP server and the CueLog table are MIT-licensed, and the <a href="/docs/">docs</a> set them up in your own Postgres.</p>
 <div class="actions"><a class="btn btn-ink" href="/contact/">Ask to join the beta</a><a class="btn btn-plain" href="/app/">Sign in</a></div>
 <h2>Questions</h2>
 <p><strong>Does shipcue see my Claude or Codex logins?</strong> No. Your agents sign in to Claude and Codex on your machines as they do now. shipcue only gives each one an agent token for the queue.</p>
