@@ -592,6 +592,60 @@ describe('adjust before capturing (shipcue report 03de1f12)', () => {
         expect(await screen.findByAltText('Screenshot 1')).toBeInTheDocument();
         expect(panel()).toBeInTheDocument();
       });
+
+      // Habitect report cbb24947: no blank wait. The page stays tinted around the selection,
+      // with a spinner, while the picture is taken; then all of it until the screenshot is in.
+      const veil = () => document.querySelector('[data-shipcue-capture-veil]') as HTMLElement | null;
+      const hole = () => document.querySelector('[data-shipcue-capture-hole]') as HTMLElement | null;
+
+      it('tints the page around the selection, leaving it clear, with a spinner while the picture is taken', async () => {
+        await openPanel();
+        press(tint(), [100, 50], [300, 150]);
+        await userEvent.keyboard('{Enter}');
+        await waitFor(() => expect(getDisplayMedia).toHaveBeenCalledTimes(1));
+        expect(veil()).toBeInTheDocument();
+        // A little wider than the selection, so no tint is in the crop.
+        expect(hole()).toHaveStyle({ left: '98px', top: '48px', width: '204px', height: '104px' });
+        expect(within(veil()!).getByRole('status')).toHaveTextContent('Taking the screenshot…');
+        await act(async () => share!());
+        expect(await screen.findByAltText('Screenshot 1')).toBeInTheDocument();
+        expect(veil()).toBeNull();
+      });
+
+      it('tints all of it once the picture is taken, until the screenshot is in the panel', async () => {
+        const toBlob = HTMLCanvasElement.prototype.toBlob;
+        let encoded: (() => void) | null = null;
+        HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback) {
+          encoded = () => cb(new Blob([new Uint8Array(blobBytes)], { type: 'image/png' }));
+        };
+        try {
+          await openPanel();
+          press(tint(), [100, 50], [300, 150]);
+          await userEvent.keyboard('{Enter}');
+          await waitFor(() => expect(getDisplayMedia).toHaveBeenCalledTimes(1));
+          await act(async () => share!());
+          await waitFor(() => expect(encoded).not.toBeNull());
+          expect(hole()).toBeNull();
+          expect(veil()).toHaveStyle({ background: 'rgba(9,9,11,0.35)' });
+          expect(within(veil()!).getByRole('status')).toHaveTextContent('Taking the screenshot…');
+          await act(async () => encoded!());
+          expect(await screen.findByAltText('Screenshot 1')).toBeInTheDocument();
+          expect(veil()).toBeNull();
+        } finally {
+          HTMLCanvasElement.prototype.toBlob = toBlob;
+        }
+      });
+    });
+
+    it('drops the capture tint when the capture fails (Habitect report cbb24947)', async () => {
+      getDisplayMedia.mockImplementationOnce(async () => {
+        throw new DOMException('no', 'NotAllowedError');
+      });
+      await openPanel();
+      press(tint(), [100, 50], [300, 150]);
+      await userEvent.keyboard('{Enter}');
+      expect(await screen.findByText(/Screen capture was not allowed/)).toBeInTheDocument();
+      expect(document.querySelector('[data-shipcue-capture-veil]')).toBeNull();
     });
 
     it('Esc drops the selection first, keeping the tint; typing in the panel still never captures', async () => {

@@ -117,8 +117,11 @@ const nextVideoFrame = (video: FrameVideo) =>
   Promise.race([new Promise<void>((resolve) => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => resolve()) : resolve())), afterPaint(4)]);
 
 export interface TabCapture {
-  /** Crop the tab to `sel` (CSS px in the viewport) as a PNG; asks to share only when no live share is held. */
-  grab(sel: Rect): Promise<Blob>;
+  /**
+   * Crop the tab to `sel` (CSS px in the viewport) as a PNG; asks to share only when no live share
+   * is held. `onTaken` runs once the frame is drawn: from then on the page can change freely.
+   */
+  grab(sel: Rect, onTaken?: () => void): Promise<Blob>;
   /** Stop sharing now (the panel closed, the page hid). */
   stop(): void;
 }
@@ -141,7 +144,7 @@ export function tabCapture({ keepAliveMs = CAPTURE_KEEP_ALIVE_MS }: { keepAliveM
     video = null;
   };
   const live = () => !!stream && stream.getVideoTracks().some((t) => t.readyState !== 'ended');
-  const grab = async (sel: Rect): Promise<Blob> => {
+  const grab = async (sel: Rect, onTaken?: () => void): Promise<Blob> => {
     if (!canCaptureTab()) throw Object.assign(new Error('Unsupported'), { name: 'Unsupported' });
     clearTimeout(idle);
     try {
@@ -174,6 +177,7 @@ export function tabCapture({ keepAliveMs = CAPTURE_KEEP_ALIVE_MS }: { keepAliveM
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('No canvas');
       ctx.drawImage(v, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+      onTaken?.();
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('No image');
       return blob;
