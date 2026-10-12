@@ -18,6 +18,7 @@ import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
 import { afterPaint, CAPTURE_KEEP_ALIVE_MS, canCaptureTab, captureError, tabCapture, type Rect, type TabCapture } from './capture';
 import { AreaSelect } from './AreaSelect';
+import { hasDraft, indexedDbDraftStore, type DraftStore, type SavedDraft } from './draft';
 import { Annotator } from './Annotator';
 import { agentPrompt, type AgentPromptAuth } from './agentPrompt';
 
@@ -192,6 +193,14 @@ export interface ReportButtonProps {
    */
   captureKeepAlive?: number;
   /**
+   * Keep the Bug or Feature request form not sent yet (its tab, text, context, screenshots and
+   * files) in the browser, so leaving the app or reloading the page brings it back (Habitect report
+   * e1204c25): a phone often drops a backgrounded tab. true keeps it in IndexedDB; pass your own
+   * DraftStore to keep it elsewhere. It goes once the report is sent, the text and files are
+   * cleared, or a hotkey or openReport() starts a fresh form. Off by default.
+   */
+  persistDraft?: boolean | DraftStore;
+  /**
    * Deprecated since 0.21 in favour of captureOnOpen. Tints the page while the panel is open,
    * without blocking it (shipcue report 58b727d9). With captureOnOpen on, this plain tint shows
    * only once the capture tint is lifted. Off by default.
@@ -259,6 +268,8 @@ const headingFor = (t: ShipcueText): Record<ReportType, [string, string]> => ({
 });
 
 const ACCEPT = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+/** How long typing pauses before persistDraft saves the draft (hiding the page saves at once). */
+const DRAFT_SAVE_DELAY_MS = 400;
 
 /** The header that says who is filing, when the app told us. */
 const reporterHeaders = (reporter: string | undefined): Record<string, string> => (reporter ? { 'x-shipcue-user': reporter } : {});
@@ -342,6 +353,7 @@ function ReportPanel({
   dimOnOpen = false,
   captureOnOpen: captureOnOpenProp,
   captureKeepAlive = CAPTURE_KEEP_ALIVE_MS,
+  persistDraft = false,
 }: ReportButtonProps) {
   const captureOnOpen = captureOnOpenProp ?? variant === 'floating';
   const endpoint = endpointProp ?? '/api/shipcue';
@@ -494,6 +506,64 @@ function ReportPanel({
   useEffect(() => {
     if (!text.trim()) draftKeyRef.current = null;
   }, [text]);
+
+  // persistDraft (Habitect report e1204c25): the kept draft is read back once on load, and
+  // nothing is saved before then, so the empty form a reload starts with never wipes it.
+  const draftStore = useMemo(() => (persistDraft === true ? indexedDbDraftStore() : persistDraft || null), [persistDraft]);
+  const draftReadyRef = useRef(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const formRef = useRef({ text, files });
+  formRef.current = { text, files };
+  const restoreDraft = (d: SavedDraft) => {
+    if (tabs.some((x) => x.value === d.type)) setType(d.type);
+    setText(d.text);
+    setContext(d.context);
+    setFiles(d.files);
+    setAlts(new Map(d.files.flatMap((f, i) => (d.alts[i] ? [[f, d.alts[i]] as const] : []))));
+    draftKeyRef.current = d.key;
+  };
+  const restoreDraftRef = useRef(restoreDraft);
+  restoreDraftRef.current = restoreDraft;
+  useEffect(() => {
+    if (!draftStore) return;
+    let live = true;
+    void draftStore.load().then((d) => {
+      if (!live || draftReadyRef.current) return;
+      draftReadyRef.current = true;
+      if (d && hasDraft(d) && !hasDraft(formRef.current)) restoreDraftRef.current(d);
+      setDraftReady(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [draftStore]);
+  const pendingDraftRef = useRef<SavedDraft | null>(null);
+  const flushDraft = () => {
+    const d = pendingDraftRef.current;
+    if (!d || !draftStore) return;
+    pendingDraftRef.current = null;
+    void (hasDraft(d) ? draftStore.save(d) : draftStore.clear());
+  };
+  const flushDraftRef = useRef(flushDraft);
+  flushDraftRef.current = flushDraft;
+  useEffect(() => {
+    if (!draftStore || !draftReady) return;
+    // busy: a send that failed has its key now, kept so a retry after a reload is not filed twice.
+    pendingDraftRef.current = { type, text, context, files, alts: files.map((f) => alts.get(f) ?? ''), key: draftKeyRef.current };
+    const t = setTimeout(() => flushDraftRef.current(), DRAFT_SAVE_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [draftStore, draftReady, type, text, context, files, alts, busy]);
+  useEffect(() => {
+    // A phone may drop the tab soon after it is hidden: save now rather than after the delay.
+    const onHide = () => document.visibilityState === 'hidden' && flushDraftRef.current();
+    const onPageHide = () => flushDraftRef.current();
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, []);
   const recognitionRef = useRef<{ stop(): void; abort(): void } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -605,8 +675,17 @@ function ReportPanel({
     }
   };
   // A hotkey or openReport() always starts a fresh, empty form on its tab (outliner report 20:55),
-  // even right after a send or with another tab half written. A click on the button keeps the draft.
-  const openOn = (t?: string, fresh = false) => {
+  // even right after a send or with another tab half written. A click on the button keeps the draft,
+  // and so does openReport(tab, { keepDraft: true }), on the draft's own tab (Habitect report e1204c25).
+  const openOn = (tab?: string, freshForm = false, keepDraft = false) => {
+    const kept = keepDraft && hasDraft({ text, files });
+    const t = kept ? type : tab;
+    const fresh = freshForm && !kept;
+    // A fresh form asked for before the kept draft was read back wins over it; keepDraft waits for it.
+    if (fresh && !keepDraft && !draftReadyRef.current) {
+      draftReadyRef.current = true;
+      setDraftReady(true);
+    }
     if (t && extraTabs?.some((x) => x.id === t)) setExtraId(t);
     else if (t && tabs.some((x) => x.value === t)) {
       setType(t as ReportType);
@@ -693,7 +772,10 @@ function ReportPanel({
       }
       openOnRef.current(t, true);
     };
-    const onOpen = (e: Event) => openOnRef.current((e as CustomEvent<{ type?: string }>).detail?.type, true);
+    const onOpen = (e: Event) => {
+      const detail = (e as CustomEvent<{ type?: string; keepDraft?: boolean }>).detail;
+      openOnRef.current(detail?.type, true, detail?.keepDraft === true);
+    };
     const onClose = () => closeRef.current();
     // Keys: a key let go does nothing either (Space on a focused button clicks on keyup).
     const onKeyUp = (e: KeyboardEvent) => {

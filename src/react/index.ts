@@ -2,7 +2,8 @@ export { ReportButton, HatIcon, shownByParam, type ReportButtonProps, type Submi
 export { shrinkImage } from './shrink';
 export { captureErrors, recentErrors, type RecentError } from './errors';
 export { canRecordScreen, recordScreen, shareError, type RecordingResult, type ScreenRecording } from './video';
-export { openReport, closeReport, selectArea, defaultHotkeys, display as displayHotkey, type Hotkeys } from './hotkeys';
+export { openReport, closeReport, selectArea, defaultHotkeys, display as displayHotkey, type Hotkeys, type OpenReportOptions } from './hotkeys';
+export { indexedDbDraftStore, type DraftStore, type SavedDraft } from './draft';
 export { ShipcueBoard, ShipcueQueue, ShipcueChangelog, type ShipcueBoardProps, type BoardTabStyle, type BoardLayout } from './Board';
 export type { Limits } from '../core';
 export { OutlinePreview, parseOutline, isOutlineText, type OutlineNode } from './outline';
