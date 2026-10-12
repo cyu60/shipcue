@@ -10,9 +10,9 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2316203A'/><g transform='translate(4 4)' fill='none' stroke='%23FFD43B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5'/><path d='M14 6a6 6 0 0 1 6 6v3'/><path d='M4 15v-3a6 6 0 0 1 6-6'/><rect x='2' y='15' width='20' height='4' rx='1'/></g></svg>">
 <script src="/assets/shipcue-button.js" defer></script>
 <title>Cloud · shipcue</title>
-<meta name="description" content="shipcue Cloud: a hosted queue and the CueLog, where your team and your agents claim reports together.">
+<meta name="description" content="shipcue Cloud: one queue for every Claude Code and Codex account, terminal and Mac mini you run, from $10 to $50 a month.">
 <meta property="og:title" content="Cloud · shipcue">
-<meta property="og:description" content="shipcue Cloud: a hosted queue and the CueLog, where your team and your agents claim reports together.">
+<meta property="og:description" content="shipcue Cloud: one queue for every Claude Code and Codex account, terminal and Mac mini you run, from $10 to $50 a month.">
 <meta property="og:image" content="https://shipcue.ibuildathing.com/assets/banner.png">
 </head>
 <body>
@@ -22,9 +22,34 @@
 
 <div class="prose">
 <h1>Cloud</h1>
-<p class="lede">The same queue without running a database: add the button, get a hosted queue, and work it in the CueLog with your team and your agents.</p>
-<div class="note">shipcue Cloud is in an invite-only beta, free while it lasts. <a href="/app/">Sign in</a>, or <a href="/contact/">ask to join</a>.</div>
-<h2>What you get</h2>
+<p class="lede">Two Claude Code accounts, a Codex seat, a Mac mini or two, a terminal open for each. shipcue Cloud is the one queue they all take work from, so no two fix the same thing and you can see who is on what.</p>
+<div class="note">shipcue Cloud is in an invite-only beta, free while it lasts. <a href="/app/">Sign in</a>, <a href="/contact/">ask to join</a>, or see the <a href="#pricing">plans</a>.</div>
+<h2>Who it is for</h2>
+<p>Founders and builders who run more coding agents than they can watch: several Claude Code or Codex subscriptions, a laptop plus a Mac mini or two, a terminal per agent. Each one is fast on its own. Together they collide: two terminals on the same bug, one agent's fix undoing another's, and you as the switchboard, copying reports into prompts and asking which window is on what.</p>
+<p>Cloud is a thin coordination layer over all of them. It does not run your agents or hold your subscriptions: they keep running on your machines with your own logins, and each one takes its next job from the same queue.</p>
+<h2>How it keeps them apart</h2>
+<ul>
+  <li><strong>A token for every agent.</strong> Give each account and terminal its own agent token (<code>claude@mini-1</code>, <code>codex@laptop</code>), and the CueLog shows which one holds which report.</li>
+  <li><strong>One report, one agent.</strong> Claims are all-or-nothing. A claim runs out when its agent stops checking in, so a terminal that crashed or hit its usage limit hands its report back to the queue.</li>
+  <li><strong>A listener on every machine.</strong> Run one per Mac mini as a launchd agent. It checks the queue every 15 seconds, starts <code>claude -p</code> (or Codex, or any command) for each report, and needs no open port.</li>
+  <li><strong>Work areas.</strong> A claim can say which areas, files, migration slot or branch it touches, and Cloud flags two claims that overlap before they meet at merge time.</li>
+  <li><strong>Every project on one screen.</strong> What is open, claimed and in review in each app, which claims are stuck, and what nobody has looked at yet.</li>
+  <li><strong>From PR to fixed without you.</strong> Connect GitHub and opening a PR puts the report in review; merging it marks it fixed.</li>
+</ul>
+<h2 id="pricing">Pricing</h2>
+<p>The plans for when the beta ends. Every plan has the hosted queue, the CueLog, the MCP tools, listeners, work areas, the GitHub loop and the digest. They differ in how many projects, agents and people they cover. Machines and terminals are never counted: an agent token runs wherever you start it.</p>
+<div class="plans">
+  <div class="plan"><h3>Solo</h3><p class="price">$10<span>/month</span></p><p>One builder with a couple of accounts.</p><ul><li>2 projects</li><li>5 agent tokens</li><li>Just you</li><li>10 hosted triages a day</li></ul></div>
+  <div class="plan plan-pick"><h3>Builder</h3><p class="price">$25<span>/month</span></p><p>A founder running a small fleet of agents and Mac minis.</p><ul><li>10 projects</li><li>25 agent tokens</li><li>3 people</li><li>50 hosted triages a day</li></ul></div>
+  <div class="plan"><h3>Team</h3><p class="price">$50<span>/month</span></p><p>A team sharing agents, machines and apps.</p><ul><li>Unlimited projects</li><li>Unlimited agent tokens</li><li>10 people</li><li>200 hosted triages a day</li></ul></div>
+</div>
+<p>Prices are in US dollars, per workspace. Rather run it yourself? Self-hosting stays free: the button, the handler, the MCP server and the CueLog table are MIT-licensed, and the <a href="/docs/">docs</a> set them up in your own Postgres.</p>
+<div class="actions"><a class="btn btn-ink" href="/contact/">Ask to join the beta</a><a class="btn btn-plain" href="/app/">Sign in</a></div>
+<h2>Questions</h2>
+<p><strong>Does shipcue see my Claude or Codex logins?</strong> No. Your agents sign in to Claude and Codex on your machines as they do now. shipcue only gives each one an agent token for the queue.</p>
+<p><strong>Does it run my agents?</strong> Not your coding agents: the listener starts them on your machines. The one agent that runs on shipcue is the optional hosted triage agent, which reads a report and leaves a note, and never touches code.</p>
+<p><strong>Can I mix Claude Code, Codex and people?</strong> Yes. Anything with a token claims from the same queue over MCP or the HTTP API, and a teammate can claim by hand in the CueLog.</p>
+<h2>What is in every plan</h2>
 <ul>
   <li><strong>A hosted queue.</strong> One project per app, with a key for the button. No table, no handler to run.</li>
   <li><strong>The CueLog.</strong> One table with every report in full: who filed it, screenshots, context, the app snapshot. Filter, sort, set priority, and see each report's history.</li>
