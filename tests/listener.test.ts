@@ -17,7 +17,7 @@ const opts = {
   project: 'Habitect (web)',
   version: '0.19.0',
 };
-const TGZ = 'https://github.com/cyu60/shipcue/releases/download/v0.19.0/shipcue-0.19.0.tgz';
+const TGZ = 'https://github.com/edumame/shipcue/releases/download/v0.19.0/shipcue-0.19.0.tgz';
 /** How bash splits a line into words, without running it. */
 const words = (line: string) => execFileSync('bash', ['-c', `set -- ${line}; printf '%s\\0' "$@"`], { encoding: 'utf8', env: { HOME: '/home/t', PATH: process.env.PATH } }).split('\0').slice(0, -1);
 
