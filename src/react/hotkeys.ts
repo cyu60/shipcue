@@ -98,9 +98,19 @@ export const CLOSE_EVENT = 'shipcue:close';
 
 export const SELECT_AREA_EVENT = 'shipcue:select-area';
 
+/** How openReport opens the panel. */
+export interface OpenReportOptions {
+  /**
+   * Keep a Bug or Feature request draft that is not sent yet: the panel opens on the draft's own
+   * tab with its text and screenshots, and on `tab` only when there is none (Habitect report
+   * e1204c25). Without it, openReport always starts a fresh, empty form.
+   */
+  keepDraft?: boolean;
+}
+
 /** Open the report panel from anywhere in your app, on a report type or one of your extraTabs. */
-export function openReport(tab?: ReportType | (string & {})): void {
-  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { type: tab } }));
+export function openReport(tab?: ReportType | (string & {}), options: OpenReportOptions = {}): void {
+  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { type: tab, keepDraft: options.keepDraft === true } }));
 }
 
 /** Close the report panel from anywhere in your app. */
