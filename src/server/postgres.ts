@@ -92,7 +92,7 @@ export interface PostgresStoreOptions {
   /**
    * Keep to one project's reports: every read and write is limited to rows with this
    * project_id, and new reports get it. For a hosted queue serving many apps from one table
-   * (shipcue Cloud); needs the project_id column from sql/cloud.sql. Leave out for one app.
+   * (shipcue Cloud); needs the project_id column from sql/projects.sql. Leave out for one app.
    * null: the table also holds Cloud projects' reports, and this store is the app's own queue,
    * so it only ever sees rows with no project.
    */

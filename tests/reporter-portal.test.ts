@@ -95,39 +95,3 @@ describe('the it-is-fixed email links the reporter portal', () => {
     expect(sent[0]!.html).toContain('href="https://acme.dev/app/mine/"');
   });
 });
-
-describe('shipcue Cloud projects have no reporter portal (their reporter is unverified)', () => {
-  it('GET /p/<key>/mine is 404 even with an x-shipcue-user header, and capabilities never says mine', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { PGlite } = await import('@electric-sql/pglite');
-    // @ts-expect-error -- plain JS module for the site's function
-    const { createCloudHandler } = await import('../website/_src/cloud.mjs');
-    const db = new PGlite();
-    await db.exec(readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8'));
-    await db.exec(readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8'));
-    const users = new Map<string, string>();
-    const auth = {
-      async signUp(email: string) {
-        users.set(email, crypto.randomUUID());
-        return { tokens: { accessToken: `at:${email}`, refreshToken: `rt:${email}`, user: { id: users.get(email)!, email } }, needsVerification: false };
-      },
-      async current(token: string) {
-        const email = token.slice(3);
-        return users.has(email) ? { id: users.get(email)!, email } : null;
-      },
-      async refresh() {
-        return null;
-      },
-    };
-    const CLOUD = 'https://shipcue.example.com/api/cloud';
-    const handle = createCloudHandler({ db: { query: (t: string, p?: unknown[]) => db.query(t, p) }, auth, beta: ['ada@example.com'], secureCookies: false });
-    const signUp = await handle(new Request(`${CLOUD}/auth/sign-up`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'ada@example.com', password: 'long-enough-pw' }) }));
-    const cookie = signUp.headers.getSetCookie().map((c: string) => c.split(';')[0]).join('; ');
-    const created = await handle(new Request(`${CLOUD}/projects`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'P' }) }));
-    const { publicKey } = ((await created.json()) as { project: { publicKey: string } }).project;
-    const as = { 'x-shipcue-user': 'ada@example.com', cookie };
-    expect((await handle(new Request(`${CLOUD}/p/${publicKey}/mine`, { headers: as }))).status).toBe(404);
-    const caps = (await (await handle(new Request(`${CLOUD}/p/${publicKey}/capabilities`, { headers: as }))).json()) as { mine?: boolean };
-    expect(caps.mine).toBeUndefined();
-  }, 60_000);
-});

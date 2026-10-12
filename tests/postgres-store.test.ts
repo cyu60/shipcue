@@ -5,7 +5,7 @@ import { postgresStore } from '../src/server';
 import { storeContract } from './store.contract';
 
 const schema = readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8');
-const cloud = readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8');
+const projects = readFileSync(new URL('../sql/projects.sql', import.meta.url), 'utf8');
 const A = '00000000-0000-4000-8000-00000000000a';
 const B = '00000000-0000-4000-8000-00000000000b';
 
@@ -19,7 +19,7 @@ storeContract('postgres', async () => {
 storeContract('postgres, one project of many', async () => {
   const db = new PGlite();
   await db.exec(schema);
-  await db.exec(cloud);
+  await db.exec(projects);
   // Another project's reports sit in the same table and must never show up.
   const other = postgresStore({ query: (text, params) => db.query(text, params) }, 'shipcue_reports', { project: B });
   await other.create({ type: 'bug', priority: 'blocking', area: 'other', description: 'Someone else', pageUrl: '', userAgent: '', diagnostics: {}, screenshots: [], reporter: null });
@@ -30,7 +30,7 @@ describe('postgres store, projects', () => {
   it("never reads, claims or closes another project's reports", async () => {
     const db = new PGlite();
     await db.exec(schema);
-    await db.exec(cloud);
+    await db.exec(projects);
     const q = { query: (text: string, params?: unknown[]) => db.query(text, params) };
     const a = postgresStore(q, 'shipcue_reports', { project: A });
     const b = postgresStore(q, 'shipcue_reports', { project: B });
@@ -48,7 +48,7 @@ describe('postgres store, projects', () => {
   it("project: null is the app's own queue: it never sees, claims or counts a Cloud project's reports", async () => {
     const db = new PGlite();
     await db.exec(schema);
-    await db.exec(cloud);
+    await db.exec(projects);
     const q = { query: (text: string, params?: unknown[]) => db.query(text, params) };
     const cloudProject = postgresStore(q, 'shipcue_reports', { project: A });
     const own = postgresStore(q, 'shipcue_reports', { project: null });
@@ -87,7 +87,7 @@ describe('retry-safe filing in Postgres (shipcue report 9833fd28)', () => {
   it('scopes a key to its project: the same key in two Cloud projects files two reports', async () => {
     const db = new PGlite();
     await db.exec(schema);
-    await db.exec(cloud);
+    await db.exec(projects);
     const q = { query: (text: string, params?: unknown[]) => db.query(text, params) };
     const a = postgresStore(q, 'shipcue_reports', { project: A });
     const b = postgresStore(q, 'shipcue_reports', { project: B });
@@ -114,15 +114,15 @@ describe('retry-safe filing in Postgres (shipcue report 9833fd28)', () => {
     expect((await store.list()).length).toBe(2);
   });
 
-  it('sql/schema.sql and sql/cloud.sql re-run safely over rows that carry keys, in either order', async () => {
+  it('sql/schema.sql and sql/projects.sql re-run safely over rows that carry keys, in either order', async () => {
     const db = new PGlite();
     await db.exec(schema);
     const own = postgresStore({ query: (text, params) => db.query(text, params) });
     await own.create({ ...input, idempotencyKey: 'k1' });
     await db.exec(schema);
-    await db.exec(cloud);
+    await db.exec(projects);
     await db.exec(schema);
-    await db.exec(cloud);
+    await db.exec(projects);
     const q = { query: (text: string, params?: unknown[]) => db.query(text, params) };
     const a = postgresStore(q, 'shipcue_reports', { project: A });
     const b = postgresStore(q, 'shipcue_reports', { project: B });

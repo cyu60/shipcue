@@ -126,7 +126,7 @@ async function pgStores() {
   shared ??= (async () => {
     const db = new PGlite();
     await db.exec(readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8'));
-    await db.exec(readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8'));
+    await db.exec(readFileSync(new URL('../sql/projects.sql', import.meta.url), 'utf8'));
     return { query: (text: string, params?: unknown[]) => db.query(text, params) };
   })();
   const q = await shared;

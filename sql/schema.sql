@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS shipcue_reports_leases
 CREATE TABLE IF NOT EXISTS shipcue_report_events (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   report_id   uuid NOT NULL,
-  -- The Cloud project, when the table serves many (see cloud.sql); null for one app.
+  -- The Cloud project, when the table serves many (see projects.sql); null for one app.
   project_id  uuid,
   action      text NOT NULL CHECK (action IN ('claimed', 'assigned', 'released', 'expired', 'review', 'closed', 'reopened', 'priority', 'note', 'edited')),
   actor_kind  text CHECK (actor_kind IN ('person', 'agent')),

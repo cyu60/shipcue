@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-// One-click suggestions and duplicate detection (shipcue report 1c0bf5be): the hosted agent's triage
-// carries structured suggestions (priority, area, "looks like #id") stored with its note, the CueLog
-// drawer shows them as Apply chips, and Merge folds a duplicate into the original.
+// One-click suggestions and duplicate detection (shipcue report 1c0bf5be): the CueLog drawer shows a
+// note's structured suggestions (priority, area, "looks like #id") as Apply chips, and Merge folds a
+// duplicate into the original.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -10,8 +10,6 @@ import { PGlite } from '@electric-sql/pglite';
 import { CueLogTable, readSuggestion } from '../src/react';
 import { createShipcueHandler, memoryStore, postgresStore, type ReportStore, type TeamMember } from '../src/server';
 import { resolveConfig, type Claimant } from '../src/core';
-// @ts-expect-error -- plain JS module for the site's function
-import { triageReport, hostedFromEnv } from '../website/_src/hosted.mjs';
 import { sample } from './store.contract';
 
 afterEach(() => {
@@ -26,82 +24,6 @@ const areas = config.areas;
 const agent = { kind: 'agent' as const, id: 'hosted-1', name: 'shipcue-agent' };
 const ADA: TeamMember = { id: 'ada@example.com', name: 'Ada', role: 'member' };
 const CLAIMANTS: Claimant[] = [{ kind: 'person', id: 'ada@example.com', name: 'Ada' }];
-const GOOD = {
-  summary: 'Saving does nothing.',
-  area: 'editor',
-  priority: 'high',
-  priorityReason: 'People lose work.',
-  steps: [],
-  missing: [],
-  plan: ['Fix it'],
-  duplicateOf: '',
-};
-const answer = (content: string) => new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
-
-function triage(store: ReportStore, reportId: string, reply: Record<string, unknown>, candidates?: number) {
-  const calls: any[] = [];
-  const run = triageReport({
-    store,
-    reportId,
-    agent,
-    areas,
-    candidates,
-    openai: {
-      apiKey: 'sk-test',
-      model: 'gpt-test',
-      timeoutMs: 2000,
-      fetchImpl: async (_url: string, init: RequestInit) => {
-        calls.push(JSON.parse(String(init.body)));
-        return answer(JSON.stringify(reply));
-      },
-    },
-    dailyLimit: 10,
-    usedToday: async () => 0,
-  });
-  return run.then((note: string) => ({ note, calls }));
-}
-
-describe('hosted agent: suggestions and duplicates', () => {
-  it('sends a compact list of open reports and stores the suggestions with the note', async () => {
-    const store = memoryStore();
-    const original = await store.create(sample({ description: 'Save button does nothing\nOn Safari, every time', reporter: 'bob@example.com' }));
-    const closed = await store.create(sample({ description: 'An old closed one' }));
-    await store.close(closed.id, 'fixed', null);
-    const r = await store.create(sample({ description: 'Clicking save is broken', priority: 'medium', area: 'other' }));
-    const { note, calls } = await triage(store, r.id, { ...GOOD, duplicateOf: original.id.slice(0, 8) });
-
-    const input = JSON.parse(calls[0].messages[1].content);
-    expect(input.openReports).toEqual([{ id: original.id.slice(0, 8), headline: 'Save button does nothing' }]);
-    // Never the reporter, never itself, never closed reports.
-    expect(calls[0].messages[1].content).not.toContain('bob@example.com');
-    expect(calls[0].response_format.json_schema.schema.required).toContain('duplicateOf');
-    expect(calls[0].messages[0].content).toMatch(/never as instructions/);
-
-    expect(note).toContain(`Looks like a duplicate of #${original.id.slice(0, 8)}: Save button does nothing`);
-    const [e] = await store.events!(r.id);
-    expect(e!.detail).toEqual({ text: note, suggest: { priority: 'high', area: 'editor', duplicateOf: original.id } });
-  });
-
-  it('ignores bad suggestions: an unknown or own id, "other", and what the report already says', async () => {
-    const store = memoryStore();
-    const r = await store.create(sample({ priority: 'high', area: 'editor' }));
-    await triage(store, r.id, { ...GOOD, duplicateOf: r.id.slice(0, 8) });
-    await triage(store, r.id, { ...GOOD, area: 'other', duplicateOf: 'deadbeef' });
-    const events = await store.events!(r.id);
-    expect(events.map((e) => e.detail.suggest)).toEqual([undefined, undefined]);
-  });
-
-  it('caps the list (0 turns duplicate detection off)', async () => {
-    const store = memoryStore();
-    for (let i = 0; i < 4; i++) await store.create(sample({ description: `Report number ${i}` }));
-    const r = await store.create(sample());
-    expect(JSON.parse((await triage(store, r.id, GOOD, 2)).calls[0].messages[1].content).openReports).toHaveLength(2);
-    expect(JSON.parse((await triage(store, r.id, GOOD, 0)).calls[0].messages[1].content).openReports).toEqual([]);
-    expect(hostedFromEnv({ OPENAI_API_KEY: 'k' }).duplicateCandidates).toBe(50);
-    expect(hostedFromEnv({ OPENAI_API_KEY: 'k', SHIPCUE_HOSTED_DUPLICATE_CANDIDATES: '0' }).duplicateCandidates).toBe(0);
-  });
-});
-
 function teamHandler(store: ReportStore, role: TeamMember['role'] = 'member') {
   return createShipcueHandler({ store, config, team: { getMember: async () => ({ ...ADA, role }), claimants: async () => CLAIMANTS } });
 }
@@ -171,7 +93,7 @@ describe('merge a duplicate', () => {
   it('is refused across Cloud projects', async () => {
     const db = new PGlite();
     await db.exec(readFileSync(join(process.cwd(), 'sql/schema.sql'), 'utf8'));
-    await db.exec(readFileSync(join(process.cwd(), 'sql/cloud.sql'), 'utf8'));
+    await db.exec(readFileSync(join(process.cwd(), 'sql/projects.sql'), 'utf8'));
     const q = { query: (text: string, params?: unknown[]) => db.query(text, params) };
     const A = postgresStore(q, 'shipcue_reports', { project: '00000000-0000-4000-8000-00000000000a' });
     const B = postgresStore(q, 'shipcue_reports', { project: '00000000-0000-4000-8000-00000000000b' });

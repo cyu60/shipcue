@@ -7,11 +7,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { createShipcueHandler, postgresStore, type ReportStore } from '../src/server';
 import type { Report, ReportEvent } from '../src/core';
-// @ts-expect-error -- plain JS module for the site's function
-import { createCloudHandler } from '../website/_src/cloud.mjs';
 
 const schema = readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8');
-const cloudSql = readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8');
+const projectsSql = readFileSync(new URL('../sql/projects.sql', import.meta.url), 'utf8');
 const A = '00000000-0000-4000-8000-00000000000a';
 const B = '00000000-0000-4000-8000-00000000000b';
 const PNG = `data:image/png;base64,${Buffer.from('not really a png').toString('base64')}`;
@@ -26,7 +24,7 @@ const PAIRS = NAMES.flatMap((x) => NAMES.filter((y) => y !== x).map((y) => [x, y
 async function freshDb() {
   const db = new PGlite();
   await db.exec(schema);
-  await db.exec(cloudSql);
+  await db.exec(projectsSql);
   return { db, q: { query: (text: string, params?: unknown[]) => db.query(text, params) } };
 }
 
@@ -313,189 +311,5 @@ describe('isolation: the handler (board, screenshots, team API, agent API)', () 
         expect(report.description.startsWith(`${n}:`)).toBe(true);
       }
     }
-  });
-});
-
-describe('isolation: shipcue Cloud (website/_src/cloud.mjs) and the site\'s own queue', () => {
-  const BASE = 'https://shipcue.example.com/api/cloud';
-  let db: PGlite;
-  let q: { query: (t: string, p?: unknown[]) => Promise<{ rows: unknown[] }> };
-  let handle: (req: Request) => Promise<Response>;
-  const jar = new Map<string, string>();
-
-  function fakeAuth() {
-    const users = new Map<string, string>();
-    const tokens = (email: string) => ({ accessToken: `at:${email}`, refreshToken: `rt:${email}`, user: { id: users.get(email)!, email } });
-    return {
-      async signUp(email: string) {
-        users.set(email, crypto.randomUUID());
-        return { tokens: tokens(email), needsVerification: false };
-      },
-      async current(token: string) {
-        const email = token.startsWith('at:') ? token.slice(3) : '';
-        return users.has(email) ? { id: users.get(email)!, email } : null;
-      },
-      async refresh() {
-        return null;
-      },
-    };
-  }
-
-  async function call(method: string, path: string, opts: { as?: string; body?: unknown; headers?: Record<string, string> } = {}) {
-    const headers: Record<string, string> = { ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}), ...opts.headers };
-    if (opts.as) headers.cookie = jar.get(opts.as)!;
-    const res = await handle(new Request(BASE + path, { method, headers, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined }));
-    return { res, data: await res.clone().json().catch(() => null) };
-  }
-
-  /** Two projects with an owner, an agent, a public board and filed reports each; plus the site's own rows. */
-  async function setup() {
-    ({ db, q } = await freshDb());
-    handle = createCloudHandler({ db: q, auth: fakeAuth(), beta: ['ada@example.com', 'bob@example.com'], secureCookies: false });
-    const projects: Record<'A' | 'B', { id: string; key: string; token: string; agentId: string; owner: string; reports: string[] }> = {} as never;
-    for (const [n, owner] of [['A', 'ada@example.com'], ['B', 'bob@example.com']] as const) {
-      const { res } = await call('POST', '/auth/sign-up', { body: { email: owner, password: 'long-enough-pw' } });
-      jar.set(owner, res.headers.getSetCookie().map((c) => c.split(';')[0]).join('; '));
-      const { data } = await call('POST', '/projects', { as: owner, body: { name: `Project ${n}` } });
-      const { id, publicKey } = data.project;
-      await call('POST', `/projects/${id}/settings`, { as: owner, body: { publicBoard: true } });
-      const { data: agent } = await call('POST', `/projects/${id}/agents`, { as: owner, body: { name: `agent-${n.toLowerCase()}` } });
-      const reports: string[] = [];
-      for (const what of ['open', 'to close']) {
-        const form = new FormData();
-        for (const [k, v] of Object.entries({ type: 'bug', priority: 'high', area: 'other', description: `${n}: report that is ${what}` })) form.set(k, v);
-        form.append('screenshot', new File([new Uint8Array(8)], 's.png', { type: 'image/png' }));
-        const filed = await handle(new Request(`${BASE}/p/${publicKey}/reports`, { method: 'POST', body: form }));
-        expect(filed.status).toBe(201);
-        reports.push((await filed.json()).id);
-      }
-      const { data: me } = await call('GET', `/p/${publicKey}/team/me`, { as: owner });
-      const agentId = me.claimants.find((c: { kind: string }) => c.kind === 'agent').id;
-      projects[n] = { id, key: publicKey, token: agent.token, agentId, owner, reports };
-      await call('POST', `/p/${publicKey}/team/reports/${reports[1]}/close`, { as: owner, body: { status: 'fixed', resolution: 'done' } });
-    }
-    // The site's own queue: the same store website/_src/api.mjs builds.
-    const own = postgresStore(q, 'shipcue_reports', { project: null });
-    const mine = await own.create({ type: 'bug', priority: 'blocking', area: 'other', description: 'own: site report', pageUrl: '', userAgent: '', diagnostics: {}, screenshots: [PNG], reporter: null });
-    const site = createShipcueHandler({ store: own, basePath: '/api/shipcue', board: true, boardScreenshots: true, agentToken: 'site-token', team: { getMember: async () => ({ id: 'p1', name: 'Pat', role: 'owner' }) } });
-    return { projects, own, mine, site };
-  }
-
-  it("a member of A gets 404 for B's ids on every per-project route, and B's queue stays shut to A", async () => {
-    const { projects } = await setup();
-    const snap = async () => (await db.query(`SELECT id, status, priority, description, claimant_id, resolution, updated_at FROM shipcue_reports ORDER BY id`)).rows;
-    const eventsBefore = (await db.query(`SELECT count(*)::int AS n FROM shipcue_report_events`)).rows;
-    const before = await snap();
-    for (const [x, y] of [['A', 'B'], ['B', 'A']] as const) {
-      const me = projects[x];
-      const them = projects[y];
-      // Their queue: not a member, not their token.
-      expect((await call('GET', `/p/${them.key}/team/reports`, { as: me.owner })).res.status).toBe(401);
-      expect((await call('GET', `/p/${them.key}/team/reports/${them.reports[0]}`, { as: me.owner })).res.status).toBe(401);
-      expect((await call('POST', `/p/${them.key}/team/reports/${them.reports[0]}/close`, { as: me.owner, body: { status: 'wontfix' } })).res.status).toBe(401);
-      expect((await handle(new Request(`${BASE}/p/${them.key}/reports`, { headers: { authorization: `Bearer ${me.token}` } }))).status).toBe(401);
-      expect((await call('GET', `/projects/${them.id}`, { as: me.owner })).res.status).toBe(404);
-      // Their ids through my own queue.
-      const { data: list } = await call('GET', `/p/${me.key}/team/reports`, { as: me.owner });
-      expect(list.reports.map((r: Report) => r.id).sort()).toEqual([...me.reports].sort());
-      expect((await call('GET', `/p/${me.key}/team/version`, { as: me.owner })).res.status).toBe(200);
-      for (const id of them.reports) {
-        expect((await call('GET', `/p/${me.key}/team/reports/${id}`, { as: me.owner })).res.status).toBe(404);
-        expect((await call('GET', `/p/${me.key}/team/screenshot/${id}/0`, { as: me.owner })).res.status).toBe(404);
-        for (const [action, body] of [
-          ['claim', {}],
-          ['assign', { to: null }],
-          ['release', {}],
-          ['close', { status: 'wontfix', resolution: 'no' }],
-          ['reopen', {}],
-          ['review', { prUrl: 'https://github.com/x/y/pull/2' }],
-          ['note', { text: 'sneaky' }],
-          ['edit', { description: 'rewritten by someone else entirely' }],
-          ['priority', { priority: 'blocking' }],
-        ] as const) {
-          const { res, data } = await call('POST', `/p/${me.key}/team/reports/${id}/${action}`, { as: me.owner, body });
-          expect([404, 409], `${x} team ${action} on ${y}'s report`).toContain(res.status);
-          expect(JSON.stringify(data)).not.toContain(`${y}:`);
-        }
-        // My agent token on their ids.
-        const auth = { authorization: `Bearer ${me.token}`, 'content-type': 'application/json' };
-        expect((await handle(new Request(`${BASE}/p/${me.key}/reports/${id}`, { headers: auth }))).status).toBe(404);
-        expect((await handle(new Request(`${BASE}/p/${me.key}/reports/${id}/events`, { headers: auth }))).status).toBe(404);
-        for (const action of ['claim', 'release', 'heartbeat', 'review', 'close', 'note']) {
-          const res = await handle(
-            new Request(`${BASE}/p/${me.key}/reports/${id}/${action}`, {
-              method: 'POST',
-              headers: auth,
-              body: JSON.stringify({ status: 'fixed', prUrl: 'https://github.com/x/y/pull/3', text: 'sneaky' }),
-            }),
-          );
-          expect([404, 409], `${x} agent ${action} on ${y}'s report`).toContain(res.status);
-        }
-      }
-      // Their agent cannot be handed my reports.
-      const { res: assignRes } = await call('POST', `/p/${me.key}/team/reports/${me.reports[0]}/assign`, { as: me.owner, body: { to: { kind: 'agent', id: them.agentId } } });
-      expect(assignRes.status).toBe(400);
-    }
-    expect(await snap()).toEqual(before);
-    expect((await db.query(`SELECT count(*)::int AS n FROM shipcue_report_events`)).rows).toEqual(eventsBefore);
-  });
-
-  it('each public board, board version and next/claim keeps to its own project', async () => {
-    const { projects } = await setup();
-    for (const [x, y] of [['A', 'B'], ['B', 'A']] as const) {
-      const board = await (await handle(new Request(`${BASE}/p/${projects[x].key}/board`))).json();
-      expect(board.queue.length + board.changelog.length).toBe(2);
-      expect(JSON.stringify(board)).not.toContain(`${y}:`);
-      const version = async () => (await (await handle(new Request(`${BASE}/p/${projects[x].key}/board/version`))).json()).version;
-      const v = await version();
-      await call('POST', `/p/${projects[y].key}/team/reports/${projects[y].reports[0]}/priority`, { as: projects[y].owner, body: { priority: 'low' } });
-      expect(await version()).toBe(v);
-      for (const id of projects[y].reports) {
-        expect((await handle(new Request(`${BASE}/p/${projects[x].key}/board/screenshot/${id}/0`))).status).toBe(404);
-      }
-    }
-    for (const n of ['A', 'B'] as const) {
-      const auth = { authorization: `Bearer ${projects[n].token}` };
-      const res = await handle(new Request(`${BASE}/p/${projects[n].key}/reports/next/claim`, { method: 'POST', headers: auth }));
-      expect(res.status).toBe(200);
-      expect((await res.json()).report.id).toBe(projects[n].reports[0]);
-      expect((await handle(new Request(`${BASE}/p/${projects[n].key}/reports/next/claim`, { method: 'POST', headers: auth }))).status).toBe(204);
-    }
-  });
-
-  it("the site's own queue never sees Cloud rows, and Cloud never sees the site's", async () => {
-    const { projects, own, mine, site } = await setup();
-    const cloudIds = [...projects.A.reports, ...projects.B.reports];
-    expect((await own.list()).map((r) => r.id)).toEqual([mine.id]);
-    for (const id of cloudIds) expect(await own.get(id)).toBeNull();
-    const sget = (path: string, headers: Record<string, string> = {}) => site(new Request(`https://shipcue.example.com/api/shipcue${path}`, { headers }));
-    const board = await (await sget('/board')).json();
-    expect(JSON.stringify(board)).not.toMatch(/"[AB]: /);
-    expect(board.queue.map((i: { id: string }) => i.id)).toEqual([mine.id]);
-    const team = await (await sget('/team/reports')).json();
-    expect(team.reports.map((r: Report) => r.id)).toEqual([mine.id]);
-    const agent = await (await sget('/reports', { authorization: 'Bearer site-token' })).json();
-    expect(agent.reports.map((r: Report) => r.id)).toEqual([mine.id]);
-    for (const id of cloudIds) {
-      expect((await sget(`/team/reports/${id}`)).status).toBe(404);
-      expect((await sget(`/reports/${id}`, { authorization: 'Bearer site-token' })).status).toBe(404);
-      expect((await sget(`/board/screenshot/${id}/0`)).status).toBe(404);
-    }
-    // A Cloud project's change does not move the site's version, and the site's own change does not move Cloud's.
-    const siteV = (await (await sget('/board/version')).json()).version;
-    await call('POST', `/p/${projects.A.key}/team/reports/${projects.A.reports[0]}/note`, { as: projects.A.owner, body: { text: 'cloud note' } });
-    expect((await (await sget('/board/version')).json()).version).toBe(siteV);
-    const cloudV = (await (await handle(new Request(`${BASE}/p/${projects.A.key}/board/version`))).json()).version;
-    await own.setPriority!(mine.id, 'low', null);
-    expect((await (await handle(new Request(`${BASE}/p/${projects.A.key}/board/version`))).json()).version).toBe(cloudV);
-    // Cloud never shows the site's own report either.
-    for (const n of ['A', 'B'] as const) {
-      expect((await call('GET', `/p/${projects[n].key}/team/reports/${mine.id}`, { as: projects[n].owner })).res.status).toBe(404);
-      expect((await handle(new Request(`${BASE}/p/${projects[n].key}/reports/${mine.id}`, { headers: { authorization: `Bearer ${projects[n].token}` } }))).status).toBe(404);
-    }
-    // The site's agent drains only its own queue.
-    const first = await site(new Request('https://shipcue.example.com/api/shipcue/reports/next/claim', { method: 'POST', headers: { authorization: 'Bearer site-token' } }));
-    expect((await first.json()).report.id).toBe(mine.id);
-    expect((await site(new Request('https://shipcue.example.com/api/shipcue/reports/next/claim', { method: 'POST', headers: { authorization: 'Bearer site-token' } }))).status).toBe(204);
   });
 });
