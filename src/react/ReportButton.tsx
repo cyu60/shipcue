@@ -18,6 +18,7 @@ import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
 import { afterPaint, CAPTURE_KEEP_ALIVE_MS, canCaptureTab, captureError, overlaps, tabCapture, type Rect, type TabCapture } from './capture';
 import { AreaSelect } from './AreaSelect';
+import { CaptureVeil } from './CaptureVeil';
 import { hasDraft, indexedDbDraftStore, type DraftStore, type SavedDraft } from './draft';
 import { Annotator } from './Annotator';
 import { agentPrompt, type AgentPromptAuth } from './agentPrompt';
@@ -396,6 +397,8 @@ function ReportPanel({
   }, [open]);
   const ambientRef = useRef(false);
   const [capturing, setCapturing] = useState(false);
+  // The selection being captured, until its picture is taken (CaptureVeil).
+  const [veilHole, setVeilHole] = useState<Rect | null>(null);
   /** The panel is hidden for this capture: it was hidden for Select area, or it is inside the selection. */
   const [panelInShot, setPanelInShot] = useState(false);
   const [annotating, setAnnotating] = useState<{ src: string; index: number | null; alt: string; name: string; own: boolean } | null>(null);
@@ -1031,17 +1034,18 @@ function ReportPanel({
   // The tint, the selection and its toolbar are gone before the frame is taken, so none of them
   // is in the picture. The panel goes too only when it would be: one beside the selection stays
   // put instead of blinking out and back (Habitect report 71cc2002). Capture attaches it;
-  // Capture & annotate opens the annotator.
+  // Capture & annotate opens the annotator. The veil shows meanwhile (Habitect report cbb24947).
   const captureSelection = async (rect: Rect, { annotate }: { annotate: boolean }) => {
     const shown = [wrapRef.current, panelRef.current].flatMap((el) => (el ? [el.getBoundingClientRect()] : []));
     setPanelInShot(selecting || shown.some((box) => overlaps(rect, box)));
     setSelecting(false);
     // Back at the panel afterwards with the page usable; Select area captures another.
     setTintLifted(true);
+    setVeilHole(rect);
     setCapturing(true);
     try {
       await afterPaint();
-      const blob = await tab().grab(rect);
+      const blob = await tab().grab(rect, () => setVeilHole(null));
       if (annotate) setAnnotating({ src: URL.createObjectURL(blob), index: null, alt: '', name: 'area.png', own: true });
       else await addFiles([new File([blob], 'area.png', { type: 'image/png' })]);
     } catch (e) {
@@ -1196,6 +1200,7 @@ function ReportPanel({
         <AreaSelect ambient hint={t.captureOnOpenHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setTintLifted(true)} onDismiss={() => setTintLifted(true)} />
       )}
       {dimOnOpen && open && !ambient && !selecting && !capturing && typeof document !== 'undefined' && createPortal(<div data-shipcue-dim="" aria-hidden="true" style={s.dim} />, document.body)}
+      {capturing && <CaptureVeil hole={veilHole} label={t.capturing} />}
       {selecting && <AreaSelect hint={t.selectAreaHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setSelecting(false)} />}
       {annotating && (
         <Annotator

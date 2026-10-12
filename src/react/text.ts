@@ -54,6 +54,7 @@ export interface ShipcueText {
   captureDeclined: string;
   captureUnsupported: string;
   captureFailed: string;
+  capturing: string;
   editScreenshot: string;
   annotateTitle: string;
   toolPen: string;
@@ -208,6 +209,7 @@ export const DEFAULT_TEXT: ShipcueText = {
   captureDeclined: 'Screen capture was not allowed. Paste a screenshot instead.',
   captureUnsupported: 'This browser cannot capture the page. Paste a screenshot instead.',
   captureFailed: 'Could not capture that area. Paste a screenshot instead.',
+  capturing: 'Taking the screenshot…',
   editScreenshot: 'Edit',
   annotateTitle: 'Mark up the screenshot',
   toolPen: 'Draw',
