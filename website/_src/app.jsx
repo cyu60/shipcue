@@ -6,7 +6,7 @@ import { CueLogTable } from '../../src/react';
 import { ago } from '../../src/react/CueLog';
 import { SHIPCUE_VERSION } from '../../src/core';
 import { LISTEN_EVENTS } from '../../src/mcp/events';
-import { DEFAULT_LISTEN_COMMAND, launchdInstall, listenCommand, releaseTarball, slug, systemdInstall } from './listener.mjs';
+import { DEFAULT_LISTEN_COMMAND, launchdInstall, listenCommand, releaseTarball, setupPrompt, slug, systemdInstall } from './listener.mjs';
 
 const API = '/api/cloud';
 const ORIGIN = window.location.origin;
@@ -182,7 +182,8 @@ const mcpLine = (endpoint, token) => `claude mcp add shipcue -e SHIPCUE_URL=${en
 
 /**
  * Run a listener (shipcue report 3d2dded6): pick or create an agent, the events and the command, and copy
- * shipcue-listen as one command, a launchd agent (macOS) or a systemd --user unit (Linux).
+ * one prompt that sets the machine up, or shipcue-listen as one command, a launchd agent (macOS) or a
+ * systemd --user unit (Linux).
  */
 function Listener({ detail, endpoint, run }) {
   const p = detail.project;
@@ -192,7 +193,7 @@ function Listener({ detail, endpoint, run }) {
   const [events, setEvents] = useState(['filed', 'assigned']);
   const [command, setCommand] = useState(DEFAULT_LISTEN_COMMAND);
   const [folder, setFolder] = useState(`~/code/${slug(p.name)}`);
-  const [os, setOs] = useState('cmd');
+  const [os, setOs] = useState('prompt');
   const agent = made && made.id === pick ? made : detail.agents.find((a) => a.id === pick);
   const opts = {
     url: endpoint,
@@ -263,6 +264,7 @@ function Listener({ detail, endpoint, run }) {
           )}
           <div style={s.pills} role="tablist" aria-label="How to run it">
             {[
+              ['prompt', 'One prompt'],
               ['cmd', 'Command'],
               ['mac', 'macOS (launchd)'],
               ['linux', 'Linux (systemd)'],
@@ -272,9 +274,11 @@ function Listener({ detail, endpoint, run }) {
               </button>
             ))}
           </div>
-          <Copy text={os === 'cmd' ? listenCommand(opts) : os === 'mac' ? launchdInstall(opts) : systemdInstall(opts)} />
+          <Copy text={os === 'prompt' ? setupPrompt(opts) : os === 'cmd' ? listenCommand(opts) : os === 'mac' ? launchdInstall(opts) : systemdInstall(opts)} />
           <p style={s.small}>
-            {os === 'cmd'
+            {os === 'prompt'
+              ? 'Paste it into Claude Code (or Codex) on the machine: it installs the shipcue tools and the listener for macOS or Linux, checks the token and that the listener runs, and asks you only for passwords and logins.'
+              : os === 'cmd'
               ? 'Runs while the terminal is open. Use launchd or systemd to keep it running after you log out and restart it if it stops.'
               : os === 'mac'
                 ? `Keeps running (KeepAlive) and starts at login; logs go to ~/Library/Logs/shipcue-listen-${slug(p.name)}.log.`
