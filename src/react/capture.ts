@@ -45,6 +45,9 @@ export function cropRect(sel: Rect, frame: { width: number; height: number }, vi
   return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
 }
 
+/** Whether two rectangles share any area (touching edges do not). */
+export const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
 /** Too small to be a selection: a click, not a drag. */
 export const isTiny = (r: Rect, min: number) => r.width < min || r.height < min;
 

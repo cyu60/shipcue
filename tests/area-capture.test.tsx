@@ -533,6 +533,67 @@ describe('adjust before capturing (shipcue report 03de1f12)', () => {
       expect(getDisplayMedia).toHaveBeenCalledTimes(1);
     });
 
+    it('Capture is the default: the highlighted button, last in the toolbar, on Enter (Habitect report 71cc2002)', async () => {
+      await openPanel();
+      press(tint(), [100, 50], [300, 150]);
+      const buttons = within(toolbar()).getAllByRole('button');
+      const capture = within(toolbar()).getByRole('button', { name: 'Capture' });
+      expect(buttons.at(-1)).toBe(capture);
+      expect(capture).toHaveAttribute('aria-keyshortcuts', 'Enter');
+      expect(capture).toHaveStyle({ background: '#fff' });
+      expect(within(toolbar()).getByRole('button', { name: 'Capture & annotate' })).toHaveStyle({ background: 'transparent' });
+    });
+
+    // The panel blinked out for the capture and back (Habitect report 71cc2002): it stays when it is not in the picture.
+    describe('while the capture is taken', () => {
+      let share: (() => void) | null = null;
+      beforeEach(() => {
+        getDisplayMedia.mockImplementationOnce(
+          (_o?: unknown) =>
+            new Promise((resolve) => {
+              share = () => {
+                const track = { readyState: 'live', stop: () => ((track.readyState = 'ended'), stop()) };
+                tracks.push(track);
+                resolve({ getTracks: () => [track], getVideoTracks: () => [track] });
+              };
+            }),
+        );
+      });
+      afterEach(() => {
+        share = null;
+        vi.restoreAllMocks();
+      });
+      const panel = () => screen.queryByRole('dialog', { name: 'Report a bug' });
+      const placePanel = (box: { x: number; y: number; width: number; height: number }) =>
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+          return this.matches('[data-shipcue]') ? DOMRect.fromRect(box) : DOMRect.fromRect({ x: 0, y: 0, width: 0, height: 0 });
+        });
+
+      it('keeps the panel on screen when the selection is beside it', async () => {
+        placePanel({ x: 500, y: 100, width: 280, height: 480 });
+        await openPanel();
+        press(tint(), [100, 50], [300, 150]);
+        await userEvent.keyboard('{Enter}');
+        await waitFor(() => expect(getDisplayMedia).toHaveBeenCalledTimes(1));
+        expect(panel()).toBeInTheDocument();
+        expect(document.querySelector('[data-shipcue]')).not.toHaveStyle({ visibility: 'hidden' });
+        await act(async () => share!());
+        expect(await screen.findByAltText('Screenshot 1')).toBeInTheDocument();
+      });
+
+      it('hides it when the selection takes it in', async () => {
+        placePanel({ x: 200, y: 100, width: 280, height: 480 });
+        await openPanel();
+        press(tint(), [100, 50], [300, 150]);
+        await userEvent.keyboard('{Enter}');
+        await waitFor(() => expect(getDisplayMedia).toHaveBeenCalledTimes(1));
+        expect(panel()).toBeNull();
+        await act(async () => share!());
+        expect(await screen.findByAltText('Screenshot 1')).toBeInTheDocument();
+        expect(panel()).toBeInTheDocument();
+      });
+    });
+
     it('Esc drops the selection first, keeping the tint; typing in the panel still never captures', async () => {
       await openPanel();
       press(tint(), [100, 50], [300, 150]);

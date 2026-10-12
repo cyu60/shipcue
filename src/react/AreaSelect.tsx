@@ -12,7 +12,7 @@ import { DEFAULT_TEXT, type ShipcueText } from './text';
 //
 // Letting go no longer captures (shipcue report 03de1f12): the selection stays, CleanShot-style,
 // to move (drag inside), resize (eight handles, or the size fields) or redraw (drag outside it),
-// with a small toolbar: Capture (Enter), Capture & annotate, Cancel (Esc). Nothing is asked of
+// with a small toolbar: Cancel (Esc), Capture & annotate, Capture (Enter, the default). Nothing is asked of
 // the browser until one of the captures.
 //
 // `ambient` (shipcue report 503aa011): the same tint and drag, laid under the open report panel
@@ -281,11 +281,15 @@ export function AreaSelect({ onSelect, onCancel, hint, text: t = DEFAULT_TEXT, m
           <button type="button" onClick={cancel} style={s.btn}>
             {t.cancel}
           </button>
-          <button type="button" onClick={() => capture(false)} title={`${t.captureNow} (Enter)`} style={s.btn}>
-            {t.captureNow}
-          </button>
-          <button type="button" onClick={() => capture(true)} style={{ ...s.btn, ...s.primary }}>
+          <button type="button" onClick={() => capture(true)} style={s.btn}>
             {t.captureAnnotate}
+          </button>
+          {/* Capture is the default (Habitect report 71cc2002): the highlighted button, and what Enter does. */}
+          <button type="button" onClick={() => capture(false)} title={`${t.captureNow} (Enter)`} aria-keyshortcuts="Enter" style={{ ...s.btn, ...s.primary }}>
+            {t.captureNow}
+            <span aria-hidden="true" style={s.key}>
+              ↵
+            </span>
           </button>
         </div>
       )}
@@ -311,4 +315,5 @@ const s: Record<string, CSSProperties> = {
   sep: { width: 1, height: 16, margin: '0 2px', background: 'rgba(255,255,255,0.15)' },
   btn: { padding: '3px 9px', border: 0, borderRadius: 999, background: 'transparent', color: 'rgba(255,255,255,0.85)', font: 'inherit', cursor: 'pointer' },
   primary: { background: '#fff', color: '#18181b', fontWeight: 500 },
+  key: { marginLeft: 5, opacity: 0.55 },
 };
