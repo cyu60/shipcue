@@ -1,6 +1,6 @@
 {
   "name": "shipcue",
-  "version": "0.32.0",
+  "version": "0.32.1",
   "description": "A drop-in bug report and feature request button whose inbox is a queue that people and coding agents both work from.",
   "license": "MIT",
   "type": "module",
@@ -13,15 +13,18 @@
   "exports": {
     ".": {
       "types": "./dist/core/index.d.ts",
-      "import": "./dist/core/index.js"
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
     },
     "./react": {
       "types": "./dist/react/index.d.ts",
-      "import": "./dist/react/index.js"
+      "import": "./dist/react/index.js",
+      "default": "./dist/react/index.js"
     },
     "./server": {
       "types": "./dist/server/index.d.ts",
-      "import": "./dist/server/index.js"
+      "import": "./dist/server/index.js",
+      "default": "./dist/server/index.js"
     },
     "./package.json": "./package.json"
   },
