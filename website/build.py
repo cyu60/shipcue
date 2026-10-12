@@ -47,9 +47,9 @@ def page(path, title, description, body, current):
 
 HOME = """
 <section class="hero">
-  <h1>Bug reports your coding agents can fix</h1>
-  <p class="lede">A report button for your app, a queue in your own Postgres, and an MCP server so Claude Code or Codex can take the most urgent report, fix it and close it with the PR link.</p>
-  <div class="actions"><a class="btn btn-ink" href="/docs/">Read the docs</a><a class="btn btn-plain" href="/blog/agents-should-read-your-bug-reports/">Why we built it</a></div>
+  <h1>One queue for all your coding agents</h1>
+  <p class="lede">Running Claude Code and Codex on several subscriptions, across a laptop and a Mac mini or two? shipcue is the coordination layer between them: people report from your app, every agent and terminal takes its next job from one queue, and no two take the same one.</p>
+  <div class="actions"><a class="btn btn-ink" href="/cloud/#pricing">See Cloud plans</a><a class="btn btn-plain" href="/docs/">Self-host it free</a></div>
 
   <div class="demo" aria-label="Try the queue">
     <div class="demo-bar">
@@ -72,11 +72,19 @@ HOME = """
   <div><h3>An agent fixes it</h3><p>The MCP server hands an agent the top report as a ready-to-run task. Claims are atomic, so several agents can work the queue at once and never take the same report.</p></div>
 </div>
 
+<h2>Cloud: one place for every account and machine</h2>
+<div class="flow">
+  <div><h3>A token per agent</h3><p>Every Claude Code account, Codex seat and terminal gets its own token, so you can see which one is on which report.</p></div>
+  <div><h3>A listener per Mac mini</h3><p>Each machine picks up the next report on its own and starts an agent for it. A crashed or rate-limited terminal hands its report back.</p></div>
+  <div><h3>From $10 a month</h3><p>Plans from $10 to $50 a month by projects, agents and people. Free while the beta lasts, and self-hosting stays free.</p></div>
+</div>
+<p><a href="/cloud/#pricing">Cloud plans</a></p>
+
 <h2>Who uses shipcue</h2>
 <div class="flow">
+  <div><h3>Founders with a fleet</h3><p>Several Claude Code and Codex subscriptions on a laptop and a Mac mini or two. One queue keeps every terminal on its own report.</p></div>
   <div><h3>Hackathon teams</h3><p>Four people each running a couple of agents on one repo. One queue means no two agents fix the same bug, and nobody's fix quietly undoes someone else's.</p></div>
   <div><h3>Founders with early users</h3><p>Users report from inside the app with the page, browser and state attached. Your agent works the queue and you review the PRs.</p></div>
-  <div><h3>Internal tools and betas</h3><p>Teammates and testers file what they hit while they click through. The most urgent report gets fixed first.</p></div>
 </div>
 <p><a href="/use-cases/">All use cases</a></p>
 
@@ -352,9 +360,34 @@ POST /github                  GitHub's signed pull_request webhook (only with gi
 CLOUD = """
 <div class="prose">
 <h1>Cloud</h1>
-<p class="lede">The same queue without running a database: add the button, get a hosted queue, and work it in the CueLog with your team and your agents.</p>
-<div class="note">shipcue Cloud is in an invite-only beta, free while it lasts. <a href="/app/">Sign in</a>, or <a href="/contact/">ask to join</a>.</div>
-<h2>What you get</h2>
+<p class="lede">Two Claude Code accounts, a Codex seat, a Mac mini or two, a terminal open for each. shipcue Cloud is the one queue they all take work from, so no two fix the same thing and you can see who is on what.</p>
+<div class="note">shipcue Cloud is in an invite-only beta, free while it lasts. <a href="/app/">Sign in</a>, <a href="/contact/">ask to join</a>, or see the <a href="#pricing">plans</a>.</div>
+<h2>Who it is for</h2>
+<p>Founders and builders who run more coding agents than they can watch: several Claude Code or Codex subscriptions, a laptop plus a Mac mini or two, a terminal per agent. Each one is fast on its own. Together they collide: two terminals on the same bug, one agent's fix undoing another's, and you as the switchboard, copying reports into prompts and asking which window is on what.</p>
+<p>Cloud is a thin coordination layer over all of them. It does not run your agents or hold your subscriptions: they keep running on your machines with your own logins, and each one takes its next job from the same queue.</p>
+<h2>How it keeps them apart</h2>
+<ul>
+  <li><strong>A token for every agent.</strong> Give each account and terminal its own agent token (<code>claude@mini-1</code>, <code>codex@laptop</code>), and the CueLog shows which one holds which report.</li>
+  <li><strong>One report, one agent.</strong> Claims are all-or-nothing. A claim runs out when its agent stops checking in, so a terminal that crashed or hit its usage limit hands its report back to the queue.</li>
+  <li><strong>A listener on every machine.</strong> Run one per Mac mini as a launchd agent. It checks the queue every 15 seconds, starts <code>claude -p</code> (or Codex, or any command) for each report, and needs no open port.</li>
+  <li><strong>Work areas.</strong> A claim can say which areas, files, migration slot or branch it touches, and Cloud flags two claims that overlap before they meet at merge time.</li>
+  <li><strong>Every project on one screen.</strong> What is open, claimed and in review in each app, which claims are stuck, and what nobody has looked at yet.</li>
+  <li><strong>From PR to fixed without you.</strong> Connect GitHub and opening a PR puts the report in review; merging it marks it fixed.</li>
+</ul>
+<h2 id="pricing">Pricing</h2>
+<p>The plans for when the beta ends. Every plan has the hosted queue, the CueLog, the MCP tools, listeners, work areas, the GitHub loop and the digest. They differ in how many projects, agents and people they cover. Machines and terminals are never counted: an agent token runs wherever you start it.</p>
+<div class="plans">
+  <div class="plan"><h3>Solo</h3><p class="price">$10<span>/month</span></p><p>One builder with a couple of accounts.</p><ul><li>2 projects</li><li>5 agent tokens</li><li>Just you</li><li>10 hosted triages a day</li></ul></div>
+  <div class="plan plan-pick"><h3>Builder</h3><p class="price">$25<span>/month</span></p><p>A founder running a small fleet of agents and Mac minis.</p><ul><li>10 projects</li><li>25 agent tokens</li><li>3 people</li><li>50 hosted triages a day</li></ul></div>
+  <div class="plan"><h3>Team</h3><p class="price">$50<span>/month</span></p><p>A team sharing agents, machines and apps.</p><ul><li>Unlimited projects</li><li>Unlimited agent tokens</li><li>10 people</li><li>200 hosted triages a day</li></ul></div>
+</div>
+<p>Prices are monthly, in US dollars. Rather run it yourself? Self-hosting stays free: the button, the handler, the MCP server and the CueLog table are MIT-licensed, and the <a href="/docs/">docs</a> set them up in your own Postgres.</p>
+<div class="actions"><a class="btn btn-ink" href="/contact/">Ask to join the beta</a><a class="btn btn-plain" href="/app/">Sign in</a></div>
+<h2>Questions</h2>
+<p><strong>Does shipcue see my Claude or Codex logins?</strong> No. Your agents sign in to Claude and Codex on your machines as they do now. shipcue only gives each one an agent token for the queue.</p>
+<p><strong>Does it run my agents?</strong> Not your coding agents: the listener starts them on your machines. The one agent that runs on shipcue is the optional hosted triage agent, which reads a report and leaves a note, and never touches code.</p>
+<p><strong>Can I mix Claude Code, Codex and people?</strong> Yes. Anything with a token claims from the same queue over MCP or the HTTP API, and a teammate can claim by hand in the CueLog.</p>
+<h2>What is in every plan</h2>
 <ul>
   <li><strong>A hosted queue.</strong> One project per app, with a key for the button. No table, no handler to run.</li>
   <li><strong>The CueLog.</strong> One table with every report in full: who filed it, screenshots, context, the app snapshot. Filter, sort, set priority, and see each report's history.</li>
@@ -396,6 +429,11 @@ USE_CASES = """
 <h1>Use cases</h1>
 <p class="lede">shipcue is for any team where the people who find problems and the agents that fix them are not the same, and you want one queue between them instead of a group chat.</p>
 
+<h2>Founders running several agent subscriptions and Mac minis</h2>
+<p>Once one Claude Code account is not enough, you add another, then a Codex seat, then a Mac mini that runs agents while you sleep. Each terminal is quick; keeping them off each other is the slow part. You end up as the switchboard, pasting reports into prompts and checking which window is on what.</p>
+<p>With <a href="/cloud/">shipcue Cloud</a> every account and terminal gets its own agent token and claims from one queue, so a report is only ever in one place. Each Mac mini runs a listener that starts an agent for the next report, and a terminal that crashes or hits its usage limit hands its report back. You look at one CueLog and review PRs.</p>
+<p><b>Set up:</b> create a Cloud project, add the button to your app, create an agent per account in Setup and run the listener on each machine. Plans run from $10 to $50 a month; see <a href="/cloud/#pricing">pricing</a>.</p>
+
 <h2>Hackathon teams running many agents</h2>
 <p>At a hackathon everyone is building at once, and now each person has two or three coding agents going as well. The hard part stops being writing code and becomes coordination: two agents fixing the same bug, one agent's change undoing another's, a teammate asking in the chat "is anyone on the login bug?" and nobody being sure.</p>
 <p>With shipcue the whole team files bugs and feature ideas through the button in the app you are building. Every agent pulls from the same queue, and a claim is atomic, so once an agent has a report nobody else can take it. When it is done it closes the report with the PR link, so the team can see what shipped without asking.</p>
@@ -422,7 +460,6 @@ USE_CASES = """
 <ul>
   <li>You want a public roadmap with voting today. shipcue is an inbox for your team; an optional voting board is on the roadmap.</li>
   <li>Your team already lives in Linear or GitHub Issues and is happy there. Forwarding reports to them is planned for <a href="/cloud/">Cloud</a>; for now you can do it yourself in <code>onReport</code>.</li>
-  <li>You do not have a Postgres database and do not want one. Cloud is meant for that, and it is not built yet.</li>
 </ul>
 <p><a class="btn btn-ink" href="/docs/">Set it up</a></p>
 </div>
@@ -533,10 +570,10 @@ CONTACT = """
 </div>
 """
 
-page("index.html", "shipcue: bug reports your coding agents can fix", "A report button, a queue in your own Postgres, and an MCP server so coding agents can fix what people report.", HOME, "/")
+page("index.html", "shipcue: one queue for all your coding agents", "The coordination layer for founders running several Claude Code and Codex subscriptions and Mac minis: one queue every agent and terminal takes work from.", HOME, "/")
 DOCS = DOCS.replace("{VERSION}", VERSION)
 page("docs/index.html", "Docs · shipcue", "Set up shipcue: the table, the handler, the button and the agent tools.", DOCS, "/docs/")
-page("cloud/index.html", "Cloud · shipcue", "shipcue Cloud: a hosted queue and the CueLog, where your team and your agents claim reports together.", CLOUD, "/cloud/")
+page("cloud/index.html", "Cloud · shipcue", "shipcue Cloud: one queue for every Claude Code and Codex account, terminal and Mac mini you run, from $10 to $50 a month.", CLOUD, "/cloud/")
 APP = """<div id="shipcue-app"></div>
 <script src="/assets/shipcue-app.js" defer></script>
 """
@@ -551,7 +588,7 @@ MINE = """<div class="prose">
 page("app/mine/index.html", "My reports · shipcue", "The reports you sent to shipcue, and how each was fixed.", MINE, "/cloud/")
 page("blog/index.html", "Blog · shipcue", "Notes on building shipcue.", BLOG, "/blog/")
 page("blog/agents-should-read-your-bug-reports/index.html", "Your bug report button should feed your agents · shipcue", "Why shipcue treats the bug report inbox as a queue that agents work from.", POST, "/blog/")
-page("use-cases/index.html", "Use cases · shipcue", "Who shipcue is for: hackathon teams running many agents, founders with early users, internal tools, beta tests and more.", USE_CASES, "/use-cases/")
+page("use-cases/index.html", "Use cases · shipcue", "Who shipcue is for: founders running several agent subscriptions and Mac minis, hackathon teams, founders with early users, internal tools, beta tests and more.", USE_CASES, "/use-cases/")
 page("blog/hackathon-teams-and-agents/index.html", "Coordinating a hackathon team when everyone has agents · shipcue", "Why a shared queue keeps a hackathon team's coding agents from colliding.", HACKATHON_POST, "/blog/")
 page("blog/fixqueue-is-now-shipcue/index.html", "fixqueue is now shipcue, and it is open source · shipcue", "The new name, the public repository, and what to rename if you set it up early.", RENAME_POST, "/blog/")
 CHANGELOG = """<div class="prose">

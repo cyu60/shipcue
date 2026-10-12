@@ -107,3 +107,16 @@ h3 { font-size: 28px; margin-top: 36px; }
   margin: 40px 0 72px;
 }
 .board h2 { font-family: var(--display); }
+
+/* Cloud pricing (Habitect report 2af9bd79): wider than the prose column it sits in. */
+.plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin: 28px 0; width: min(1032px, calc(100vw - 48px)); }
+.plan { background: var(--white); border: 2px solid var(--ink); border-radius: 14px; padding: 22px; }
+.plan-pick { background: var(--ticket); }
+.plan h3 { margin-top: 0; }
+.plan .price { font: 900 56px/1 var(--display); margin: 14px 0 0; }
+.plan .price span { font: 500 16px/1 var(--body); color: var(--muted); margin-left: 4px; }
+.plan-pick .price span { color: var(--ink); }
+.plan ul { padding-left: 20px; margin: 14px 0 0; }
+@media (max-width: 760px) {
+  .plans { grid-template-columns: 1fr; width: auto; }
+}
