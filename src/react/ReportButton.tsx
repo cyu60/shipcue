@@ -16,7 +16,7 @@ import { shrinkImage } from './shrink';
 import { isOutlineText, OutlinePreview } from './outline';
 import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
-import { afterPaint, CAPTURE_KEEP_ALIVE_MS, canCaptureTab, captureError, tabCapture, type Rect, type TabCapture } from './capture';
+import { afterPaint, CAPTURE_KEEP_ALIVE_MS, canCaptureTab, captureError, overlaps, tabCapture, type Rect, type TabCapture } from './capture';
 import { AreaSelect } from './AreaSelect';
 import { hasDraft, indexedDbDraftStore, type DraftStore, type SavedDraft } from './draft';
 import { Annotator } from './Annotator';
@@ -396,6 +396,8 @@ function ReportPanel({
   }, [open]);
   const ambientRef = useRef(false);
   const [capturing, setCapturing] = useState(false);
+  /** The panel is hidden for this capture: it was hidden for Select area, or it is inside the selection. */
+  const [panelInShot, setPanelInShot] = useState(false);
   const [annotating, setAnnotating] = useState<{ src: string; index: number | null; alt: string; name: string; own: boolean } | null>(null);
   const [alts, setAlts] = useState<Map<File, string>>(() => new Map());
   const annotatingRef = useRef(annotating);
@@ -1026,9 +1028,13 @@ function ReportPanel({
     };
   }, []);
 
-  // The tint, the selection and its toolbar, and the panel are gone before the frame is taken,
-  // so none of them is in the picture. Capture attaches it; Capture & annotate opens the annotator.
+  // The tint, the selection and its toolbar are gone before the frame is taken, so none of them
+  // is in the picture. The panel goes too only when it would be: one beside the selection stays
+  // put instead of blinking out and back (Habitect report 71cc2002). Capture attaches it;
+  // Capture & annotate opens the annotator.
   const captureSelection = async (rect: Rect, { annotate }: { annotate: boolean }) => {
+    const shown = [wrapRef.current, panelRef.current].flatMap((el) => (el ? [el.getBoundingClientRect()] : []));
+    setPanelInShot(selecting || shown.some((box) => overlaps(rect, box)));
     setSelecting(false);
     // Back at the panel afterwards with the page usable; Select area captures another.
     setTintLifted(true);
@@ -1185,7 +1191,7 @@ function ReportPanel({
   ambientRef.current = ambient;
 
   return (
-    <div ref={wrapRef} data-shipcue={variant} style={{ ...(variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap), ...(selecting || capturing ? { visibility: 'hidden' } : null) }}>
+    <div ref={wrapRef} data-shipcue={variant} style={{ ...(variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap), ...(selecting || (capturing && panelInShot) ? { visibility: 'hidden' } : null) }}>
       {ambient && typeof document !== 'undefined' && (
         <AreaSelect ambient hint={t.captureOnOpenHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setTintLifted(true)} onDismiss={() => setTintLifted(true)} />
       )}
@@ -1202,7 +1208,7 @@ function ReportPanel({
           onSave={(blob, alt) => finishAnnotating(blob, alt)}
         />
       )}
-      {open && recording === null && !selecting && !capturing && (
+      {open && recording === null && !selecting && !(capturing && panelInShot) && (
         <ResizeBox on={canResize} grip={resize.grip(drag.corner, t.resizePanel)}>
         <div
           ref={panelRef}
