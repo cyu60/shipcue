@@ -29,6 +29,11 @@ export type SubmitResult = { id: string } | { error: string; signIn?: string | n
 export interface ReportButtonProps {
   /** The parts of your app a report can be about. "Other" is always added. */
   areas?: Area[];
+  /**
+   * The area the Where select starts on, e.g. the part of your app the page belongs to. Read when
+   * the panel opens and again after a send; Other stays a plain choice. Not one of `areas`: Other.
+   */
+  defaultArea?: string;
   /** Where createShipcueHandler is mounted. Ignored when `submit` is given. */
   endpoint?: string;
   /**
@@ -316,6 +321,7 @@ async function postVideo(endpoint: string, reportId: string, video: Blob, report
 
 function ReportPanel({
   areas,
+  defaultArea,
   endpoint: endpointProp,
   submit,
   reporter,
@@ -385,7 +391,16 @@ function ReportPanel({
   const extra = extraTabs?.find((x) => x.id === extraId) ?? null;
   const [type, setType] = useState<ReportType>(() => tabs[0]?.value ?? 'bug');
   const [priority, setPriority] = useState<Priority>('medium');
-  const [area, setArea] = useState('other');
+  // The Where: the reporter's pick, else the app's defaultArea as it was when the panel opened.
+  const startArea = defaultArea && config.areas.some((a) => a.value === defaultArea) ? defaultArea : 'other';
+  const [openedOn, setOpenedOn] = useState(startArea);
+  const [picked, setArea] = useState<string | null>(null);
+  const [openSeen, setOpenSeen] = useState(open);
+  if (open !== openSeen) {
+    setOpenSeen(open);
+    if (open) setOpenedOn(startArea);
+  }
+  const area = picked ?? (open ? openedOn : startArea);
   const [files, setFiles] = useState<File[]>([]);
   // Select an area, capture it, mark it up (shipcue report 58b727d9). Alt text per screenshot.
   const [selecting, setSelecting] = useState(false);
@@ -1135,6 +1150,7 @@ function ReportPanel({
       setOpen(false);
       setSent({ warning: videoFailed });
       setText('');
+      setArea(null);
       setContext(null);
       setFiles([]);
       setAlts(new Map());

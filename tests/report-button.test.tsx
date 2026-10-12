@@ -627,3 +627,44 @@ describe('showParam (?shipcue=true)', () => {
     expect(shownByParam('shipcue')).toBe(false);
   });
 });
+
+describe('defaultArea (Habitect report e49ac22f)', () => {
+  const many = [
+    { value: 'editor', label: 'Editor' },
+    { value: 'billing', label: 'Billing' },
+  ];
+  const where = () => screen.getByLabelText('Where') as HTMLSelectElement;
+  const launcher = () => screen.getByRole('button', { name: 'Report a bug or request a feature' });
+
+  it('starts the Where on the area the app names, with Other still a plain choice', async () => {
+    const submit = await openPanel({ areas: many, defaultArea: 'billing' });
+    expect(where().value).toBe('billing');
+    expect(Array.from(where().options).map((o) => o.text)).toEqual(['Editor', 'Billing', 'Other']);
+    await userEvent.selectOptions(where(), 'other');
+    await userEvent.type(screen.getByRole('textbox'), 'Something odd happened');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(submit.mock.calls[0]![0].get('area')).toBe('other');
+  });
+
+  it('starts on Other when the area is not one of yours', async () => {
+    await openPanel({ areas: many, defaultArea: 'nope' });
+    expect(where().value).toBe('other');
+  });
+
+  it('opens on the default as it is when the panel opens, and on it again after a send', async () => {
+    const submit = ok();
+    const { rerender } = render(<ReportButton areas={many} submit={submit} defaultArea="editor" />);
+    rerender(<ReportButton areas={many} submit={submit} defaultArea="billing" />);
+    await userEvent.click(launcher());
+    expect(where().value).toBe('billing');
+    // Moved on with the panel open: the Where stays where it was opened.
+    rerender(<ReportButton areas={many} submit={submit} defaultArea="editor" />);
+    expect(where().value).toBe('billing');
+    await userEvent.selectOptions(where(), 'other');
+    await userEvent.type(screen.getByRole('textbox'), 'Something odd happened');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(submit.mock.calls[0]![0].get('area')).toBe('other');
+    await userEvent.click(launcher());
+    expect(where().value).toBe('editor');
+  });
+});
