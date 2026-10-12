@@ -107,7 +107,7 @@ import { ReportButton } from 'shipcue/react';
 />
 ```
 
-Use `variant="inline"` for a header or toolbar button on phones, where a floating bubble covers the controls. Pass `submit={(form) => myServerAction(form)}` to send through a server action instead of `fetch`; the form carries `idempotencyKey` (one per draft, the same on a retry), so file a key once and answer a repeat with the report already filed. Pass `reporter={user.email}` to say who is signed in on your site: it goes with each report in the `x-shipcue-user` header, shipcue Cloud shows it as the reporter, and your own handler can read it in `getReporter`.
+Use `variant="inline"` for a header or toolbar button on phones, where a floating bubble covers the controls. Pass `submit={(form) => myServerAction(form)}` to send through a server action instead of `fetch`; the form carries `idempotencyKey` (one per draft, the same on a retry), so file a key once and answer a repeat with the report already filed. Pass `defaultArea="billing"` to start the Where on the part of your app the page is in (Other is still offered). Pass `reporter={user.email}` to say who is signed in on your site: it goes with each report in the `x-shipcue-user` header, shipcue Cloud shows it as the reporter, and your own handler can read it in `getReporter`.
 
 What else the panel does:
 
@@ -339,6 +339,7 @@ Release tarballs for GitHub: `npm run pack:release` (builds, then `npm pack`).
 
 ## Changelog
 
+- **0.35.0**: `defaultArea` on `ReportButton` (Habitect report e49ac22f): the Where select starts on the area you name, e.g. the part of your app the page belongs to, instead of Other, which stays a plain choice. It is read when the panel opens (moving on with the panel open does not change it) and again after a send; a value that is not one of `areas` starts on Other. No text or schema change.
 - **0.34.0**: no blank wait while a capture is taken (Habitect report cbb24947). From Capture until the screenshot is in the panel the page shows a tint with a spinner and "Taking the screenshot…": first around the selection, which stays clear (2 px wider than it) so none of the tint is in the picture, then over the whole page once the frame is drawn. The page takes no clicks meanwhile; the panel stays usable. New: text key `capturing`; `tabCapture().grab(sel, onTaken)` calls `onTaken` once the frame is drawn.
 - **0.33.0**: Capture is the default for a selection (Habitect report 71cc2002). In the selection's toolbar **Capture** is now the highlighted button, last in the row and marked ↵ (`aria-keyshortcuts="Enter"`), with **Capture & annotate** beside it as a plain one; Enter still captures without the annotator. The panel no longer blinks out and back while a capture is taken: it is hidden only when it lies inside the selection (or was already hidden for Select area). No API or text change.
 - **0.32.1**: `shipcue`, `shipcue/react` and `shipcue/server` can be required from CommonJS (Habitect report e2c501aa): each export gives a `default` condition beside `import`, so Playwright specs and other CommonJS loaders no longer fail with "Package subpath is not defined by exports" (Node 22.12+ requires the ES module directly). No API change.
