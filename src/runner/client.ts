@@ -66,7 +66,8 @@ export interface RunStep {
 }
 
 export interface RunDetail {
-  run: { id: string; workflow: string; status: string; inputs: Record<string, unknown>; createdAt: string; finishedAt: string | null };
+  /** url: the run's page in the app, when Cloud sends it. */
+  run: { id: string; workflow: string; status: string; inputs: Record<string, unknown>; createdAt: string; finishedAt: string | null; url?: string | null };
   steps: RunStep[];
 }
 
@@ -156,8 +157,7 @@ export function createWorkflowClient(o: { url: string; token: string; fetch?: (u
 
 export type WorkflowClient = ReturnType<typeof createWorkflowClient>;
 
-/** The app's page for a run, from the project endpoint (…/api/cloud/p/<key> → …/app/). */
-export function runPageUrl(url: string, runId: string): string {
-  const origin = new URL(url).origin;
-  return `${origin}/app/#runs/${runId}`;
+/** The app's page for a run: the link Cloud sent, else the app on the endpoint's origin. */
+export function runPageUrl(url: string, d: Pick<RunDetail, 'run'>): string {
+  return d.run.url ?? `${new URL(url).origin}/app/`;
 }

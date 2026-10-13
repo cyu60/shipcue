@@ -18,7 +18,7 @@ export function runText(d: RunDetail, url: string): string {
     return `- ${s.key}: ${s.status}${extra ? ` (${extra})` : ''}`;
   });
   const tail = RUN_DONE.includes(d.run.status) ? [] : d.steps.filter((s) => s.logTail && s.status === 'running').map((s) => `\n${s.key} log (end):\n${s.logTail.slice(-1500)}`);
-  return [head, ...steps, `Page: ${runPageUrl(url, d.run.id)}`, ...tail].join('\n');
+  return [head, ...steps, `Page: ${runPageUrl(url, d)}`, ...tail].join('\n');
 }
 
 export interface WorkflowTool {

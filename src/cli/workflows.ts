@@ -132,7 +132,7 @@ export async function runCommand(c: CliContext, client: WorkflowClient, url: str
     return { output: `${err instanceof Error ? err.message : err}\n${errors.map((e) => `  ✗ ${e}`).join('\n')}${errors.length ? '\n' : ''}`, code: 1 };
   }
   const id = detail.run.id;
-  out(`run ${id} (${name}): ${detail.run.status}\n  ${runPageUrl(url, id)}\n`);
+  out(`run ${id} (${name}): ${detail.run.status}\n  ${runPageUrl(url, detail)}\n`);
   if (c.args.includes('--no-follow')) return { output: '', code: 0 };
   const seen = new Map<string, string>();
   const logSeq = new Map<string, number>();

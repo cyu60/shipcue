@@ -284,7 +284,7 @@ describe('the CLI', () => {
   it('run starts a run and follows it to the end', async () => {
     const cloud = fakeCloud();
     const step = (status: string, over = {}) => ({ key: 'build', kind: 'agent', status, attempt: 1, runner: 'mini', question: null, output: null, exitCode: null, error: null, logTail: '', lastSeq: null, ...over });
-    const run = (status: string, s: unknown) => ({ run: { id: 'run-9', workflow: 'fix-report', status, inputs: {}, createdAt: '', finishedAt: null }, steps: [s] });
+    const run = (status: string, s: unknown) => ({ run: { id: 'run-9', workflow: 'fix-report', status, inputs: {}, createdAt: '', finishedAt: null, url: 'https://cloud.example.com/app/?p=x&tab=runs&run=run-9' }, steps: [s] });
     cloud.state.runs.push(run('running', step('running', { lastSeq: 0 })), run('succeeded', step('succeeded', { lastSeq: 0 })));
     let printed = '';
     const r = await runCommand({ cwd: dir, args: ['fix-report', '--input', 'report_id=r1'], env: {}, out: (s) => (printed += s), sleep: async () => {} }, cloud.client, URL_);
@@ -292,7 +292,7 @@ describe('the CLI', () => {
     expect(cloud.calls.find((c) => c.path === '/workflows/fix-report/runs')!.body).toEqual({ inputs: { report_id: 'r1' } });
     expect(printed).toContain('build: running on mini');
     expect(printed).toContain('build | built it');
-    expect(printed).toContain('https://cloud.example.com/app/#runs/run-9');
+    expect(printed).toContain('https://cloud.example.com/app/?p=x&tab=runs&run=run-9');
   });
 
   it('needs a Cloud project endpoint and a token', async () => {
