@@ -9,6 +9,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { describeOverlaps, otherSide, PRIORITIES, validateScope } from '../core';
 import { createAgentClient, DUPLICATE_CHOICES, duplicateText, filedText, LikelyDuplicateError } from './client';
+import { createWorkflowClient } from '../runner/client';
+import { workflowTools } from './workflow-tools';
 
 const url = process.env.SHIPCUE_URL;
 const token = process.env.SHIPCUE_TOKEN;
@@ -213,5 +215,13 @@ server.registerTool(
     );
   },
 );
+
+// shipcue Cloud Workflows (a Cloud project endpoint and a token): list, start, read and cancel runs. No approve.
+if (token && /\/api\/cloud\/p\/pk_[0-9a-f]+\/?$/.test(url)) {
+  const wf = createWorkflowClient({ url, token });
+  for (const t of workflowTools(wf, url)) {
+    server.registerTool(t.name, { description: t.description, inputSchema: t.inputSchema }, async (args: any) => text(await t.handler(args)));
+  }
+}
 
 await server.connect(new StdioServerTransport());
