@@ -6,6 +6,7 @@ import { CueLogTable } from '../../src/react';
 import { ago } from '../../src/react/CueLog';
 import { SHIPCUE_VERSION } from '../../src/core';
 import { LISTEN_EVENTS } from '../../src/mcp/events';
+import { LIMITS } from './billing.mjs';
 import { DEFAULT_LISTEN_COMMAND, launchdInstall, listenCommand, releaseTarball, slug, systemdInstall } from './listener.mjs';
 
 const API = '/api/cloud';
@@ -868,6 +869,77 @@ function AllProjects({ open }) {
   );
 }
 
+/** The account's plan (billing.mjs): shown only when the Cloud has Checkout on (me.billing). */
+function Plan() {
+  const [b, setB] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const params = new URLSearchParams(window.location.search);
+  const go = async (path, body) => {
+    setBusy(true);
+    setError('');
+    try {
+      const { url } = await api(path, body);
+      window.location.assign(url);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    api('/billing').then(setB, (err) => setError(err.message));
+    // From a plan button on /cloud: straight to Checkout.
+    const upgrade = params.get('upgrade');
+    if (upgrade) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('upgrade');
+      window.history.replaceState(null, '', url);
+      void go('/billing/checkout', { plan: upgrade });
+    }
+  }, []);
+  if (!b) return error ? <p style={s.error}>{error}</p> : null;
+  const limit = (thing) => (b.plan ? b.plan.limits[thing] : 0);
+  const back = params.get('billing');
+  return (
+    <section style={{ ...s.card, gap: 8 }} aria-label="Plan">
+      <div style={{ ...s.row, justifyContent: 'space-between' }}>
+        <strong>
+          Plan: {b.plan ? b.plan.name : 'none'}
+          {b.beta ? ' (free during the beta)' : ''}
+        </strong>
+        <div style={s.row}>
+          {b.canManage && (
+            <Button disabled={busy} onClick={() => go('/billing/portal', {})}>
+              Manage billing
+            </Button>
+          )}
+          {!b.subscription?.active &&
+            b.plans
+              .filter((p) => p.available)
+              .map((p) => (
+                <Button key={p.id} ink={p.pick} disabled={busy} onClick={() => go('/billing/checkout', { plan: p.id })}>
+                  {b.beta ? `Pick ${p.name}` : `Upgrade to ${p.name}`} (${p.price}/mo)
+                </Button>
+              ))}
+        </div>
+      </div>
+      {back === 'success' && <p style={s.small}>Thanks. Your plan updates as soon as Stripe confirms the payment.</p>}
+      {back === 'cancel' && <p style={s.small}>Checkout was cancelled; nothing was charged.</p>}
+      {b.subscription?.status === 'past_due' && <p style={s.error}>Your last payment did not go through. Update your card with Manage billing.</p>}
+      <p style={s.small}>
+        {Object.keys(LIMITS)
+          .map((thing) => {
+            const max = limit(thing);
+            return `${b.usage[thing]} of ${max === null ? 'unlimited' : max} ${LIMITS[thing].many}`;
+          })
+          .join(' · ')}
+        {b.subscription?.currentPeriodEnd ? ` · renews ${new Date(b.subscription.currentPeriodEnd).toLocaleDateString()}` : ''}
+      </p>
+      {error && <p style={s.error}>{error}</p>}
+    </section>
+  );
+}
+
 function App() {
   const [me, setMe] = useState(undefined);
   const [current, setCurrent] = useState(() => new URLSearchParams(window.location.search).get('p'));
@@ -931,6 +1003,7 @@ function App() {
           <Button onClick={() => api('/auth/sign-out', {}).then(() => setMe(null))}>Sign out</Button>
         </div>
       </div>
+      {me.billing?.enabled && <Plan />}
       {creating || (!project && !showAll && me.canCreate) ? (
         <NewProject
           onMade={async (id) => {

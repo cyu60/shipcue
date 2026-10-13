@@ -6,6 +6,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { DIGEST_PERIOD_MS, EVENT_TYPES, broadcast, createShipcueHandler, digest, emailDigest, postgresStore, slack, slackDigest, webhook } from '../../src/server';
 import { SHIPCUE_VERSION, compareVersions, parseVersion, resolveConfig } from '../../src/core';
 import { triageReport } from './hosted.mjs';
+import { createBilling } from './billing.mjs';
 
 const ROLES = ['owner', 'member', 'viewer'];
 const TYPES = ['bug', 'feature', 'task'];
@@ -214,6 +215,8 @@ export function digestDue(p, now = new Date()) {
  *   sendEmail: sends one email ({ to, subject, html, text }), for digests to the owner's email; null leaves email off.
  *   latestVersion: the newest shipcue, which apps are compared to in All projects (default: this build's SHIPCUE_VERSION).
  *   fetch, versionTimeoutMs, versionCacheMs: how All projects reads each app's /capabilities (defaults: fetch, 2500, 5 minutes).
+ *   billing: plans, limits and Stripe Checkout (billingFromEnv in billing.mjs); null or absent leaves all of it off.
+ *   now: the clock billing reads (default: new Date()).
  */
 export function createCloudHandler(opts) {
   const { db, auth } = opts;
@@ -339,6 +342,8 @@ export function createCloudHandler(opts) {
 
   // Continue with Google (or GitHub): off to the provider with a PKCE challenge, back to /callback, then /app/.
   const appPath = opts.appPath ?? '/app/';
+  // Plans and limits (billing.mjs): no-ops until opts.billing turns them on.
+  const billing = createBilling({ q, config: opts.billing ?? null, json, fail, appPath, now: opts.now });
   const pkceCookie = (value, maxAge) =>
     `${PKCE_COOKIE}=${encodeURIComponent(value)}; Path=${base}/auth/oauth; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
   const redirect = (location, set = []) => {
@@ -423,6 +428,8 @@ export function createCloudHandler(opts) {
       user,
       canCreate: await canCreate(user),
       projects: projects.map((p) => ({ id: p.id, name: p.name, publicKey: p.public_key, role: p.role })),
+      // Only with Checkout on, so the dashboard shows its Plan section.
+      ...(billing.enabled ? { billing: { enabled: true, enforced: billing.isEnforced() } } : {}),
     });
   }
 
@@ -509,6 +516,8 @@ export function createCloudHandler(opts) {
       const b = await body(req);
       const name = String(b.name ?? '').trim().slice(0, 80);
       if (!name) return fail('Name the project.');
+      const over = await billing.check(user.id, 'projects');
+      if (over) return over;
       const key = `pk_${randomBytes(12).toString('hex')}`;
       const [p] = await q(`INSERT INTO cloud_projects (name, public_key, created_by) VALUES ($1, $2, $3) RETURNING *`, [name, key, user.id]);
       await q(`INSERT INTO cloud_members (project_id, user_id, email, name, role) VALUES ($1, $2, $3, $4, 'owner')`, [p.id, user.id, user.email, nameFromEmail(user.email)]);
@@ -684,6 +693,9 @@ export function createCloudHandler(opts) {
         [id, email],
       );
       if (existing.length) return fail('They are already on the team or invited.', 409);
+      // People count against the plan of the account that created the project.
+      const over = await billing.check(p.created_by, 'people', email);
+      if (over) return over;
       const [inv] = await q(`INSERT INTO cloud_invites (project_id, email, role, invited_by) VALUES ($1, $2, $3, $4) RETURNING id, email, role`, [id, email, role, user.id]);
       return json({ invite: inv }, 201);
     }
@@ -724,6 +736,8 @@ export function createCloudHandler(opts) {
       if (types === undefined) return fail('Types are bug, feature and task.');
       const pull = b.pull === true ? true : b.pull === false ? false : null;
       if ((await q(`SELECT 1 FROM cloud_agents WHERE project_id = $1 AND name = $2 AND revoked_at IS NULL`, [id, name])).length) return fail('An agent with that name is already connected.', 409);
+      const over = await billing.check(p.created_by, 'agentTokens');
+      if (over) return over;
       const token = `sca_${randomBytes(24).toString('hex')}`;
       const [a] = await q(
         `INSERT INTO cloud_agents (project_id, name, token_hash, owner_user_id, owner_name, pull, types) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, name`,
@@ -744,6 +758,8 @@ export function createCloudHandler(opts) {
     const row = (await q(`SELECT id, name FROM cloud_agents WHERE project_id = $1 AND hosted AND revoked_at IS NULL`, [p.id]))[0];
     if (!row) return [];
     const agent = { kind: 'agent', id: row.id, name: row.name };
+    // Once billing is enforced, the plan's triages a day over the account's projects; until then the server's cap per project.
+    const planLimit = await billing.triageLimit(p.created_by);
     return [
       {
         name: 'hosted agent',
@@ -759,9 +775,10 @@ export function createCloudHandler(opts) {
             held: assigned,
             openai: hosted,
             candidates: hosted.duplicateCandidates,
-            dailyLimit: hosted.dailyLimit,
+            dailyLimit: planLimit ? planLimit.dailyLimit : hosted.dailyLimit,
+            limitNote: planLimit?.note,
             // The cap counts its notes in the last 24 hours.
-            usedToday: async () =>
+            usedToday: planLimit ? planLimit.usedToday : async () =>
               Number(
                 (
                   await q(
@@ -900,6 +917,12 @@ export function createCloudHandler(opts) {
     const [head, ...rest] = parts;
     if (head === 'p' && rest[0]) return projectQueue(req, rest[0]);
     if (head === 'digest' && !rest.length && (req.method === 'GET' || req.method === 'POST')) return runDigests(req);
+    // Billing: Checkout, the portal and Stripe's webhook. With billing off this falls through, as before.
+    if (head === 'billing') {
+      let signedIn;
+      const res = await billing.routes(req, rest, async () => (signedIn = await session(req)));
+      if (res) return withCookies(res, signedIn?.set);
+    }
     if (!jsonWrite(req)) return fail('Send JSON.', 415);
     if (head === 'auth') return authRoutes(req, rest[0], rest[1]);
     const s = await session(req);

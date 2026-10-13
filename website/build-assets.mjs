@@ -45,7 +45,7 @@ await build({
   entryPoints: ['website/_src/cloud-api.mjs'],
   outfile: 'website/api/cloud.mjs',
   // @vercel/functions stays a real dependency (website/package.json) so waitUntil finds Vercel's request context.
-  bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg', '@vercel/functions'],
+  bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg', '@vercel/functions', 'stripe'],
   define: { __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 console.log('assets built');

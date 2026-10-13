@@ -357,6 +357,47 @@ POST /github                  GitHub's signed pull_request webhook (only with gi
 </div>
 """
 
+# The plans on /cloud come from website/_src/plans.json, the same table the Cloud enforces (billing.mjs).
+PLAN_DATA = json.loads((ROOT / "_src" / "plans.json").read_text())["plans"]
+
+
+def plan_limit(thing, n):
+    if thing == "people":
+        return "Just you" if n == 1 else f"{n} people"
+    if thing == "hostedTriagesPerDay":
+        return f"{n} hosted triages a day"
+    one, many = {"projects": ("project", "projects"), "agentTokens": ("agent token", "agent tokens")}[thing]
+    return f"Unlimited {many}" if n is None else f"{n} {one if n == 1 else many}"
+
+
+def plan_cards():
+    cards = []
+    for p in PLAN_DATA:
+        limits = "".join(f"<li>{plan_limit(k, v)}</li>" for k, v in p["limits"].items())
+        cls = "plan plan-pick" if p.get("pick") else "plan"
+        # "Free during beta" until the Cloud turns Checkout on (CLOUD_BILLING_ENABLED); the script below swaps it then.
+        cta = f'<p class="plan-cta"><span class="btn btn-plain" data-plan="{p["id"]}" data-name="{p["name"]}" aria-disabled="true">Free during beta</span></p>'
+        cards.append(f'  <div class="{cls}"><h3>{p["name"]}</h3><p class="price">${p["price"]}<span>/month</span></p><p>{p["blurb"]}</p><ul>{limits}</ul>{cta}</div>')
+    script = """<script>
+// Plan buttons stay "Free during beta" unless the Cloud says Checkout is on (GET /api/cloud/billing/plans answers only then).
+fetch('/api/cloud/billing/plans').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+  if (!d || !d.plans) return;
+  d.plans.forEach(function (p) {
+    var el = document.querySelector('[data-plan="' + p.id + '"]');
+    if (!el || !p.available) return;
+    var a = document.createElement('a');
+    a.className = 'btn btn-ink';
+    a.href = '/app/?upgrade=' + encodeURIComponent(p.id);
+    a.textContent = 'Choose ' + el.getAttribute('data-name');
+    el.replaceWith(a);
+  });
+}).catch(function () {});
+</script>"""
+    return '<div class="plans">\n' + "\n".join(cards) + "\n</div>\n" + script
+
+
+PRICE_RANGE = f"from ${min(p['price'] for p in PLAN_DATA)} to ${max(p['price'] for p in PLAN_DATA)} a month"
+
 CLOUD = """
 <div class="prose">
 <h1>Cloud</h1>
@@ -376,11 +417,7 @@ CLOUD = """
 </ul>
 <h2 id="pricing">Pricing</h2>
 <p>The plans for when the beta ends. Every plan has the hosted queue, the CueLog, the MCP tools, listeners, work areas, the GitHub loop and the digest. They differ in how many projects, agents and people they cover. Machines and terminals are never counted: an agent token runs wherever you start it.</p>
-<div class="plans">
-  <div class="plan"><h3>Solo</h3><p class="price">$10<span>/month</span></p><p>One builder with a couple of accounts.</p><ul><li>2 projects</li><li>5 agent tokens</li><li>Just you</li><li>10 hosted triages a day</li></ul></div>
-  <div class="plan plan-pick"><h3>Builder</h3><p class="price">$25<span>/month</span></p><p>A founder running a small fleet of agents and Mac minis.</p><ul><li>10 projects</li><li>25 agent tokens</li><li>3 people</li><li>50 hosted triages a day</li></ul></div>
-  <div class="plan"><h3>Team</h3><p class="price">$50<span>/month</span></p><p>A team sharing agents, machines and apps.</p><ul><li>Unlimited projects</li><li>Unlimited agent tokens</li><li>10 people</li><li>200 hosted triages a day</li></ul></div>
-</div>
+{PLANS}
 <p>Prices are monthly, in US dollars. Rather run it yourself? Self-hosting stays free: the button, the handler, the MCP server and the CueLog table are MIT-licensed, and the <a href="/docs/">docs</a> set them up in your own Postgres.</p>
 <div class="actions"><a class="btn btn-ink" href="/contact/">Ask to join the beta</a><a class="btn btn-plain" href="/app/">Sign in</a></div>
 <h2>Questions</h2>
@@ -573,7 +610,8 @@ CONTACT = """
 page("index.html", "shipcue: one queue for all your coding agents", "The coordination layer for founders running several Claude Code and Codex subscriptions and Mac minis: one queue every agent and terminal takes work from.", HOME, "/")
 DOCS = DOCS.replace("{VERSION}", VERSION)
 page("docs/index.html", "Docs · shipcue", "Set up shipcue: the table, the handler, the button and the agent tools.", DOCS, "/docs/")
-page("cloud/index.html", "Cloud · shipcue", "shipcue Cloud: one queue for every Claude Code and Codex account, terminal and Mac mini you run, from $10 to $50 a month.", CLOUD, "/cloud/")
+CLOUD = CLOUD.replace("{PLANS}", plan_cards())
+page("cloud/index.html", "Cloud · shipcue", f"shipcue Cloud: one queue for every Claude Code and Codex account, terminal and Mac mini you run, {PRICE_RANGE}.", CLOUD, "/cloud/")
 APP = """<div id="shipcue-app"></div>
 <script src="/assets/shipcue-app.js" defer></script>
 """

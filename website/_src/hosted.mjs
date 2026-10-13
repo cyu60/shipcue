@@ -193,7 +193,8 @@ export async function askOpenAI(input, { apiKey, model, timeoutMs, fetchImpl = f
  * works and releases it after (whatever happens). Returns the note's text.
  * @param {{ store: any, reportId: string, agent: { kind: 'agent', id: string, name: string }, areas: { value: string, label: string }[],
  *   held?: boolean, candidates?: number, openai: { apiKey: string, model: string, timeoutMs: number, fetchImpl?: typeof fetch },
- *   dailyLimit: number, usedToday: () => Promise<number>, onReleased?: (report: any) => Promise<void> }} o
+ *   dailyLimit: number, usedToday: () => Promise<number>, limitNote?: string, onReleased?: (report: any) => Promise<void> }} o
+ *   limitNote: the note to leave at the cap instead of the per-project one (the plan's limit, once billing is enforced).
  */
 export async function triageReport(o) {
   const { store, reportId, agent, areas } = o;
@@ -206,7 +207,7 @@ export async function triageReport(o) {
   if (o.held && !held) return null;
   try {
     if ((await o.usedToday()) >= o.dailyLimit) {
-      note = `The hosted agent has reached today's limit of ${o.dailyLimit} triages for this project, so it did not look at this one.`;
+      note = o.limitNote ?? `The hosted agent has reached today's limit of ${o.dailyLimit} triages for this project, so it did not look at this one.`;
     } else {
       try {
         const candidates = await duplicateCandidates(store, report, o.candidates ?? DEFAULT_DUPLICATE_CANDIDATES);
