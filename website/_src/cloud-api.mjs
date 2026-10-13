@@ -3,6 +3,8 @@ import pg from 'pg';
 import { waitUntil } from '@vercel/functions';
 import { createCloudHandler, insforgeAuth, insforgeEmail } from './cloud.mjs';
 import { hostedFromEnv } from './hosted.mjs';
+import Stripe from 'stripe';
+import { billingFromEnv } from './billing.mjs';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 const handler = createCloudHandler({
@@ -20,6 +22,9 @@ const handler = createCloudHandler({
   // and email digests go out with InsForge emails, like the fix emails in api.mjs.
   cronSecret: process.env.CRON_SECRET,
   sendEmail: insforgeEmail(process.env.SHIPCUE_CLOUD_AUTH_URL, process.env.SHIPCUE_EMAIL_API_KEY),
+  // Plans (docs/cloud-billing.md): limits with CLOUD_BILLING_ENFORCED or CLOUD_BETA_ENDS_AT; Checkout with
+  // STRIPE_SECRET_KEY and CLOUD_BILLING_ENABLED=1. All unset: null, and the Cloud runs as the free beta.
+  billing: billingFromEnv(process.env, (key) => new Stripe(key)),
 });
 
 // vercel.json sends /api/cloud/<rest> here as ?__p=<rest>; put the path back.

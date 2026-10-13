@@ -2,7 +2,7 @@
 import pg from "pg";
 
 // src/core/version.ts
-var SHIPCUE_VERSION = true ? "0.31.0" : "0.0.0";
+var SHIPCUE_VERSION = true ? "0.35.0" : "0.0.0";
 
 // src/core/scope.ts
 var SCOPE_LIMITS = { areas: 20, paths: 50, item: 200 };
@@ -1695,6 +1695,49 @@ var AREAS = [
   { value: "blog", label: "Blog" },
   { value: "package", label: "The shipcue package" }
 ];
+
+// website/_src/plans.json
+var plans_default = {
+  _comment: "shipcue Cloud's plans: the one place their prices and limits live. billing.mjs enforces them, website/build.py renders them on /cloud, and the /app dashboard shows them. null means unlimited. Stripe price ids come from the env var named in priceEnv, never from here.",
+  betaPlan: "team",
+  plans: [
+    {
+      id: "solo",
+      name: "Solo",
+      price: 10,
+      priceEnv: "STRIPE_PRICE_SOLO",
+      blurb: "One builder with a couple of accounts.",
+      limits: { projects: 2, agentTokens: 5, people: 1, hostedTriagesPerDay: 10 }
+    },
+    {
+      id: "builder",
+      name: "Builder",
+      price: 25,
+      priceEnv: "STRIPE_PRICE_BUILDER",
+      blurb: "A founder running a small fleet of agents and Mac minis.",
+      pick: true,
+      limits: { projects: 10, agentTokens: 25, people: 3, hostedTriagesPerDay: 50 }
+    },
+    {
+      id: "team",
+      name: "Team",
+      price: 50,
+      priceEnv: "STRIPE_PRICE_TEAM",
+      blurb: "A team sharing agents, machines and apps.",
+      limits: { projects: null, agentTokens: null, people: 10, hostedTriagesPerDay: 200 }
+    }
+  ]
+};
+
+// website/_src/billing.mjs
+var PLANS = plans_default.plans.map((p) => Object.freeze({ ...p, limits: Object.freeze({ ...p.limits }) }));
+var BETA_PLAN = plans_default.betaPlan;
+var LIMITS = Object.freeze({
+  projects: { one: "project", many: "projects" },
+  agentTokens: { one: "agent token", many: "agent tokens" },
+  people: { one: "person", many: "people" },
+  hostedTriagesPerDay: { one: "hosted triage a day", many: "hosted triages a day" }
+});
 
 // website/_src/cloud.mjs
 var ACCESS_COOKIE = "sc_at";

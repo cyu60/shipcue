@@ -117,6 +117,7 @@ h3 { font-size: 28px; margin-top: 36px; }
 .plan .price span { font: 500 16px/1 var(--body); color: var(--muted); margin-left: 4px; }
 .plan-pick .price span { color: var(--ink); }
 .plan ul { padding-left: 20px; margin: 14px 0 0; }
+.plan-cta { margin: 18px 0 0; }
 @media (max-width: 760px) {
   .plans { grid-template-columns: 1fr; width: auto; }
 }

@@ -1,0 +1,31 @@
+{
+  "_comment": "shipcue Cloud's plans: the one place their prices and limits live. billing.mjs enforces them, website/build.py renders them on /cloud, and the /app dashboard shows them. null means unlimited. Stripe price ids come from the env var named in priceEnv, never from here.",
+  "betaPlan": "team",
+  "plans": [
+    {
+      "id": "solo",
+      "name": "Solo",
+      "price": 10,
+      "priceEnv": "STRIPE_PRICE_SOLO",
+      "blurb": "One builder with a couple of accounts.",
+      "limits": { "projects": 2, "agentTokens": 5, "people": 1, "hostedTriagesPerDay": 10 }
+    },
+    {
+      "id": "builder",
+      "name": "Builder",
+      "price": 25,
+      "priceEnv": "STRIPE_PRICE_BUILDER",
+      "blurb": "A founder running a small fleet of agents and Mac minis.",
+      "pick": true,
+      "limits": { "projects": 10, "agentTokens": 25, "people": 3, "hostedTriagesPerDay": 50 }
+    },
+    {
+      "id": "team",
+      "name": "Team",
+      "price": 50,
+      "priceEnv": "STRIPE_PRICE_TEAM",
+      "blurb": "A team sharing agents, machines and apps.",
+      "limits": { "projects": null, "agentTokens": null, "people": 10, "hostedTriagesPerDay": 200 }
+    }
+  ]
+}
