@@ -249,6 +249,16 @@ describe('the runner loop', () => {
     expect(env).toMatchObject({ A: '1', HOME: '/h', SHIPCUE_RUN_ID: 'run-1', SHIPCUE_STEP: 'gates', SHIPCUE_OUTPUT_FILE: '/o.json', SHIPCUE_INPUT_REPORT_ID: 'r1' });
     expect(env.SHIPCUE_TOKEN).toBeUndefined();
     expect(shellOutput('a\n::output {"x":1}\n::output {"x":2}\n', null)).toEqual({ x: 2 });
+    // Only declared project secrets reach a step; the clone's GITHUB_TOKEN stays with the runner.
+    const cloudEnv = { SHIPCUE_SECRET_GITHUB_TOKEN: 'ghp_x', SHIPCUE_SECRET_ANTHROPIC_API_KEY: 'sk-ant-x', SHIPCUE_SECRET_OPENAI_API_KEY: 'sk-oa' };
+    const plain = jobEnv(job(), cloudEnv, '/o.json');
+    expect(Object.keys(plain).filter((k) => /TOKEN|KEY|SECRET|GIT_CONFIG/.test(k))).toEqual([]);
+    const agent = jobEnv(job({ secrets: ['ANTHROPIC_API_KEY'] }), cloudEnv, '/o.json');
+    expect(agent.ANTHROPIC_API_KEY).toBe('sk-ant-x');
+    expect(agent.GITHUB_TOKEN).toBeUndefined();
+    expect(agent.OPENAI_API_KEY).toBeUndefined();
+    const pusher = jobEnv(job({ secrets: ['GITHUB_TOKEN'] }), cloudEnv, '/o.json');
+    expect(pusher).toMatchObject({ GITHUB_TOKEN: 'ghp_x', GH_TOKEN: 'ghp_x', GIT_CONFIG_COUNT: '1', GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from('x-access-token:ghp_x').toString('base64')}` });
     expect(shellOutput('nothing', null)).toBeNull();
   });
 });

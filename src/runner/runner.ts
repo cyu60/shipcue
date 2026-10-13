@@ -66,14 +66,39 @@ export function onPath(cmd: string): boolean {
 }
 
 /** The env a step runs with: the runner's, minus its token, plus the step's env and SHIPCUE_* about the job. */
+export const SECRET_PREFIX = 'SHIPCUE_SECRET_';
+
+/**
+ * The project secrets a step declares, from a cloud runner's SHIPCUE_SECRET_<NAME> env. With
+ * GITHUB_TOKEN, gh (GH_TOKEN) and git over https (an auth header passed as env config, never written
+ * to .git/config) use it too.
+ */
+export function stepSecrets(names: string[], base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const n of names) {
+    const v = base[`${SECRET_PREFIX}${n}`];
+    if (v !== undefined) out[n] = v;
+  }
+  if (out.GITHUB_TOKEN) {
+    out.GH_TOKEN ??= out.GITHUB_TOKEN;
+    out.GIT_CONFIG_COUNT = '1';
+    out.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
+    out.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(`x-access-token:${out.GITHUB_TOKEN}`).toString('base64')}`;
+  }
+  return out;
+}
+
 export function jobEnv(job: Job, base: NodeJS.ProcessEnv, outputFile: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
-  // A step is the team's code, not the runner's: it does not get the runner's token.
+  // A step is the team's code, not the runner's: it does not get the runner's token, nor any project
+  // secret it did not declare (a cloud runner holds them as SHIPCUE_SECRET_<NAME>).
   delete env.SHIPCUE_TOKEN;
+  for (const k of Object.keys(env)) if (k.startsWith(SECRET_PREFIX)) delete env[k];
   for (const [k, v] of Object.entries(job.inputs ?? {})) env[`SHIPCUE_INPUT_${k.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`] = typeof v === 'string' ? v : JSON.stringify(v);
   return {
     ...env,
     ...job.env,
+    ...stepSecrets(job.secrets ?? [], base),
     SHIPCUE_RUN_ID: job.runId,
     SHIPCUE_WORKFLOW: job.workflow,
     SHIPCUE_STEP: job.step,

@@ -18,6 +18,8 @@ export interface Job {
   output: Record<string, unknown> | null;
   env: Record<string, string>;
   inputs: Record<string, unknown>;
+  /** The project secrets this step declares. A cloud runner has them as SHIPCUE_SECRET_<NAME>. */
+  secrets?: string[];
   timeoutSeconds: number;
   leaseSeconds: number;
   heartbeatSeconds: number;
