@@ -2,7 +2,7 @@
 import pg from "pg";
 
 // src/core/version.ts
-var SHIPCUE_VERSION = true ? "0.35.0" : "0.0.0";
+var SHIPCUE_VERSION = true ? "0.36.0" : "0.0.0";
 
 // src/core/scope.ts
 var SCOPE_LIMITS = { areas: 20, paths: 50, item: 200 };
@@ -1823,7 +1823,7 @@ var handler = createShipcueHandler({
   // shipcue's own board shows screenshots too (report 9fdd0b45).
   boardScreenshots: true,
   // Videos are uploaded to Vercel Blob by /api/shipcue-upload; only this store's report folders count.
-  // PRs on cyu60/shipcue that name a report move it to In review and close it on merge (report 919f5ca2).
+  // PRs on edumame/shipcue that name a report move it to In review and close it on merge (report 919f5ca2).
   github: process.env.SHIPCUE_GITHUB_SECRET ? { secret: process.env.SHIPCUE_GITHUB_SECRET } : void 0,
   acceptVideoUrl: (url, id) => {
     const u = new URL(url);

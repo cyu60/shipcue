@@ -1810,12 +1810,12 @@ function ReportPanel({
           {watermark && (
             <p style={s.watermark}>
               Powered by{' '}
-              <a href="https://github.com/cyu60/shipcue" target="_blank" rel="noopener noreferrer" style={s.watermarkLink}>
+              <a href="https://github.com/edumame/shipcue" target="_blank" rel="noopener noreferrer" style={s.watermarkLink}>
                 shipcue
               </a>
               {' · '}
               <a
-                href="https://github.com/cyu60/shipcue"
+                href="https://github.com/edumame/shipcue"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Star shipcue on GitHub"

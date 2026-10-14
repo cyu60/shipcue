@@ -6,7 +6,7 @@ export const DEFAULT_LISTEN_COMMAND =
   'claude -p "Use the shipcue MCP tools to claim the report in $SHIPCUE_REPORT_ID, fix it, open a PR and submit it for review"';
 
 /** The prebuilt release (shipcue is not on npm yet). */
-export const releaseTarball = (version) => `https://github.com/cyu60/shipcue/releases/download/v${version}/shipcue-${version}.tgz`;
+export const releaseTarball = (version) => `https://github.com/edumame/shipcue/releases/download/v${version}/shipcue-${version}.tgz`;
 
 /** A file-name-safe name for the project: "Habitect (web)" → "habitect-web". */
 export function slug(name) {

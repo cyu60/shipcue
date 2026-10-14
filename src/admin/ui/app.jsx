@@ -475,7 +475,7 @@ function Setup({ detail, reload, onProjects }) {
       {error && <p style={s.error}>{error}</p>}
       <section style={s.card}>
         <h3 style={{ margin: 0 }}>1. Add the button to your app</h3>
-        <Copy text={`pnpm add https://github.com/cyu60/shipcue/releases/download/v${VERSION}/shipcue-${VERSION}.tgz`} />
+        <Copy text={`pnpm add https://github.com/edumame/shipcue/releases/download/v${VERSION}/shipcue-${VERSION}.tgz`} />
         <Copy text={`import { ReportButton } from 'shipcue/react';\n\n<ReportButton endpoint="${endpoint}" types={['bug', 'feature']} />`} />
         <p style={s.small}>The button can only file reports from the sites you list here, one per line.</p>
         <textarea style={{ ...s.input, minHeight: 60 }} disabled={!owner} placeholder="https://app.example.com" value={origins} onChange={(e) => setOrigins(e.target.value)} />

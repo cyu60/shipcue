@@ -11,7 +11,7 @@ export interface CheckResult {
   fix?: string;
 }
 
-export const REPO = 'cyu60/shipcue';
+export const REPO = 'edumame/shipcue';
 const MARK: Record<Status, string> = { ok: '✓', fail: '✗', warn: '!', skip: '–' };
 
 export function formatResults(results: CheckResult[]): string {

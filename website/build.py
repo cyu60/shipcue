@@ -35,7 +35,7 @@ def page(path, title, description, body, current):
 <main>
 {body}
 </main>
-<footer class="site-foot"><span>shipcue is open source under the MIT license. <a href="https://github.com/cyu60/shipcue">Star it on GitHub</a></span><span><a href="/contact/">Contact us through shipcue</a></span></footer>
+<footer class="site-foot"><span>shipcue is open source under the MIT license. <a href="https://github.com/edumame/shipcue">Star it on GitHub</a></span><span><a href="/contact/">Contact us through shipcue</a></span></footer>
 </div>
 </body>
 </html>
@@ -162,12 +162,12 @@ DOCS = """
 <div class="prose">
 <h1>shipcue docs</h1>
 <p class="lede">Set up shipcue in a Next.js app in about ten minutes. The handler is a plain <code>(Request) =&gt; Response</code> function, so it also runs in Hono, Remix, Bun, Deno and Cloudflare Workers.</p>
-<div class="note">shipcue is open source under the MIT license: <a href="https://github.com/cyu60/shipcue">github.com/cyu60/shipcue</a>. It is an early release, so <a href="/contact/">tell us</a> what breaks.</div>
+<div class="note">shipcue is open source under the MIT license: <a href="https://github.com/edumame/shipcue">github.com/edumame/shipcue</a>. It is an early release, so <a href="/contact/">tell us</a> what breaks.</div>
 
 <h2>0. Install shipcue</h2>
 <pre><code>npm install shipcue</code></pre>
 <p>Until it's on npm, install the prebuilt release from GitHub. Nothing builds on install, so it works with npm, pnpm and Vercel:</p>
-<pre><code>pnpm add https://github.com/cyu60/shipcue/releases/download/v{VERSION}/shipcue-{VERSION}.tgz</code></pre>
+<pre><code>pnpm add https://github.com/edumame/shipcue/releases/download/v{VERSION}/shipcue-{VERSION}.tgz</code></pre>
 <p>shipcue has three entry points: <code>shipcue</code> (config and the task prompt), <code>shipcue/server</code> (the handler and the Postgres store) and <code>shipcue/react</code> (the button). The MCP server runs as <code>npx shipcue-mcp</code>.</p>
 <p>Stuck at any step? <code>npx shipcue doctor</code> says what is missing and how to fix it (see <a href="#doctor">Check your setup</a>). On shipcue Cloud, with no database of your own, <code>npx shipcue init --cloud pk_…</code> gives you the button for your project.</p>
 
@@ -533,7 +533,7 @@ POST = """
 <p>There are good hosted feedback tools already. I wanted something that lives in the database I already have, that I can read with SQL, and that does not need another login for the team. It is one table, one handler and one React component.</p>
 
 <h2>What is next</h2>
-<p>The first version is built and tested, and the code is now public on <a href="https://github.com/cyu60/shipcue">GitHub</a> under the MIT license. Next I am moving my own apps onto it, starting with the outliner. If you try it, or you have a queue of reports you wish an agent would just handle, <a href="/contact/">get in touch</a>. I would really love to hear how you end up using it.</p>
+<p>The first version is built and tested, and the code is now public on <a href="https://github.com/edumame/shipcue">GitHub</a> under the MIT license. Next I am moving my own apps onto it, starting with the outliner. If you try it, or you have a queue of reports you wish an agent would just handle, <a href="/contact/">get in touch</a>. I would really love to hear how you end up using it.</p>
 </article>
 """
 
@@ -558,7 +558,7 @@ HACKATHON_POST = """
   <li>Let mentors and friends who try your app report into it as well too. That is pretty much free testing.</li>
 </ul>
 
-<p>If you are building at a hackathon this season, I would love for you to add it on day one and tell me what breaks. The code is on <a href="https://github.com/cyu60/shipcue">GitHub</a> and the setup is in the <a href="/docs/">docs</a>.</p>
+<p>If you are building at a hackathon this season, I would love for you to add it on day one and tell me what breaks. The code is on <a href="https://github.com/edumame/shipcue">GitHub</a> and the setup is in the <a href="/docs/">docs</a>.</p>
 </article>
 """
 
@@ -571,7 +571,7 @@ RENAME_POST = """
 
 <p>So it is now shipcue. Said out loud it sounds like "ship queue", which is what it is, and a cue is also the signal for someone to go, which is what the button does. Someone reports something, that cues an agent, and the agent ships it.</p>
 
-<p>I also made the repository public, since the whole point is for other teams to use it. It is MIT licensed and lives at <a href="https://github.com/cyu60/shipcue">github.com/cyu60/shipcue</a>.</p>
+<p>I also made the repository public, since the whole point is for other teams to use it. It is MIT licensed and lives at <a href="https://github.com/edumame/shipcue">github.com/edumame/shipcue</a>.</p>
 
 <h2>What changed</h2>
 <p>If you set it up early under the old name, these are the things to rename:</p>

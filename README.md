@@ -48,10 +48,10 @@ More on the [use cases page](https://shipcue.ibuildathing.com/use-cases/).
 npm i shipcue   # or pnpm add shipcue
 ```
 
-Until it's on npm, install the prebuilt release (nothing builds on install, so it works with pnpm on Vercel; pick the newest from [releases](https://github.com/cyu60/shipcue/releases)):
+Until it's on npm, install the prebuilt release (nothing builds on install, so it works with pnpm on Vercel; pick the newest from [releases](https://github.com/edumame/shipcue/releases)):
 
 ```bash
-pnpm add https://github.com/cyu60/shipcue/releases/download/v<version>/shipcue-<version>.tgz
+pnpm add https://github.com/edumame/shipcue/releases/download/v<version>/shipcue-<version>.tgz
 ```
 
 Then run `npx shipcue doctor` in your app's repo; it says what is missing and how to fix it (see [Check your setup](#check-your-setup)). On shipcue Cloud, with no database of your own: `npx shipcue init --cloud <pk_…>`.

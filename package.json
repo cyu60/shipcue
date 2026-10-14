@@ -84,11 +84,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cyu60/shipcue.git"
+    "url": "git+https://github.com/edumame/shipcue.git"
   },
   "homepage": "https://shipcue.ibuildathing.com",
   "bugs": {
-    "url": "https://github.com/cyu60/shipcue/issues"
+    "url": "https://github.com/edumame/shipcue/issues"
   },
   "keywords": [
     "bug-report",

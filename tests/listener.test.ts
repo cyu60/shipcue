@@ -17,7 +17,7 @@ const opts = {
   project: 'Habitect (web)',
   version: '0.19.0',
 };
-const TGZ = 'https://github.com/cyu60/shipcue/releases/download/v0.19.0/shipcue-0.19.0.tgz';
+const TGZ = 'https://github.com/edumame/shipcue/releases/download/v0.19.0/shipcue-0.19.0.tgz';
 /** How bash splits a line into words, without running it. */
 const words = (line: string) => execFileSync('bash', ['-c', `set -- ${line}; printf '%s\\0' "$@"`], { encoding: 'utf8', env: { HOME: '/home/t', PATH: process.env.PATH } }).split('\0').slice(0, -1);
 
@@ -106,7 +106,7 @@ describe('dispatch: the Setup text', () => {
 
   it('installs the release globally, dry-runs, then installs the launchd agent with the same flags', () => {
     const lines = L.dispatchInstall({ ...o, max: '3', instructions: "Run pnpm test; don't skip it." }).split('\n');
-    expect(lines[0]).toBe('npm install -g https://github.com/cyu60/shipcue/releases/download/v1.2.3/shipcue-1.2.3.tgz');
+    expect(lines[0]).toBe('npm install -g https://github.com/edumame/shipcue/releases/download/v1.2.3/shipcue-1.2.3.tgz');
     const dry = words(lines[1]!);
     const install = words(lines[2]!);
     expect(dry.slice(0, 3)).toEqual(['shipcue', 'dispatch', '--dry-run']);

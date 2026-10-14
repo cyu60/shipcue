@@ -36,7 +36,7 @@ export async function runInit(o: { cwd: string; args: string[] }): Promise<{ out
   const { envLine, componentPath, component } = cloudInit({ key, origin: flagValue(o.args, '--origin'), srcDir });
   const layout = `${srcDir ? 'src/' : ''}app/layout.tsx`;
   const steps = `Then:
-  1. npm i shipcue   (until it's on npm: the release tarball, see https://github.com/cyu60/shipcue#install)
+  1. npm i shipcue   (until it's on npm: the release tarball, see https://github.com/edumame/shipcue#install)
   2. In ${layout}: import { ShipcueButton } from '@/components/shipcue-button'; and render <ShipcueButton reporter={user?.email} />
   3. List your sites in the Cloud project's Setup, and set ${ENV_NAME} on your host too.
 `;
