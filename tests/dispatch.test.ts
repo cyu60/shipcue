@@ -112,6 +112,21 @@ describe('a pass', () => {
     expect(started).toEqual([]);
   });
 
+  it('does not count a report whose session never started against the cap', async () => {
+    // Two failed starts with a cap of 2 would otherwise block every slot for ttlHours.
+    await store.create(sample());
+    await store.create(sample());
+    deps.start = async () => {
+      throw new Error('claude: not logged in');
+    };
+    await runPass(s, deps);
+    const r = await store.create(sample());
+    deps.start = async (name, prompt) => (started.push({ name, prompt }), 'x');
+    await runPass(s, deps);
+    expect(started.map((x) => x.name)).toEqual([`shipcue ${r.id.slice(0, 8)}`]);
+    expect(logs.join('\n')).not.toMatch(/at 2 live sessions|stuck/);
+  });
+
   it('holds and retries the report when the folder is not trusted yet', async () => {
     const r = await store.create(sample());
     deps.start = async () => {
