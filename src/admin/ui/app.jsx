@@ -3,7 +3,7 @@
 // Talks to createAdminHandler (src/admin); the CueLog table is the package's CueLogTable on the project's team API.
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CueLogTable } from '../../react';
+import { CueLogTable, ReportButton } from '../../react';
 import { ago } from '../../react/CueLog';
 import { SHIPCUE_VERSION } from '../../core';
 import { LISTEN_EVENTS } from '../../mcp/events';
@@ -1232,4 +1232,13 @@ function App() {
   );
 }
 
-if (root) createRoot(root).render(<App />);
+// data-report (the handler's reportKey): a report button filing into that project, as whoever is signed in.
+const REPORT_KEY = root?.dataset.report;
+
+if (root)
+  createRoot(root).render(
+    <>
+      <App />
+      {REPORT_KEY && <ReportButton endpoint={`${API}/p/${REPORT_KEY}`} types={['bug', 'feature']} accentColor="#16203A" diagnostics={() => ({ path: window.location.pathname + window.location.search })} />}
+    </>,
+  );

@@ -137,6 +137,11 @@ export interface AdminHandlerOptions {
   cookieDomain?: string;
   /** The page's title, with `page`. Default "shipcue admin". */
   pageTitle?: string;
+  /**
+   * A project's public key (pk_…): the page shows a report button filing into that project, as whoever is
+   * signed in. shipcue Cloud files its own reports this way. Off by default.
+   */
+  reportKey?: string;
   /** Upload a screenshot filed to a project (key: "<project id>/<batch>/<n>.<ext>") and return its URL. Without it, screenshots are kept in Postgres. */
   saveScreenshot?: (file: File, key: string) => Promise<string>;
 }
@@ -353,6 +358,7 @@ export function createAdminHandler(opts: AdminHandlerOptions): (req: Request) =>
       void work;
     });
   const base = (opts.base ?? '/api/cloud').replace(/\/$/, '');
+  if (opts.reportKey !== undefined && !/^pk_[0-9a-f]{24}$/.test(opts.reportKey)) throw new Error('createAdminHandler: reportKey is a project\'s public key, pk_ and 24 hex digits.');
   const beta = new Set((opts.beta ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean));
   const secure = opts.secureCookies !== false;
   const refreshDays = opts.refreshDays ?? 30;
@@ -1031,7 +1037,8 @@ export function createAdminHandler(opts: AdminHandlerOptions): (req: Request) =>
     // would let any page file into the queue. A browser always names its page's origin: hold it to the list.
     const origin = req.headers.get('origin');
     const filing = req.method === 'POST' && (path === `${base}/p/${key}/reports` || /^\/reports\/[^/]+\/video$/.test(path.slice(`${base}/p/${key}`.length)));
-    if (filing && origin && !p.allowed_origins.includes(origin)) return fail("This site is not on the project's list of sites.", 403);
+    // The admin's own page (its report button) is always on the list.
+    if (filing && origin && origin !== new URL(req.url).origin && !p.allowed_origins.includes(origin)) return fail("This site is not on the project's list of sites.", 403);
     if (filing) {
       const ip = clientIp(req);
       const over = await limited('file', ip && `${p.id}:${ip}`);
@@ -1052,8 +1059,9 @@ export function createAdminHandler(opts: AdminHandlerOptions): (req: Request) =>
       basePath: `${base}/p/${key}`,
       cors: p.allowed_origins,
       ...(opts.saveScreenshot ? { saveScreenshot: (file: File, k: string) => opts.saveScreenshot!(file, `${p.id}/${k}`) } : {}),
-      // The site vouches for who is signed in there; the admin cannot check it.
-      getReporter: async (r) => reporterFrom(r),
+      // Someone signed in to the admin is who they are; otherwise the site vouches for who is signed in
+      // there, which the admin cannot check.
+      getReporter: async (r) => (await session(r))?.user.email ?? reporterFrom(r),
       board: p.public_board,
       // The team sees every fix link on the public board, private repositories included.
       boardAdmin: async (r) => {
@@ -1091,7 +1099,9 @@ export function createAdminHandler(opts: AdminHandlerOptions): (req: Request) =>
         },
       },
     });
-    return withCookies(await handler(req), s?.set);
+    const res = await handler(req);
+    // A session refreshed for the team API or for the reporter: keep its new cookies.
+    return withCookies(res, (await sessions.get(req))?.set);
   }
 
   /** Where a project's digest goes: its Slack channel, or its first owner's email. Null when that is not set up. */
@@ -1165,7 +1175,7 @@ a { color: inherit; }
 </style>
 </head>
 <body>
-<main><div id="shipcue-app" data-api="${b}"></div></main>
+<main><div id="shipcue-app" data-api="${b}"${opts.reportKey ? ` data-report="${escapeHtml(opts.reportKey)}"` : ''}></div></main>
 <script src="${b}/app.js?v=${escapeHtml(SHIPCUE_VERSION)}" defer></script>
 </body>
 </html>`;
