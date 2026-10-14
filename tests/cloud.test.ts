@@ -297,6 +297,32 @@ describe('shipcue Cloud: who filed it', () => {
   });
 });
 
+describe("shipcue Cloud: the admin's own report button", () => {
+  it('files from its own page, as the account signed in there rather than what the site says', async () => {
+    await signUp('ada@example.com');
+    const { data: made } = await call('POST', '/projects', { as: 'ada@example.com', body: { name: 'Own' } });
+    const file = (origin: string, headers: Record<string, string> = {}) => {
+      const form = new FormData();
+      form.set('type', 'bug');
+      form.set('description', 'The project picker forgets my choice');
+      return handle(new Request(`${BASE}/p/${made.project.publicKey}/reports`, { method: 'POST', body: form, headers: { origin, ...headers } }));
+    };
+    // Not on the project's list of sites, but it is the admin's own origin.
+    expect((await file(new URL(BASE).origin, { cookie: jar.get('ada@example.com')!, 'x-shipcue-user': 'mallory@example.com' })).status).toBe(201);
+    expect((await file('https://elsewhere.example', { cookie: jar.get('ada@example.com')! })).status).toBe(403);
+    const { data } = await call('GET', `/p/${made.project.publicKey}/team/reports`, { as: 'ada@example.com' });
+    expect(data.reports.map((r: { reporter: string | null }) => r.reporter)).toEqual(['ada@example.com']);
+  });
+
+  it('shows the button on the page only with a reportKey, and checks the key', async () => {
+    const page = (reportKey?: string) =>
+      createAdminHandler({ db, auth: insforgeAuth('https://x.example.com'), page: true, ...(reportKey ? { reportKey } : {}) })(new Request(`${BASE}/`)).then((r) => r.text());
+    expect(await page('pk_0123456789abcdef01234567')).toContain('data-report="pk_0123456789abcdef01234567"');
+    expect(await page()).not.toContain('data-report');
+    expect(() => createAdminHandler({ db, auth: insforgeAuth('https://x.example.com'), reportKey: 'nope' })).toThrow(/reportKey/);
+  });
+});
+
 describe('shipcue Cloud: a new key, and deleting a project', () => {
   async function project() {
     await signUp('ada@example.com');
