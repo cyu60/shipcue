@@ -297,10 +297,11 @@ export async function runPass(s: DispatchSettings, deps: PassDeps, dryRun = fals
   const mineIds = new Set(mine.map((r) => r.id));
 
   // A dispatched report still not closed counts against the cap until ttlHours, then it is stuck.
+  // One whose session never started (d.error) runs nowhere: it takes no slot and is never stuck.
   const dispatched = st.dispatched();
   let live = 0;
   for (const d of dispatched) {
-    if (!unclosed.has(d.id)) continue;
+    if (!unclosed.has(d.id) || d.error) continue;
     if (now - d.epoch < s.ttlHours * 3600_000) live++;
     else if (!d.stuckLogged && !dryRun) {
       deps.log(`stuck: ${d.id.slice(0, 8)} still open after ${s.ttlHours}h; session ${d.session ?? '-'}`);
@@ -392,6 +393,8 @@ export async function runPass(s: DispatchSettings, deps: PassDeps, dryRun = fals
     } catch (err) {
       d.error = err instanceof Error ? err.message : String(err);
       await deps.client.release(r.id).catch(() => undefined);
+      // An untrusted folder fails every report the same way: hold the machine and retry this one, not give up on it.
+      if (/workspace not trusted/i.test(d.error)) return hold(now + RETRY_MIN * 60_000, `released ${id8}: ${d.error}`);
       deps.log(`could not start a session for ${id8}, released it (not retried; delete report-${r.id}.json to retry): ${d.error}`);
     }
     st.saveDispatched(d);

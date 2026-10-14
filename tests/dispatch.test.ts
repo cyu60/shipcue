@@ -112,6 +112,36 @@ describe('a pass', () => {
     expect(started).toEqual([]);
   });
 
+  it('does not count a report whose session never started against the cap', async () => {
+    // Two failed starts with a cap of 2 would otherwise block every slot for ttlHours.
+    await store.create(sample());
+    await store.create(sample());
+    deps.start = async () => {
+      throw new Error('claude: not logged in');
+    };
+    await runPass(s, deps);
+    const r = await store.create(sample());
+    deps.start = async (name, prompt) => (started.push({ name, prompt }), 'x');
+    await runPass(s, deps);
+    expect(started.map((x) => x.name)).toEqual([`shipcue ${r.id.slice(0, 8)}`]);
+    expect(logs.join('\n')).not.toMatch(/at 2 live sessions|stuck/);
+  });
+
+  it('holds and retries the report when the folder is not trusted yet', async () => {
+    const r = await store.create(sample());
+    deps.start = async () => {
+      throw new Error('Workspace not trusted. Run `claude` in /repo/app once and accept the trust prompt, then retry.');
+    };
+    await runPass(s, deps);
+    expect((await store.get(r.id))!.status).toBe('open');
+    expect(logs.at(-1)).toMatch(/holding until .*released .*Workspace not trusted/);
+    // Trusted now, and the hold is over: the same report starts.
+    deps.start = async (name, prompt) => (started.push({ name, prompt }), 'x');
+    deps.now = () => Date.now() + 16 * 60_000;
+    await runPass(s, deps);
+    expect(started.map((x) => x.name)).toEqual([`shipcue ${r.id.slice(0, 8)}`]);
+  });
+
   it('holds until the usage window resets when another session would not fit', async () => {
     await store.create(sample());
     deps.usage = async () => ({ five_hour: { utilization: 95, resets_at: '2099-01-01T00:00:00Z' } });
