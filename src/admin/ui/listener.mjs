@@ -310,13 +310,14 @@ ${fence(`curl -fsS -H ${shq(`Authorization: Bearer ${n.token}`)} ${shq(`${n.url}
 From then on, a Claude Code session in this folder has the shipcue tools (list_reports, claim_next_report, submit_for_review, …) after a restart.
 
 ## 4. A workflow that works the queue
+The sessions it starts run with nobody watching, so set two things up first. Trust: Claude Code only starts sessions in a folder it trusts, and only I can accept that; if I have never opened Claude Code in ${n.folder}, ask me to run \`claude\` there once, accept the trust prompt and exit. Permissions: make sure Claude Code may edit files and run git, gh and the app's tests in ${n.folder} without asking (its .claude/settings.local.json); if you may not write that file yourself, ask me to allow it.
 macOS: shipcue dispatch checks the queue every minute and starts a background Claude Code session per unclaimed report, each in its own git worktree, which claims the report, fixes it, opens a PR and submits it for review. Run this as is; show me what the dry run would start before the install line:
 ${fence(dispatchInstall(o))}
-   Then ask me to run \`sudo pmset -a sleep 0 disablesleep 1\` so the Mac stays awake, and to turn on automatic login so it comes back after a restart. Background sessions only start in a folder Claude Code trusts: if I have never opened Claude Code in ${n.folder}, ask me to run \`claude\` there once and accept the trust prompt. Check: \`shipcue dispatch --status ${repo}\` and the log above show no errors after a minute.
+   Then ask me to run \`sudo pmset -a sleep 0 disablesleep 1\` so the Mac stays awake, and to turn on automatic login so it comes back after a restart. Check: \`shipcue dispatch --status ${repo}\` and the log above show no errors after a minute. A dry run that shows nothing to start just means no report is open yet. If the log says it could not start a session for a report, fix what it names and delete the report-<id>.json it names (in the log's folder) so the next pass retries it.
 Linux: run the listener as a service instead (it runs claude once per new report):
 ${fence(systemdInstall(o))}
    Check: \`systemctl --user status ${unit}\`.
-If the log says npx, claude or shipcue is not found, the service's login shell does not see them (nvm and similar set PATH only in interactive shells): put their folder on PATH in ~/.zprofile (macOS) or ~/.profile (Linux) and restart it. The sessions run with nobody watching, so make sure Claude Code may edit files and run git, gh and the app's tests in ${n.folder} (its .claude/settings.local.json) without asking.
+If the log says npx, claude or shipcue is not found, the service's login shell does not see them (nvm and similar set PATH only in interactive shells): put their folder on PATH in ~/.zprofile (macOS) or ~/.profile (Linux) and restart it.
 
 ## 5. Removing it
 If I ask you (or a later session) to take shipcue off this machine, do this and nothing more. On macOS, stop dispatch, drop its state and log, and remove the global install (sessions it already started keep running until they finish; \`claude agents\` lists them):
