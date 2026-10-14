@@ -196,7 +196,35 @@ shipcue dispatch --install ${flags}
 `;
 }
 
-const fence = (body) => `\`\`\`sh\n${body.trimEnd()}\n\`\`\``;
+/** Takes the listener service off this machine: the reverse of launchdInstall / systemdInstall. */
+export function launchdUninstall(project) {
+  const label = launchdLabel(project);
+  return `launchctl bootout gui/$(id -u)/${label}
+rm -f ~/Library/LaunchAgents/${label}.plist ~/Library/Logs/shipcue-listen-${slug(project)}.log
+`;
+}
+
+export function systemdUninstall(project) {
+  const name = systemdName(project);
+  return `systemctl --user disable --now ${name}
+rm -f ~/.config/systemd/user/${name}.service
+systemctl --user daemon-reload
+`;
+}
+
+/** Takes shipcue dispatch off this machine: the reverse of dispatchInstall, state and log included. */
+export function dispatchUninstall(o) {
+  const n = normalise(o);
+  return `shipcue dispatch --uninstall --repo ${shq(n.folder)}
+rm -rf ~/.local/state/shipcue-dispatch/${dispatchName(n.folder)}
+npm uninstall -g shipcue
+`;
+}
+
+/** The MCP server, from the folder it was added in. */
+const mcpUninstall = (n) => `cd ${n.folder === '~' ? '~' : shDir(n.folder)}\nclaude mcp remove shipcue`;
+
+const fence = (body, lang = 'sh') => `\`\`\`${lang}\n${body.trimEnd()}\n\`\`\``;
 
 /**
  * One prompt to paste into Claude Code (or Codex) on the machine that should work the queue: it checks
@@ -230,5 +258,75 @@ ${fence(launchdInstall(o))}
 ${fence(systemdInstall(o))}
 6. Check it. macOS: \`launchctl print gui/$(id -u)/${label} | grep -m1 state\` says running, and \`tail ~/Library/Logs/shipcue-listen-${n.name}.log\` shows no errors after 30 seconds. Linux: \`systemctl --user status ${unit}\`. If the log says npx or claude is not found, the service's login shell does not see them (nvm and similar set PATH only in interactive shells): put their folder on PATH in ~/.zprofile (macOS) or ~/.profile (Linux) and restart the service.
 7. Unattended runs. The command above runs once per event with nobody watching, so it must not stop on a permission prompt: make sure Claude Code is allowed to edit files and run git, gh and the app's tests in ${n.folder} (its .claude/settings.local.json), or tell me which permission mode you suggest.
-8. Tell me in a few lines: what you installed, where the log is, how to stop it (\`launchctl bootout gui/$(id -u)/${label}\` or \`systemctl --user disable --now ${unit}\`), and anything still waiting on me.`;
+8. Removing it. If I ask you (or a later session) to take this off the machine, run, on macOS:
+${fence(launchdUninstall(o.project))}
+   or on Linux:
+${fence(systemdUninstall(o.project))}
+   then, on both:
+${fence(mcpUninstall(n))}
+   and tell me to Disconnect ${n.agent} in Cloud → Setup → Connect your agents, which revokes its token everywhere.
+9. Tell me in a few lines: what you installed, where the log is, how to stop it (\`launchctl bootout gui/$(id -u)/${label}\` or \`systemctl --user disable --now ${unit}\`), how to remove it (step 8), and anything still waiting on me.`;
+}
+
+/**
+ * The whole project from one prompt, shown first in Setup: pasted into Claude Code (or Codex) in the
+ * app's repo on the machine that should work the queue, it adds the report button to the app, gives
+ * Claude the shipcue tools as the agent, and keeps a workflow running on that machine: shipcue dispatch
+ * on macOS (a Claude Code session per report), the listener as a systemd --user unit on Linux. The
+ * commands are the same text the cards below show, so it never drifts from them.
+ */
+export function projectPrompt(o) {
+  const n = normalise(o);
+  const sites = (o.origins ?? []).filter(Boolean);
+  const mcp = `claude mcp add shipcue -e SHIPCUE_URL=${shq(n.url)} -e SHIPCUE_TOKEN=${shq(n.token)} -- npx -y -p ${releaseTarball(n.version)} shipcue-mcp`;
+  const unit = systemdName(o.project);
+  const repo = `--repo ${shq(n.folder)}`;
+  return `Set up my shipcue Cloud project "${o.project ?? n.name}" end to end on this machine: put the report button in my app, connect you to the project's queue as the agent "${n.agent}", and keep a workflow running here that works the queue after this chat ends. Do every step yourself; stop and ask me only for what only I can do (a password, a login, which repo, a setting in the Cloud dashboard).
+
+- Project endpoint: ${n.url}
+  Public: it is what the button posts to, so it may go in the app's browser code.
+- Agent token: ${n.token}
+  A secret: never print it back, never commit it, never put it in the app or its .env files; only where the commands below put it. If it is still a <placeholder>, ask me for it first (Cloud → Setup → Connect your agents makes one; it is shown once).
+- The app's repo on this machine: ${n.folder}
+- Sites the button may file from: ${sites.length ? sites.join(', ') : 'none yet'}
+
+## 1. Tools and repo
+Check node 20+ (with npx), git, gh (signed in: \`gh auth status\`) and claude (Claude Code, signed in). Install what is missing (Homebrew on macOS, the package manager on Linux), or tell me exactly what to run. Make sure ${n.folder} is a git checkout of the app these reports are about, with a remote you can push branches to; if not, ask me for the repo URL and clone it there. Do the rest from that folder.
+
+## 2. The report button
+Check the endpoint answers (this prints its capabilities as JSON):
+${fence(`curl -fsS ${shq(`${n.url}/capabilities`)}`)}
+On a new branch, add shipcue with the repo's own package manager (pnpm, npm, yarn or bun, from its lockfile) from the release, since it is not on npm yet:
+${fence(`pnpm add ${releaseTarball(n.version)}`)}
+Render the button once, on every page (the root layout or app shell), from a client component:
+${fence(`import { ReportButton } from 'shipcue/react';\n\n<ReportButton endpoint={ENDPOINT} types={['bug', 'feature']} reporter={user?.email} />`, 'tsx')}
+Read ENDPOINT from a public env var in the framework's style (NEXT_PUBLIC_SHIPCUE_ENDPOINT in Next.js, VITE_SHIPCUE_ENDPOINT in Vite) set to the project endpoint in .env.local (or the repo's equivalent) and in .env.example; tell me to set it on the host too. Pass reporter only if the app knows who is signed in. Build or typecheck the app, start it, and check the button shows. The button only files from listed sites: if the dev origin (for example http://localhost:3000) or the production site is not in the list above, tell me to add it in Cloud → Setup → Add the button to your app. Commit, push the branch and open a PR; do not merge it.
+
+## 3. Connect you to the queue
+In ${n.folder} (run \`claude mcp remove shipcue\` first if one is already there):
+${fence(`cd ${n.folder === '~' ? '~' : shDir(n.folder)}\n${mcp}`)}
+Check the token; this must print "token ok" (a 401 means it is wrong or revoked: stop and tell me):
+${fence(`curl -fsS -H ${shq(`Authorization: Bearer ${n.token}`)} ${shq(`${n.url}/reports?status=open`)} >/dev/null && echo token ok`)}
+From then on, a Claude Code session in this folder has the shipcue tools (list_reports, claim_next_report, submit_for_review, …) after a restart.
+
+## 4. A workflow that works the queue
+macOS: shipcue dispatch checks the queue every minute and starts a background Claude Code session per unclaimed report, each in its own git worktree, which claims the report, fixes it, opens a PR and submits it for review. Run this as is; show me what the dry run would start before the install line:
+${fence(dispatchInstall(o))}
+   Then ask me to run \`sudo pmset -a sleep 0 disablesleep 1\` so the Mac stays awake, and to turn on automatic login so it comes back after a restart. Check: \`shipcue dispatch --status ${repo}\` and the log above show no errors after a minute.
+Linux: run the listener as a service instead (it runs claude once per new report):
+${fence(systemdInstall(o))}
+   Check: \`systemctl --user status ${unit}\`.
+If the log says npx, claude or shipcue is not found, the service's login shell does not see them (nvm and similar set PATH only in interactive shells): put their folder on PATH in ~/.zprofile (macOS) or ~/.profile (Linux) and restart it. The sessions run with nobody watching, so make sure Claude Code may edit files and run git, gh and the app's tests in ${n.folder} (its .claude/settings.local.json) without asking.
+
+## 5. Removing it
+If I ask you (or a later session) to take shipcue off this machine, do this and nothing more. On macOS, stop dispatch, drop its state and log, and remove the global install (sessions it already started keep running until they finish; \`claude agents\` lists them):
+${fence(dispatchUninstall(o))}
+On Linux, stop the listener and remove its unit:
+${fence(systemdUninstall(o.project))}
+On both, remove the shipcue tools from the repo's Claude Code:
+${fence(mcpUninstall(n))}
+Then tell me to Disconnect ${n.agent} in Cloud → Setup → Connect your agents (that revokes its token everywhere) and, if I turned it off, that \`sudo pmset -a disablesleep 0\` lets the Mac sleep again. Leave the button in the app unless I ask for it out too; then, on a new branch, remove the ReportButton, its env var and the shipcue package, and open a PR.
+
+## 6. Tell me in a few lines
+The button PR, what is still waiting on me (sites to list, env var on the host, sleep settings), what is running here, where its log is, how to stop it (\`shipcue dispatch --uninstall ${repo}\` or \`systemctl --user disable --now ${unit}\`), and that step 5 removes it all.`;
 }
