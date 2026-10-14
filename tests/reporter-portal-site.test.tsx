@@ -16,7 +16,7 @@ async function site() {
   const store = memoryStore();
   const base = { priority: 'medium' as const, area: 'other', pageUrl: '', userAgent: '', diagnostics: { secret: 'diag-xyz' }, screenshots: [] as string[], context: null };
   const fixed = await store.create({ ...base, type: 'bug', description: 'The CueLog tab forgets itself', reporter: 'ada@example.com' });
-  await store.close(fixed.id, 'fixed', 'The tab is kept in the URL now', { prUrl: 'https://github.com/cyu60/shipcue/pull/12' });
+  await store.close(fixed.id, 'fixed', 'The tab is kept in the URL now', { prUrl: 'https://github.com/edumame/shipcue/pull/12' });
   const wont = await store.create({ ...base, type: 'feature', description: 'Make it purple', reporter: 'ada@example.com' });
   await store.close(wont.id, 'wontfix', null);
   await store.create({ ...base, type: 'bug', description: "Bob's private report", reporter: 'bob@example.com' });
@@ -45,7 +45,7 @@ describe('My reports page', () => {
     expect(within(list).getByText('The tab is kept in the URL now')).toBeInTheDocument();
     expect(within(list).getByText('Fixed')).toBeInTheDocument();
     expect(within(list).getByText("Won't fix")).toBeInTheDocument();
-    expect(within(list).getByRole('link', { name: 'PR #12 ↗' }).getAttribute('href')).toBe('https://github.com/cyu60/shipcue/pull/12');
+    expect(within(list).getByRole('link', { name: 'PR #12 ↗' }).getAttribute('href')).toBe('https://github.com/edumame/shipcue/pull/12');
     const links = within(list).getAllByRole('link', { name: 'On the CueLog' });
     expect(links.map((a) => a.getAttribute('href'))).toEqual([`/cuelog/?view=all#shipcue-${fixed.id}`]);
     expect(document.body.textContent).not.toContain("Bob's private report");
@@ -58,6 +58,7 @@ describe('My reports page', () => {
     browserAs(handle, null);
     render(<MyReports />);
     const link = await screen.findByRole('link', { name: 'Sign in' });
-    expect(link.getAttribute('href')).toBe('/app/?next=%2Fapp%2Fmine%2F');
+    // Cloud signs in on its own site; it comes back to this page (www.shipcue.ai shares its cookie).
+    expect(link.getAttribute('href')).toBe(`https://cloud.shipcue.ai/?next=${encodeURIComponent(`${window.location.origin}/app/mine/`)}`);
   });
 });

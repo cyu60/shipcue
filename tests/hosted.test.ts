@@ -2,8 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { memoryStore } from '../src/server';
 import { resolveConfig } from '../src/core';
-// @ts-expect-error -- plain JS module for the site's function
-import { triageReport, triageInput, parseTriage, hostedFromEnv, DEFAULT_HOSTED_MODEL } from '../website/_src/hosted.mjs';
+import { triageReport, triageInput, parseTriage, hostedFromEnv, DEFAULT_HOSTED_MODEL } from '../src/admin';
 import { sample } from './store.contract';
 
 const areas = resolveConfig({ areas: [{ value: 'editor', label: 'Editor' }] }).areas;
@@ -121,7 +120,7 @@ describe('hosted agent: triage', () => {
   });
 
   it('checks the answer and keeps the area to the list', () => {
-    expect(parseTriage(JSON.stringify({ ...GOOD, area: 'billing' }), areas).area).toBe('other');
+    expect(parseTriage(JSON.stringify({ ...GOOD, area: 'billing' }), areas)!.area).toBe('other');
     expect(parseTriage(JSON.stringify({ ...GOOD, steps: 'one' }), areas)).toBeNull();
     expect(triageInput(sample({ pageUrl: 'not a url' }), areas).page).toBe('');
   });

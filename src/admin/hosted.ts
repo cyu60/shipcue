@@ -1,13 +1,15 @@
-// shipcue Cloud's hosted agent (shipcue report 3d2dded6): a built-in "shipcue-agent" a project can
-// turn on. Given a report (assigned to it, or every new one with auto-triage), it asks OpenAI for a
+// The hosted agent (shipcue report 3d2dded6): a built-in "shipcue-agent" a project can turn on.
+// Given a report (assigned to it, or every new one with auto-triage), it asks OpenAI for a
 // triage and posts it as a note: summary, likely area, suggested priority with a reason, steps to
 // reproduce (or what is missing) and a short plan for a coding agent. It never fixes code; a report
 // assigned to it goes back to the queue. Failures become a short note, never an error.
 // The note also carries structured suggestions (shipcue report 1c0bf5be): a priority, an area and
 // "looks like #id8" from a compact list of the project's open reports sent in the same call. They
 // are stored with the note as detail.suggest and only change anything when someone clicks Apply.
+import type { Area, Claimant, Priority, Report } from '../core';
+import type { ReportStore } from '../server';
 
-const PRIORITIES = ['low', 'medium', 'high', 'blocking'];
+const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'blocking'];
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 export const DEFAULT_HOSTED_MODEL = 'gpt-5.4-mini';
 // What we send is capped; the report text is untrusted, so it is data in the prompt, never instructions.
@@ -16,29 +18,50 @@ const MAX_CONTEXT = 4000;
 const MAX_HEADLINE = 120;
 export const DEFAULT_DUPLICATE_CANDIDATES = 50;
 
+/** What the admin needs of fetch: always called with a string URL. */
+export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+
+/** The hosted agent's OpenAI settings. */
+export interface HostedOptions {
+  apiKey: string;
+  model: string;
+  /** Triages per project per 24 hours. */
+  dailyLimit: number;
+  timeoutMs: number;
+  /** How many open reports go along for duplicate detection; 0 turns it off. Default 50. */
+  duplicateCandidates?: number;
+  fetchImpl?: FetchLike;
+}
+
 /** The hosted agent's settings from the environment; null when there is no OpenAI key. */
-export function hostedFromEnv(env = process.env) {
+export function hostedFromEnv(env: Record<string, string | undefined> = process.env): HostedOptions | null {
   if (!env.OPENAI_API_KEY) return null;
-  const n = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : d);
+  const n = (v: unknown, d: number) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : d);
   return {
     apiKey: env.OPENAI_API_KEY,
     model: env.SHIPCUE_HOSTED_MODEL || DEFAULT_HOSTED_MODEL,
     dailyLimit: n(env.SHIPCUE_HOSTED_DAILY_LIMIT, 50),
     timeoutMs: n(env.SHIPCUE_HOSTED_TIMEOUT_MS, 25000),
-    // How many open reports go along for duplicate detection; 0 turns it off.
     duplicateCandidates: /^\d+$/.test(String(env.SHIPCUE_HOSTED_DUPLICATE_CANDIDATES ?? ''))
       ? Number(env.SHIPCUE_HOSTED_DUPLICATE_CANDIDATES)
       : DEFAULT_DUPLICATE_CANDIDATES,
   };
 }
 
+/** Another open report, as the model sees it: its first 8 characters and first line. */
+export interface Candidate {
+  id: string;
+  fullId: string;
+  headline: string;
+}
+
 /**
  * The project's other open reports, newest first, as { id: first 8 characters, headline: first line }:
  * nothing else about them (no reporter, no screenshots). At most `max`.
  */
-export async function duplicateCandidates(store, report, max) {
+export async function duplicateCandidates(store: ReportStore, report: Report, max: number): Promise<Candidate[]> {
   if (!(max > 0)) return [];
-  const all = await store.list().catch(() => []);
+  const all = await store.list().catch(() => [] as Report[]);
   return all
     .filter((r) => r.id !== report.id && r.status !== 'fixed' && r.status !== 'wontfix')
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -47,7 +70,7 @@ export async function duplicateCandidates(store, report, max) {
 }
 
 /** Only what triage needs: no screenshots, reporter, diagnostics or the page's query string. */
-export function triageInput(report, areas, candidates = []) {
+export function triageInput(report: Pick<Report, 'type' | 'priority' | 'area' | 'description' | 'pageUrl'> & { context?: string | null }, areas: Area[], candidates: Candidate[] = []) {
   let page = '';
   try {
     page = report.pageUrl ? new URL(report.pageUrl).pathname : '';
@@ -66,6 +89,8 @@ export function triageInput(report, areas, candidates = []) {
   };
 }
 
+export type TriageInput = ReturnType<typeof triageInput>;
+
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -82,7 +107,7 @@ const SCHEMA = {
   },
 };
 
-export function triageMessages(input) {
+export function triageMessages(input: TriageInput) {
   return [
     {
       role: 'system',
@@ -100,37 +125,47 @@ export function triageMessages(input) {
   ];
 }
 
-const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : null);
-const list = (v, maxItems, max) => (Array.isArray(v) ? v.map((x) => str(x, max)).filter(Boolean).slice(0, maxItems) : null);
+const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : null);
+const list = (v: unknown, maxItems: number, max: number) =>
+  Array.isArray(v) ? v.map((x) => str(x, max)).filter((x): x is string => !!x).slice(0, maxItems) : null;
+
+/** A checked triage. */
+export interface Triage {
+  summary: string;
+  area: string;
+  priority: Priority;
+  priorityReason: string;
+  steps: string[];
+  missing: string[];
+  plan: string[];
+  duplicate: Candidate | null;
+}
 
 /** Checks the model's JSON; null when it is not what we asked for. A duplicateOf outside `candidates` is dropped. */
-export function parseTriage(text, areas, candidates = []) {
-  let d;
+export function parseTriage(text: string, areas: Area[], candidates: Candidate[] = []): Triage | null {
+  let d: Record<string, unknown>;
   try {
     d = JSON.parse(text);
   } catch {
     return null;
   }
   if (!d || typeof d !== 'object') return null;
-  const t = {
-    summary: str(d.summary, 1200),
-    area: str(d.area, 60),
-    priority: PRIORITIES.includes(d.priority) ? d.priority : null,
-    priorityReason: str(d.priorityReason, 300),
-    steps: list(d.steps, 10, 300),
-    missing: list(d.missing, 6, 300),
-    plan: list(d.plan, 8, 300),
-  };
-  if (!t.summary || !t.area || !t.priority || !t.priorityReason || !t.steps || !t.missing || !t.plan) return null;
-  if (t.area !== 'other' && !areas.some((a) => a.value === t.area)) t.area = 'other';
+  const summary = str(d.summary, 1200);
+  let area = str(d.area, 60);
+  const priority = PRIORITIES.includes(d.priority as Priority) ? (d.priority as Priority) : null;
+  const priorityReason = str(d.priorityReason, 300);
+  const steps = list(d.steps, 10, 300);
+  const missing = list(d.missing, 6, 300);
+  const plan = list(d.plan, 8, 300);
+  if (!summary || !area || !priority || !priorityReason || !steps || !missing || !plan) return null;
+  if (area !== 'other' && !areas.some((a) => a.value === area)) area = 'other';
   const dupId = str(d.duplicateOf, 40)?.replace(/^#/, '').toLowerCase();
   const matches = dupId ? candidates.filter((c) => c.id === dupId) : [];
-  t.duplicate = matches.length === 1 ? matches[0] : null;
-  return t;
+  return { summary, area, priority, priorityReason, steps, missing, plan, duplicate: matches.length === 1 ? matches[0]! : null };
 }
 
 /** The note people read in the CueLog. */
-export function formatTriage(t, areas) {
+export function formatTriage(t: Triage, areas: Area[]): string {
   const area = areas.find((a) => a.value === t.area);
   const lines = [
     'Triage',
@@ -148,9 +183,16 @@ export function formatTriage(t, areas) {
   return lines.join('\n');
 }
 
+/** What the CueLog offers as Apply chips. */
+export interface Suggest {
+  priority?: Priority;
+  area?: string;
+  duplicateOf?: string;
+}
+
 /** What the CueLog offers as Apply chips: only what differs from the report now. Null when nothing. */
-export function suggestions(t, report) {
-  const suggest = {};
+export function suggestions(t: Triage, report: Report): Suggest | null {
+  const suggest: Suggest = {};
   if (t.priority !== report.priority) suggest.priority = t.priority;
   if (t.area !== 'other' && t.area !== report.area) suggest.area = t.area;
   if (t.duplicate && t.duplicate.fullId !== report.id) suggest.duplicateOf = t.duplicate.fullId;
@@ -158,7 +200,10 @@ export function suggestions(t, report) {
 }
 
 /** One chat completion with structured output, given up after timeoutMs. Throws with a short reason. */
-export async function askOpenAI(input, { apiKey, model, timeoutMs, fetchImpl = fetch }) {
+export async function askOpenAI(
+  input: TriageInput,
+  { apiKey, model, timeoutMs, fetchImpl = fetch }: Pick<HostedOptions, 'apiKey' | 'model' | 'timeoutMs' | 'fetchImpl'>,
+): Promise<string> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -176,7 +221,7 @@ export async function askOpenAI(input, { apiKey, model, timeoutMs, fetchImpl = f
       }),
     });
     if (!res.ok) throw new Error(`OpenAI said ${res.status}`);
-    const data = await res.json();
+    const data = (await res.json()) as { choices?: { message?: { content?: unknown } }[] };
     const text = data?.choices?.[0]?.message?.content;
     if (typeof text !== 'string') throw new Error('OpenAI sent no answer');
     return text;
@@ -188,20 +233,29 @@ export async function askOpenAI(input, { apiKey, model, timeoutMs, fetchImpl = f
   }
 }
 
-/**
- * Triage one report and leave a note. `held`: it was assigned to the agent, so it claims it while it
- * works and releases it after (whatever happens). Returns the note's text.
- * @param {{ store: any, reportId: string, agent: { kind: 'agent', id: string, name: string }, areas: { value: string, label: string }[],
- *   held?: boolean, candidates?: number, openai: { apiKey: string, model: string, timeoutMs: number, fetchImpl?: typeof fetch },
- *   dailyLimit: number, usedToday: () => Promise<number>, limitNote?: string, onReleased?: (report: any) => Promise<void> }} o
- *   limitNote: the note to leave at the cap instead of the per-project one (the plan's limit, once billing is enforced).
- */
-export async function triageReport(o) {
+export interface TriageReportOptions {
+  store: ReportStore;
+  reportId: string;
+  agent: Claimant & { kind: 'agent' };
+  areas: Area[];
+  /** It was assigned to the agent, so it claims it while it works and releases it after (whatever happens). */
+  held?: boolean;
+  candidates?: number;
+  openai: Pick<HostedOptions, 'apiKey' | 'model' | 'timeoutMs' | 'fetchImpl'>;
+  dailyLimit: number;
+  usedToday: () => Promise<number>;
+  /** The note to leave at the cap instead of the per-project one (e.g. the plan's limit). */
+  limitNote?: string;
+  onReleased?: (report: Report) => Promise<void>;
+}
+
+/** Triage one report and leave a note. Returns the note's text. */
+export async function triageReport(o: TriageReportOptions): Promise<string | null> {
   const { store, reportId, agent, areas } = o;
   let report = await store.get(reportId);
   if (!report || !store.note) return null;
-  let note;
-  let suggest = null;
+  let note: string;
+  let suggest: Suggest | null = null;
   const held = o.held && (await store.claim(reportId, agent));
   // Assigned, but someone took it or unassigned it first: leave it be.
   if (o.held && !held) return null;

@@ -2,8 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
-// @ts-expect-error -- plain JS module for the site's function
-import { createCloudHandler, digestDue, insforgeAuth, insforgeEmail } from '../website/_src/cloud.mjs';
+import { createAdminHandler, digestDue, insforgeAuth, insforgeEmail } from '../src/admin';
 
 const schema = readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8');
 const cloud = readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8');
@@ -61,7 +60,7 @@ beforeEach(async () => {
   await db.exec(schema);
   await db.exec(cloud);
   auth = fakeAuth();
-  handle = createCloudHandler({ db: { query: (t: string, p?: unknown[]) => db.query(t, p) }, auth, beta: ['ada@example.com'], secureCookies: false });
+  handle = createAdminHandler({ db: { query: (t: string, p?: unknown[]) => db.query(t, p) }, auth, beta: ['ada@example.com'], secureCookies: false });
 });
 
 const jar = new Map<string, string>();
@@ -374,7 +373,7 @@ describe('shipcue Cloud: the hosted agent (shipcue report 3d2dded6)', () => {
   async function hostedProject(opts: { available?: boolean } = {}) {
     pending = [];
     openaiCalls = 0;
-    handle = createCloudHandler({
+    handle = createAdminHandler({
       db: { query: (t: string, p?: unknown[]) => db.query(t, p) },
       auth,
       beta: ['ada@example.com'],
@@ -501,7 +500,7 @@ describe('shipcue Cloud: the activity digest (shipcue report 5f4d339b)', () => {
       slackPosts.push({ url: String(url), body: String(init?.body) });
       return new Response('ok');
     }) as typeof fetch;
-    handle = createCloudHandler({
+    handle = createAdminHandler({
       db: { query: (t: string, p?: unknown[]) => db.query(t, p) },
       auth,
       beta: ['ada@example.com'],
@@ -553,7 +552,7 @@ describe('shipcue Cloud: the activity digest (shipcue report 5f4d339b)', () => {
     const { data: detail } = await call('GET', `/projects/${p.id}`, { as: 'ada@example.com' });
     expect(detail.digest).toEqual({ available: true, email: true });
 
-    handle = createCloudHandler({ db: { query: (t: string, q?: unknown[]) => db.query(t, q) }, auth, beta: ['ada@example.com'], secureCookies: false });
+    handle = createAdminHandler({ db: { query: (t: string, q?: unknown[]) => db.query(t, q) }, auth, beta: ['ada@example.com'], secureCookies: false });
     expect((await call('POST', `/projects/${p.id}/settings`, { as: 'ada@example.com', body: { digestTo: 'email' } })).res.status).toBe(409);
     expect((await call('GET', `/projects/${p.id}`, { as: 'ada@example.com' })).data.digest).toEqual({ available: false, email: false });
     // No cron secret: no cron route.
@@ -576,6 +575,8 @@ describe('shipcue Cloud: the activity digest (shipcue report 5f4d339b)', () => {
     await file(b.project.publicKey, 'Beta search is slow');
     await file(off.publicKey, 'Never digested');
     slackPosts.length = 0;
+    // See "retries a failed send": past the millisecond the last report was filed in.
+    await new Promise((r) => setTimeout(r, 5));
 
     const { sent, results } = await (await cron()).json();
     expect(sent).toBe(2);
@@ -612,6 +613,9 @@ describe('shipcue Cloud: the activity digest (shipcue report 5f4d339b)', () => {
 
     await db.query(`UPDATE cloud_projects SET digest_sent_at = NULL WHERE id = $1`, [p.id]);
     await file(p.publicKey, 'Something broke');
+    // Postgres keeps microseconds and the cron's clock milliseconds: filed in the same millisecond as the
+    // run, the report would fall just after its period (and into the next one), not into this one.
+    await new Promise((r) => setTimeout(r, 5));
     globalThis.fetch = (async () => new Response('nope', { status: 500 })) as typeof fetch;
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect((await (await cron()).json()).results).toEqual([{ project: p.id, sent: false, reason: 'failed' }]);
@@ -629,7 +633,7 @@ describe('shipcue Cloud: the activity digest (shipcue report 5f4d339b)', () => {
       calls.push({ url, init });
       return new Response('{}');
     });
-    await send({ to: 'a@example.com', subject: 's', html: '<p>h</p>', text: 'h' });
+    await send!({ to: 'a@example.com', subject: 's', html: '<p>h</p>', text: 'h' });
     expect(calls[0]!.url).toBe('https://auth.example.com/api/email/send-raw');
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ to: 'a@example.com', subject: 's', html: '<p>h</p>', from: 'shipcue' });
   });

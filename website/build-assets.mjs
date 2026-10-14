@@ -20,7 +20,8 @@ await build({
 await build({
   entryPoints: ['website/_src/api.mjs'],
   outfile: 'website/api/shipcue.mjs',
-  bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg'],
+  // The admin page's script is only loaded with `page`, which the site does not use (it serves /app/ itself).
+  bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg', 'virtual:shipcue-admin-ui'],
   define: { __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 await build({
@@ -30,22 +31,9 @@ await build({
   define: { __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 await build({
-  entryPoints: ['website/_src/app.jsx'],
-  outfile: 'website/assets/shipcue-app.js',
-  bundle: true, minify: true, format: 'iife', target: 'es2020', jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': '"production"', __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
-});
-await build({
   entryPoints: ['website/_src/mine.jsx'],
   outfile: 'website/assets/shipcue-mine.js',
   bundle: true, minify: true, format: 'iife', target: 'es2020', jsx: 'automatic',
   define: { 'process.env.NODE_ENV': '"production"' },
-});
-await build({
-  entryPoints: ['website/_src/cloud-api.mjs'],
-  outfile: 'website/api/cloud.mjs',
-  // @vercel/functions stays a real dependency (website/package.json) so waitUntil finds Vercel's request context.
-  bundle: true, platform: 'node', format: 'esm', target: 'node20', external: ['pg', '@vercel/functions', 'stripe'],
-  define: { __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
 });
 console.log('assets built');

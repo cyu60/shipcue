@@ -309,7 +309,7 @@ describe('ReportButton: watermark', () => {
   it('asks people to star shipcue on GitHub, in a new tab', async () => {
     await openPanel();
     const link = screen.getByRole('link', { name: /star shipcue on github/i });
-    expect(link).toHaveAttribute('href', 'https://github.com/cyu60/shipcue');
+    expect(link).toHaveAttribute('href', 'https://github.com/edumame/shipcue');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });

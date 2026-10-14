@@ -1,15 +1,35 @@
-// shipcue Cloud: projects, teams, invites and agents on top of the package's handler. Each project's
-// queue lives in the shared shipcue_reports table under its project_id, served at
+// The admin: projects, teams, invites and agents on top of the package's handler (what shipcue Cloud
+// runs). Each project's queue lives in the shared shipcue_reports table under its project_id, served at
 // {base}/p/<public key>/... with the same routes as a self-hosted handler (button, agent API, team API).
-// Sign-in is InsForge auth on shipcue's project, kept server-side in httpOnly cookies.
+// Who is signed in comes from the app (getUser), or from an AdminAuth (insforgeAuth on Cloud) whose
+// tokens it keeps in httpOnly cookies. With `page` it serves the admin page too, so one route is the
+// whole admin. Needs sql/schema.sql and sql/cloud.sql.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { DIGEST_PERIOD_MS, EVENT_TYPES, broadcast, createShipcueHandler, digest, emailDigest, postgresStore, slack, slackDigest, webhook } from '../../src/server';
-import { SHIPCUE_VERSION, compareVersions, parseVersion, resolveConfig } from '../../src/core';
-import { triageReport } from './hosted.mjs';
-import { createBilling } from './billing.mjs';
+import {
+  DIGEST_PERIOD_MS,
+  EVENT_TYPES,
+  broadcast,
+  createShipcueHandler,
+  digest,
+  emailDigest,
+  postgresStore,
+  slack,
+  slackDigest,
+  webhook,
+  type Broadcaster,
+  type DigestPeriod,
+  type DigestSender,
+  type EmailMessage,
+  type Queryable,
+  type ReportStore,
+  type ShipcueEventType,
+} from '../server';
+import { SHIPCUE_VERSION, compareVersions, parseVersion, resolveConfig, type Area, type Claimant, type ReportType, type ShipcueConfig } from '../core';
+import { triageReport, type FetchLike, type HostedOptions } from './hosted';
 
-const ROLES = ['owner', 'member', 'viewer'];
-const TYPES = ['bug', 'feature', 'task'];
+type Role = 'owner' | 'member' | 'viewer';
+const ROLES: Role[] = ['owner', 'member', 'viewer'];
+const TYPES: ReportType[] = ['bug', 'feature', 'task'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ORIGIN = /^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/i;
 const AGENT_NAME = /^[a-z0-9][a-z0-9._@-]{0,59}$/;
@@ -25,18 +45,184 @@ const MAX_REPORTER = 200;
 // The hosted agent's name in the CueLog (shipcue report 3d2dded6); no one else's agent can take it.
 const HOSTED_NAME = 'shipcue-agent';
 
-const json = (body, status = 200, headers = {}) =>
+/** A signed-in admin user. */
+export interface AdminUser {
+  /** A uuid. getUser may give any stable id; one that is not a uuid is turned into one. */
+  id: string;
+  email: string;
+  /** Shown in the team list; the part of the email before the @ when left out. */
+  name?: string;
+}
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken?: string;
+  user?: AdminUser;
+}
+
+/**
+ * Sign-in for the admin. insforgeAuth is one. Only current and refresh are needed to read a session;
+ * each of the others turns on its {base}/auth route, which answers 404 without it.
+ */
+export interface AdminAuth {
+  current(accessToken: string): Promise<AdminUser | null>;
+  refresh(refreshToken: string): Promise<AuthTokens | null>;
+  signUp?(email: string, password: string): Promise<{ tokens: AuthTokens | null; needsVerification: boolean }>;
+  verify?(email: string, otp: string): Promise<AuthTokens | null>;
+  resend?(email: string): Promise<void>;
+  signIn?(email: string, password: string): Promise<AuthTokens | null>;
+  /** The provider's sign-in page for a PKCE challenge (Continue with Google or GitHub). Needs exchange too. */
+  oauthUrl?(provider: string, redirectUri: string, codeChallenge: string): Promise<string>;
+  exchange?(code: string, codeVerifier: string): Promise<AuthTokens | null>;
+  /** Emails a code for setting a new password (Forgot password). Needs resetPassword too. */
+  sendReset?(email: string): Promise<void>;
+  /** Sets a new password with that code, and signs in with it. */
+  resetPassword?(email: string, code: string, password: string): Promise<AuthTokens | null>;
+}
+
+export interface AdminHandlerOptions {
+  db: Queryable;
+  /**
+   * The app's signed-in user from the request (its session cookie, a header from your proxy), or null.
+   * Use this or `auth`: with it the admin has no sign-in of its own.
+   */
+  getUser?: (req: Request) => AdminUser | null | Promise<AdminUser | null>;
+  /** With getUser: where the page sends someone who is signed out. */
+  signInUrl?: string;
+  /** The admin's own sign-in (insforgeAuth on Cloud), kept in cookies. Use this or `getUser`. */
+  auth?: AdminAuth;
+  /** Serve the admin page at {base}/ (its script at {base}/app.js). Off by default. */
+  page?: boolean;
+  /** Where the handler is mounted. Default /api/cloud. */
+  base?: string;
+  /** Emails that may create projects (shipcue Cloud's invite-only beta). Everyone else joins by invite. */
+  beta?: string[];
+  /** Anyone signed in may create projects, not just `beta` and existing owners. Off by default. */
+  openSignup?: boolean;
+  /** Secure cookies; turn off only for plain http on localhost. Default true. */
+  secureCookies?: boolean;
+  refreshDays?: number;
+  /** The session cookies' Path. Default /api, so an app's own report button sees who is signed in too. */
+  cookiePath?: string;
+  /** Where Continue with Google lands, signed in or with ?error=. Default /app/. */
+  appPath?: string;
+  /** The hosted agent's OpenAI settings (hostedFromEnv), or null to leave it off on this server. */
+  hosted?: HostedOptions | null;
+  /** Keeps work running after the response (Vercel: waitUntil); by default it just runs. */
+  background?: (work: Promise<unknown>) => void;
+  /** Turns on GET|POST {base}/digest for a cron (Authorization: Bearer <cronSecret>), which sends due digests. */
+  cronSecret?: string;
+  /** Sends one email, for digests to the owner's email; null leaves email off. */
+  sendEmail?: ((m: EmailMessage) => Promise<void>) | null;
+  /** The newest shipcue, which apps are compared to in All projects. Default: this build's SHIPCUE_VERSION. */
+  latestVersion?: string;
+  /** How All projects reads each app's /capabilities (defaults: fetch, 2500 ms, 5 minutes). */
+  fetch?: FetchLike;
+  versionTimeoutMs?: number;
+  versionCacheMs?: number;
+  /**
+   * How many tries each kind of request gets per window, as [count, seconds], kept in cloud_rate_limits:
+   * auth (sign-in, sign-up, codes, per IP), forgot (reset emails, per address), project (made, per user),
+   * invite (sent, per user), file (reports filed, per IP per project). false turns them off.
+   */
+  rateLimits?: false | Partial<Record<LimitName, [number, number]>>;
+  /** Who is asking, for the per-IP limits. Default: the first x-forwarded-for address, or x-real-ip. */
+  clientIp?: (req: Request) => string | null;
+  /**
+   * Plans and limits (shipcue Cloud's billing plugs in here), made with the handler's query and JSON
+   * helpers. Every part is optional; without it nothing is limited.
+   */
+  plans?: (tools: AdminPlanTools) => AdminPlans;
+  /** The session cookies' Domain, e.g. "shipcue.ai" so www.shipcue.ai's own button sees who is signed in to cloud.shipcue.ai. */
+  cookieDomain?: string;
+  /** The page's title, with `page`. Default "shipcue admin". */
+  pageTitle?: string;
+  /** Upload a screenshot filed to a project (key: "<project id>/<batch>/<n>.<ext>") and return its URL. Without it, screenshots are kept in Postgres. */
+  saveScreenshot?: (file: File, key: string) => Promise<string>;
+}
+
+export interface AdminPlanTools {
+  q: <T = Record<string, unknown>>(text: string, params?: unknown[]) => Promise<T[]>;
+  json: (body: unknown, status?: number, headers?: Record<string, string>) => Response;
+  fail: (error: string, status?: number) => Response;
+  /** Where the admin page is, e.g. for Checkout to come back to. */
+  appPath: string;
+}
+
+/** What a plan limits when something is added. `account` is the user who created the project. */
+export type PlanThing = 'projects' | 'people' | 'agentTokens';
+
+export interface AdminPlans {
+  /** For /me, so the page shows its Plan section; null hides it. */
+  status?(): { enabled: boolean; enforced: boolean } | null;
+  /** Null to go ahead, or a Response (a 402) refusing one more. For people, the email being added. */
+  check?(account: string, thing: PlanThing, email?: string): Promise<Response | null>;
+  /** The hosted agent's cap over the account's projects; null for the server's own cap per project. */
+  triageLimit?(account: string): Promise<{ dailyLimit: number; usedToday: () => Promise<number>; note?: string } | null>;
+  /** {base}/billing/...: Checkout, the portal, a payment webhook. Null falls through. */
+  routes?(req: Request, rest: string[], signedIn: () => Promise<{ user: AdminUser; set: string[] } | null>): Promise<Response | null>;
+}
+
+export type LimitName = 'auth' | 'forgot' | 'project' | 'invite' | 'file';
+const LIMITS: Record<LimitName, [number, number]> = { auth: [30, 600], forgot: [5, 3600], project: [20, 3600], invite: [50, 3600], file: [30, 600] };
+
+interface ProjectRow {
+  id: string;
+  name: string;
+  created_by: string;
+  public_key: string;
+  allowed_origins: string[];
+  lease_seconds: number | null;
+  stale_days: number;
+  agent_pull: boolean;
+  areas: Area[] | unknown;
+  public_board: boolean;
+  slack_webhook_url: string | null;
+  webhook_url: string | null;
+  webhook_secret: string | null;
+  notify_events: ShipcueEventType[] | null;
+  hosted_agent: boolean | null;
+  hosted_auto_triage: boolean | null;
+  digest_every: string | null;
+  digest_to: string | null;
+  digest_sent_at: string | Date | null;
+  github_secret: string | null;
+  app_url: string | null;
+  created_at: string | Date;
+}
+
+interface MemberRow {
+  id: string;
+  project_id: string;
+  user_id: string;
+  email: string;
+  name: string;
+  role: Role;
+}
+
+type Body = Record<string, unknown>;
+
+const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
-const fail = (error, status = 400) => json({ error }, status);
-const sha256 = (t) => createHash('sha256').update(t).digest('hex');
-const reporterFrom = (req) => {
+const fail = (error: string, status = 400) => json({ error }, status);
+const sha256 = (t: string) => createHash('sha256').update(t).digest('hex');
+const reporterFrom = (req: Request) => {
   const raw = (req.headers.get(REPORTER_HEADER) ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
   return raw ? raw.slice(0, MAX_REPORTER) : null;
 };
-const nameFromEmail = (email) => email.split('@')[0].slice(0, 80) || email.slice(0, 80);
+const nameFromEmail = (email: string) => (email.split('@')[0] ?? '').slice(0, 80) || email.slice(0, 80);
+/** A uuid for an app's own user id (an email, a number): the same one every time. */
+const asUuid = (id: string) => {
+  if (UUID.test(id)) return id;
+  const h = createHash('sha256').update(`shipcue-user:${id}`).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+};
+const nameOf = (user: AdminUser) => user.name?.trim().slice(0, 80) || nameFromEmail(user.email);
+const escapeHtml = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const errorOf = (err: unknown) => (err instanceof Error ? err : new Error(String(err))) as Error & { status?: number };
 
-function cookies(req) {
-  const out = {};
+function cookies(req: Request): Record<string, string> {
+  const out: Record<string, string> = {};
   for (const part of (req.headers.get('cookie') ?? '').split(';')) {
     const i = part.indexOf('=');
     if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
@@ -44,64 +230,27 @@ function cookies(req) {
   return out;
 }
 
-async function body(req) {
+async function body(req: Request): Promise<Body> {
   try {
     const b = await req.json();
-    return b && typeof b === 'object' ? b : {};
+    return b && typeof b === 'object' ? (b as Body) : {};
   } catch {
     return {};
   }
 }
 
-/** InsForge auth over REST, as a server client (tokens come back in the body, not cookies). */
-export function insforgeAuth(baseUrl, fetchImpl = fetch) {
-  const call = async (path, payload, token) => {
-    const res = await fetchImpl(`${baseUrl}${path}`, {
-      method: payload ? 'POST' : 'GET',
-      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: payload ? JSON.stringify(payload) : undefined,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(data.message ?? data.error ?? `Sign-in service said ${res.status}`), { status: res.status });
-    return data;
-  };
-  const tokens = (d) => (d.accessToken ? { accessToken: d.accessToken, refreshToken: d.refreshToken, user: d.user } : null);
-  return {
-    async signUp(email, password) {
-      const d = await call('/api/auth/users?client_type=server', { email, password });
-      return { tokens: tokens(d), needsVerification: !d.accessToken };
-    },
-    async verify(email, otp) {
-      return tokens(await call('/api/auth/email/verify?client_type=server', { email, otp }));
-    },
-    async resend(email) {
-      await call('/api/auth/email/send-verification', { email });
-    },
-    async signIn(email, password) {
-      return tokens(await call('/api/auth/sessions?client_type=server', { email, password }));
-    },
-    async current(accessToken) {
-      const d = await call('/api/auth/sessions/current', null, accessToken);
-      return d.user ? { id: d.user.id, email: d.user.email } : null;
-    },
-    async refresh(refreshToken) {
-      return tokens(await call('/api/auth/refresh?client_type=server', { refreshToken }));
-    },
-    /** The provider's sign-in page (Google, GitHub) for a PKCE challenge; it comes back to redirectUri with ?insforge_code. */
-    async oauthUrl(provider, redirectUri, codeChallenge) {
-      const qs = new URLSearchParams({ redirect_uri: redirectUri, code_challenge: codeChallenge });
-      const d = await call(`/api/auth/oauth/${encodeURIComponent(provider)}?${qs}`);
-      if (typeof d.authUrl !== 'string' || !d.authUrl.startsWith('https://')) throw new Error('The sign-in service gave no sign-in page.');
-      return d.authUrl;
-    },
-    async exchange(code, codeVerifier) {
-      return tokens(await call('/api/auth/oauth/exchange?client_type=server', { code, code_verifier: codeVerifier }));
-    },
-  };
+/** The email an invite sends: who, which project, and where to sign up with this address. */
+export function inviteEmail(o: { to: string; from: string; project: string; role: Role; link: string }): EmailMessage {
+  const as = o.role === 'viewer' ? 'see its queue' : 'work its queue';
+  const text = `${o.from} invited you to ${o.project} on shipcue, to ${as} with the team.\n\nSign up or sign in with ${o.to} and you will land in the project:\n${o.link}\n`;
+  const e = escapeHtml;
+  const html = `<p>${e(o.from)} invited you to <strong>${e(o.project)}</strong> on shipcue, to ${as} with the team.</p>
+<p><a href="${e(o.link)}">Sign up or sign in</a> with ${e(o.to)} and you will land in the project.</p>`;
+  return { to: o.to, subject: `${o.from} invited you to ${o.project} on shipcue`, html, text };
 }
 
-/** The signed-in Cloud user from the request's cookies, or null. Refreshes without saving: for read-only callers. */
-export async function cloudUserFrom(req, auth) {
+/** The signed-in admin user from the request's cookies, or null. Refreshes without saving: for read-only callers. */
+export async function adminUserFrom(req: Request, auth: AdminAuth): Promise<AdminUser | null> {
   const c = cookies(req);
   if (c[ACCESS_COOKIE]) {
     try {
@@ -122,26 +271,13 @@ export async function cloudUserFrom(req, auth) {
   return null;
 }
 
-/** Sends one email with InsForge's emails on shipcue's project; null without a key. */
-export function insforgeEmail(baseUrl, apiKey, fetchImpl = fetch) {
-  if (!apiKey) return null;
-  return async (m) => {
-    const res = await fetchImpl(`${baseUrl}/api/email/send-raw`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ to: m.to, subject: m.subject, html: m.html, from: 'shipcue' }),
-    });
-    if (!res.ok) throw new Error(`email: ${res.status} ${(await res.text()).slice(0, 200)}`);
-  };
-}
-
 /**
  * An app's shipcue endpoint for the All projects view (shipcue report e4e1a85e): https, no credentials,
  * no trailing slash. Null when empty; undefined when it is not one.
  */
-export function cleanAppUrl(v) {
+export function cleanAppUrl(v: unknown): string | null | undefined {
   if (v === null || v === undefined || String(v).trim() === '') return null;
-  let url;
+  let url: URL;
   try {
     url = new URL(String(v).trim());
   } catch {
@@ -157,26 +293,26 @@ export function cleanAppUrl(v) {
  * briefly, so the All projects view never waits long or asks every app on every load. Null when the app
  * is slow, down, older than the version field, or says something that is not a version.
  */
-export function appVersions({ fetchImpl = fetch, timeoutMs = 2500, cacheMs = 5 * 60_000 } = {}) {
-  const cache = new Map();
-  async function fetchOne(appUrl) {
+export function appVersions({ fetchImpl = fetch, timeoutMs = 2500, cacheMs = 5 * 60_000 }: { fetchImpl?: FetchLike; timeoutMs?: number; cacheMs?: number } = {}) {
+  const cache = new Map<string, { at: number; version: string | null }>();
+  async function fetchOne(appUrl: string): Promise<string | null> {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
       const res = await Promise.race([
         fetchImpl(`${appUrl}/capabilities`, { signal: ctl.signal, redirect: 'error', headers: { accept: 'application/json', 'user-agent': 'shipcue-cloud' } }),
-        new Promise((_, reject) => ctl.signal.addEventListener('abort', () => reject(new Error('timeout')))),
+        new Promise<never>((_, reject) => ctl.signal.addEventListener('abort', () => reject(new Error('timeout')))),
       ]);
       if (!res.ok) return null;
-      const caps = await res.json();
-      return parseVersion(caps?.version) ? String(caps.version).trim().replace(/^v/, '') : null;
+      const caps = (await res.json()) as { version?: unknown } | null;
+      return parseVersion(caps?.version) ? String(caps!.version).trim().replace(/^v/, '') : null;
     } catch {
       return null;
     } finally {
       clearTimeout(timer);
     }
   }
-  return async function versionOf(appUrl) {
+  return async function versionOf(appUrl: string): Promise<string | null> {
     const hit = cache.get(appUrl);
     if (hit && Date.now() - hit.at < cacheMs) return hit.version;
     const version = await fetchOne(appUrl);
@@ -195,53 +331,44 @@ const DIGEST_EARLY_SHARE = 0.1;
  * end of the last one sent, or one period back when none was sent lately (so turning it on, or a long
  * gap, never digests weeks of history).
  */
-export function digestDue(p, now = new Date()) {
-  const period = DIGEST_PERIOD_MS[p?.digest_every];
-  if (!period) return null;
+export function digestDue(
+  p: { digest_every?: string | null; digest_sent_at?: string | Date | null } | null | undefined,
+  now = new Date(),
+): { since: Date; until: Date } | null {
+  const period = p?.digest_every ? DIGEST_PERIOD_MS[p.digest_every as DigestPeriod] : undefined;
+  if (!p || !period) return null;
   const last = p.digest_sent_at ? new Date(p.digest_sent_at).getTime() : null;
   const gap = last === null ? Infinity : now.getTime() - last;
   if (gap < period * (1 - DIGEST_EARLY_SHARE)) return null;
-  return { since: new Date(gap <= 2 * period ? last : now.getTime() - period), until: now };
+  return { since: new Date(gap <= 2 * period ? last! : now.getTime() - period), until: now };
 }
 
-/**
- * @param {{ db: { query(text: string, params?: unknown[]): Promise<{ rows: any[] }> }, auth: ReturnType<typeof insforgeAuth>,
- *   base?: string, beta?: string[], secureCookies?: boolean, refreshDays?: number, cookiePath?: string, appPath?: string }} opts
- *   appPath: where Continue with Google lands, signed in or with ?error= (default /app/).
- *   beta: emails that may create projects during the invite-only beta. Everyone else joins by invite.
- *   hosted: the hosted agent's OpenAI settings (hostedFromEnv in hosted.mjs), or null to leave it off on this server.
- *   background: keeps work running after the response (Vercel: waitUntil); by default it just runs.
- *   cronSecret: turns on GET|POST {base}/digest for a cron (Authorization: Bearer <cronSecret>), which sends due digests.
- *   sendEmail: sends one email ({ to, subject, html, text }), for digests to the owner's email; null leaves email off.
- *   latestVersion: the newest shipcue, which apps are compared to in All projects (default: this build's SHIPCUE_VERSION).
- *   fetch, versionTimeoutMs, versionCacheMs: how All projects reads each app's /capabilities (defaults: fetch, 2500, 5 minutes).
- *   billing: plans, limits and Stripe Checkout (billingFromEnv in billing.mjs); null or absent leaves all of it off.
- *   now: the clock billing reads (default: new Date()).
- */
-export function createCloudHandler(opts) {
-  const { db, auth } = opts;
+export function createAdminHandler(opts: AdminHandlerOptions): (req: Request) => Promise<Response> {
+  const { db, auth, getUser } = opts;
+  if (!auth === !getUser) throw new Error('createAdminHandler: pass getUser (your app\'s user) or auth (its own sign-in), not both.');
   const hosted = opts.hosted ?? null;
   const background =
     opts.background ??
-    ((work) => {
+    ((work: Promise<unknown>) => {
       void work;
     });
   const base = (opts.base ?? '/api/cloud').replace(/\/$/, '');
   const beta = new Set((opts.beta ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean));
   const secure = opts.secureCookies !== false;
   const refreshDays = opts.refreshDays ?? 30;
-  const q = async (text, params = []) => (await db.query(text, params)).rows;
+  const q = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await db.query(text, params)).rows as T[];
   const sendEmail = opts.sendEmail ?? null;
   const latestVersion = opts.latestVersion ?? SHIPCUE_VERSION;
   const versionOf = appVersions({ fetchImpl: opts.fetch, timeoutMs: opts.versionTimeoutMs, cacheMs: opts.versionCacheMs });
 
   // Path /api: the site's own report button (/api/shipcue) knows who is signed in too.
   const cookiePath = opts.cookiePath ?? '/api';
-  const cookie = (name, value, maxAge) =>
-    `${name}=${encodeURIComponent(value)}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
-  const sessionCookies = (t) => [cookie(ACCESS_COOKIE, t.accessToken, 60 * 60 * 24), cookie(REFRESH_COOKIE, t.refreshToken ?? '', 60 * 60 * 24 * refreshDays)];
+  const domain = opts.cookieDomain ? `; Domain=${opts.cookieDomain}` : '';
+  const cookie = (name: string, value: string, maxAge: number) =>
+    `${name}=${encodeURIComponent(value)}; Path=${cookiePath}${domain}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+  const sessionCookies = (t: AuthTokens) => [cookie(ACCESS_COOKIE, t.accessToken, 60 * 60 * 24), cookie(REFRESH_COOKIE, t.refreshToken ?? '', 60 * 60 * 24 * refreshDays)];
   const clearCookies = () => [cookie(ACCESS_COOKIE, '', 0), cookie(REFRESH_COOKIE, '', 0)];
-  const withCookies = (res, set) => {
+  const withCookies = (res: Response, set: string[] | undefined) => {
     if (!set?.length) return res;
     const headers = new Headers(res.headers);
     for (const c of set) headers.append('set-cookie', c);
@@ -249,11 +376,17 @@ export function createCloudHandler(opts) {
   };
 
   /** The signed-in user, refreshing the session when the access token ran out. */
-  const sessions = new WeakMap();
-  function session(req) {
+  type Session = { user: AdminUser; set: string[] } | null;
+  const sessions = new WeakMap<Request, Promise<Session>>();
+  function session(req: Request): Promise<Session> {
     let s = sessions.get(req);
     if (!s) {
-      s = (async () => {
+      s = (async (): Promise<Session> => {
+        if (getUser) {
+          const user = await getUser(req);
+          return user?.id && user.email ? { user: { id: asUuid(String(user.id)), email: user.email, ...(user.name ? { name: user.name } : {}) }, set: [] } : null;
+        }
+        if (!auth) return null;
         const c = cookies(req);
         if (c[ACCESS_COOKIE]) {
           try {
@@ -281,14 +414,37 @@ export function createCloudHandler(opts) {
     return s;
   }
 
-  /** Cookie-authenticated writes must be JSON, which a cross-site form cannot send. */
-  const jsonWrite = (req) => req.method !== 'POST' || (req.headers.get('content-type') ?? '').startsWith('application/json');
+  const clientIp =
+    opts.clientIp ??
+    ((req: Request) => req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip')?.trim() || null);
+  let limitsMissing = false;
+  /** A 429 when `who` has used up this kind of request for the window; null to go ahead (and when it cannot tell). */
+  async function limited(name: LimitName, who: string | null): Promise<Response | null> {
+    if (opts.rateLimits === false || !who || limitsMissing) return null;
+    const [max, secs] = opts.rateLimits?.[name] ?? LIMITS[name];
+    try {
+      const [row] = await q<{ n: number }>(
+        `INSERT INTO cloud_rate_limits (key, window_start, n) VALUES ($1, to_timestamp(floor(extract(epoch FROM now()) / $2::int) * $2::int), 1)
+         ON CONFLICT (key, window_start) DO UPDATE SET n = cloud_rate_limits.n + 1 RETURNING n`,
+        [`${name}:${who}`.slice(0, 400), secs],
+      );
+      if (Math.random() < 0.02) void q(`DELETE FROM cloud_rate_limits WHERE window_start < now() - interval '1 day'`).catch(() => undefined);
+      return row && row.n > max ? json({ error: 'Too many tries. Wait a few minutes and try again.' }, 429, { 'retry-after': String(secs) }) : null;
+    } catch (err) {
+      // No table (sql/cloud.sql not run again yet): no limits, rather than no admin.
+      if ((err as { code?: string }).code === '42P01') limitsMissing = true;
+      console.error(`shipcue admin: rate limit not checked${limitsMissing ? ' (run sql/cloud.sql for cloud_rate_limits)' : ''}:`, errorOf(err).message);
+      return null;
+    }
+  }
 
-  const memberOf = async (projectId, userId) =>
-    (await q(`SELECT id, project_id, user_id, email, name, role FROM cloud_members WHERE project_id = $1 AND user_id = $2 AND NOT is_deleted`, [projectId, userId]))[0] ?? null;
-  const projectRow = async (id) =>
-    (await q(`SELECT * FROM cloud_projects WHERE id = $1 AND NOT is_deleted`, [id]))[0] ?? null;
-  const publicProject = (p) => ({
+  /** Cookie-authenticated writes must be JSON, which a cross-site form cannot send. */
+  const jsonWrite = (req: Request) => req.method !== 'POST' || (req.headers.get('content-type') ?? '').startsWith('application/json');
+
+  const memberOf = async (projectId: string, userId: string) =>
+    (await q<MemberRow>(`SELECT id, project_id, user_id, email, name, role FROM cloud_members WHERE project_id = $1 AND user_id = $2 AND NOT is_deleted`, [projectId, userId]))[0] ?? null;
+  const projectRow = async (id: string) => (await q<ProjectRow>(`SELECT * FROM cloud_projects WHERE id = $1 AND NOT is_deleted`, [id]))[0] ?? null;
+  const publicProject = (p: ProjectRow) => ({
     id: p.id,
     name: p.name,
     publicKey: p.public_key,
@@ -314,8 +470,8 @@ export function createCloudHandler(opts) {
   });
 
   /** Joins every open invite for this email. */
-  async function acceptInvites(user) {
-    const invites = await q(
+  async function acceptInvites(user: AdminUser) {
+    const invites = await q<{ id: string; project_id: string; role: Role }>(
       `SELECT i.id, i.project_id, i.role FROM cloud_invites i JOIN cloud_projects p ON p.id = i.project_id AND NOT p.is_deleted
         WHERE lower(i.email) = lower($1) AND i.accepted_at IS NULL AND i.revoked_at IS NULL`,
       [user.email],
@@ -326,7 +482,7 @@ export function createCloudHandler(opts) {
           inv.project_id,
           user.id,
           user.email,
-          nameFromEmail(user.email),
+          nameOf(user),
           inv.role,
         ]);
       }
@@ -334,37 +490,41 @@ export function createCloudHandler(opts) {
     }
   }
 
-  async function canCreate(user) {
+  async function canCreate(user: AdminUser) {
+    if (opts.openSignup) return true;
     if (beta.has(user.email.toLowerCase())) return true;
     // Anyone who already owns a project may make another.
     return (await q(`SELECT 1 FROM cloud_members WHERE user_id = $1 AND role = 'owner' AND NOT is_deleted LIMIT 1`, [user.id])).length > 0;
   }
 
   // Continue with Google (or GitHub): off to the provider with a PKCE challenge, back to /callback, then /app/.
-  const appPath = opts.appPath ?? '/app/';
-  // Plans and limits (billing.mjs): no-ops until opts.billing turns them on.
-  const billing = createBilling({ q, config: opts.billing ?? null, json, fail, appPath, now: opts.now });
-  const pkceCookie = (value, maxAge) =>
+  // Served with `page`, the page is at {base}/.
+  const appPath = opts.appPath ?? (opts.page ? `${base}/` : '/app/');
+  // Plans and limits: nothing is limited without them.
+  const plans: AdminPlans = opts.plans ? opts.plans({ q, json, fail, appPath }) : {};
+  const planCheck = (account: string, thing: PlanThing, email?: string) => (plans.check ? plans.check(account, thing, email) : Promise.resolve(null));
+  const pkceCookie = (value: string, maxAge: number) =>
     `${PKCE_COOKIE}=${encodeURIComponent(value)}; Path=${base}/auth/oauth; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
-  const redirect = (location, set = []) => {
+  const redirect = (location: string, set: string[] = []) => {
     const headers = new Headers({ location, 'cache-control': 'no-store' });
     for (const c of set) headers.append('set-cookie', c);
     return new Response(null, { status: 302, headers });
   };
-  const toApp = (req, error, set = []) => {
+  const toApp = (req: Request, error: string | null, set: string[] = []) => {
     const url = new URL(appPath, req.url);
     if (error) url.searchParams.set('error', error);
     return redirect(url.toString(), set);
   };
-  async function oauth(req, step) {
-    if (OAUTH_PROVIDERS.includes(step)) {
+  async function oauth(req: Request, step: string | undefined) {
+    if (!auth?.oauthUrl || !auth.exchange) return fail('Not found', 404);
+    if (step && OAUTH_PROVIDERS.includes(step)) {
       const verifier = randomBytes(32).toString('base64url');
       const challenge = createHash('sha256').update(verifier).digest('base64url');
       try {
         const url = await auth.oauthUrl(step, new URL(`${base}/auth/oauth/callback`, req.url).toString(), challenge);
         return redirect(url, [pkceCookie(verifier, 600)]);
       } catch (err) {
-        return toApp(req, err.message || 'Could not reach the sign-in service.');
+        return toApp(req, errorOf(err).message || 'Could not reach the sign-in service.');
       }
     }
     if (step !== 'callback') return fail('Not found', 404);
@@ -379,11 +539,16 @@ export function createCloudHandler(opts) {
       if (!t) return toApp(req, 'Could not sign in.', clear);
       return toApp(req, null, [...clear, ...sessionCookies(t)]);
     } catch (err) {
-      return toApp(req, err.message || 'Could not sign in.', clear);
+      return toApp(req, errorOf(err).message || 'Could not sign in.', clear);
     }
   }
 
-  async function authRoutes(req, action, step) {
+  async function authRoutes(req: Request, action: string | undefined, step: string | undefined) {
+    if (!auth) return fail('Not found', 404);
+    if (req.method === 'POST' && action !== 'sign-out') {
+      const over = await limited('auth', clientIp(req));
+      if (over) return over;
+    }
     if (action === 'oauth' && req.method === 'GET') return oauth(req, step);
     if (req.method !== 'POST') return fail('Not found', 404);
     const b = await body(req);
@@ -391,45 +556,63 @@ export function createCloudHandler(opts) {
     try {
       if (action === 'sign-out') return withCookies(json({ ok: true }), clearCookies());
       if (!EMAIL.test(email)) return fail('Enter your email.');
-      if (action === 'sign-up') {
+      if (action === 'sign-up' && auth.signUp) {
         const password = String(b.password ?? '');
         if (password.length < 8) return fail('Use at least 8 characters for the password.');
         const r = await auth.signUp(email, password);
         if (r.tokens) return withCookies(json({ user: { email } }), sessionCookies(r.tokens));
         return json({ needsVerification: true });
       }
-      if (action === 'verify') {
+      if (action === 'verify' && auth.verify) {
         const t = await auth.verify(email, String(b.otp ?? '').trim());
         return t ? withCookies(json({ user: { email } }), sessionCookies(t)) : json({ needsSignIn: true });
       }
-      if (action === 'resend') {
+      if (action === 'resend' && auth.resend) {
         await auth.resend(email);
         return json({ ok: true });
       }
-      if (action === 'sign-in') {
+      // Forgot password: always "sent", so it never says which emails have an account.
+      if (action === 'forgot' && auth.sendReset && auth.resetPassword) {
+        const over = await limited('forgot', email);
+        if (over) return over;
+        await auth.sendReset(email).catch((err) => console.error('shipcue admin: reset email failed', errorOf(err).message));
+        return json({ ok: true });
+      }
+      if (action === 'reset' && auth.resetPassword) {
+        const password = String(b.password ?? '');
+        const code = String(b.code ?? '').trim();
+        if (!code) return fail('Enter the code from the email.');
+        if (password.length < 8) return fail('Use at least 8 characters for the password.');
+        const t = await auth.resetPassword(email, code, password);
+        return t ? withCookies(json({ user: { email } }), sessionCookies(t)) : json({ needsSignIn: true });
+      }
+      if (action === 'sign-in' && auth.signIn) {
         const t = await auth.signIn(email, String(b.password ?? ''));
         if (!t) return fail('Could not sign in.', 401);
         return withCookies(json({ user: { email } }), sessionCookies(t));
       }
     } catch (err) {
-      return fail(err.message || 'Could not sign in.', err.status === 401 || err.status === 403 ? 401 : 400);
+      const e = errorOf(err);
+      return fail(e.message || 'Could not sign in.', e.status === 401 || e.status === 403 ? 401 : 400);
     }
     return fail('Not found', 404);
   }
 
-  async function me(user) {
+  async function me(user: AdminUser) {
     await acceptInvites(user);
-    const projects = await q(
+    const projects = await q<{ id: string; name: string; public_key: string; role: Role }>(
       `SELECT p.id, p.name, p.public_key, m.role FROM cloud_members m JOIN cloud_projects p ON p.id = m.project_id AND NOT p.is_deleted
         WHERE m.user_id = $1 AND NOT m.is_deleted ORDER BY p.created_at`,
       [user.id],
     );
     return json({
       user,
+      // 'app': getUser signs people in, so the page has no sign-in or sign-out of its own.
+      session: getUser ? 'app' : 'admin',
       canCreate: await canCreate(user),
       projects: projects.map((p) => ({ id: p.id, name: p.name, publicKey: p.public_key, role: p.role })),
-      // Only with Checkout on, so the dashboard shows its Plan section.
-      ...(billing.enabled ? { billing: { enabled: true, enforced: billing.isEnforced() } } : {}),
+      // Only when the plans say so, so the page shows its Plan section.
+      ...(plans.status?.()?.enabled ? { billing: plans.status()! } : {}),
     });
   }
 
@@ -439,9 +622,22 @@ export function createCloudHandler(opts) {
    * and open reports nobody has looked at (never claimed, assigned or noted). Only the user's own
    * memberships are read, so no other project ever shows.
    */
-  async function overview(user) {
+  async function overview(user: AdminUser) {
     await acceptInvites(user);
-    const rows = await q(
+    const rows = await q<{
+      id: string;
+      name: string;
+      public_key: string;
+      app_url: string | null;
+      role: Role;
+      open: number;
+      claimed: number;
+      in_review: number;
+      stuck: number;
+      unlooked: number;
+      oldest_open_at: string | Date | null;
+      unlooked_reports: string | { id: string; type: ReportType; description: string; createdAt: string }[];
+    }>(
       `WITH mine AS (
          SELECT p.id, p.name, p.public_key, p.app_url, p.created_at, m.role FROM cloud_members m
            JOIN cloud_projects p ON p.id = m.project_id AND NOT p.is_deleted
@@ -465,7 +661,7 @@ export function createCloudHandler(opts) {
         ORDER BY mine.created_at`,
       [user.id],
     );
-    const headlineOf = (text) => (String(text).trim().split('\n')[0] ?? '').slice(0, 120);
+    const headlineOf = (text: string) => (String(text).trim().split('\n')[0] ?? '').slice(0, 120);
     return json({
       latest: latestVersion,
       projects: rows.map((p) => ({
@@ -481,19 +677,21 @@ export function createCloudHandler(opts) {
         unlooked: p.unlooked,
         oldestOpenAt: p.oldest_open_at ? new Date(p.oldest_open_at).toISOString() : null,
         // The oldest few, so the view can list them; the count above is the whole number.
-        unlookedReports: (typeof p.unlooked_reports === 'string' ? JSON.parse(p.unlooked_reports) : p.unlooked_reports).slice(0, 20).map((x) => ({
-          id: x.id,
-          type: x.type,
-          headline: headlineOf(x.description),
-          createdAt: new Date(x.createdAt).toISOString(),
-        })),
+        unlookedReports: (typeof p.unlooked_reports === 'string' ? (JSON.parse(p.unlooked_reports) as Exclude<typeof p.unlooked_reports, string>) : p.unlooked_reports)
+          .slice(0, 20)
+          .map((x) => ({
+            id: x.id,
+            type: x.type,
+            headline: headlineOf(x.description),
+            createdAt: new Date(x.createdAt).toISOString(),
+          })),
       })),
     });
   }
 
   /** The version each of the user's apps runs, for projects with an app URL; asked separately so the overview never waits on it. */
-  async function overviewVersions(user) {
-    const rows = await q(
+  async function overviewVersions(user: AdminUser) {
+    const rows = await q<{ id: string; app_url: string }>(
       `SELECT p.id, p.app_url FROM cloud_members m JOIN cloud_projects p ON p.id = m.project_id AND NOT p.is_deleted
         WHERE m.user_id = $1 AND NOT m.is_deleted AND p.app_url IS NOT NULL`,
       [user.id],
@@ -502,26 +700,26 @@ export function createCloudHandler(opts) {
       rows.map(async (p) => {
         const version = await versionOf(p.app_url);
         const cmp = version ? compareVersions(version, latestVersion) : null;
-        return [p.id, { version, behind: cmp === null ? null : cmp < 0 }];
+        return [p.id, { version, behind: cmp === null ? null : cmp < 0 }] as const;
       }),
     );
     return json({ latest: latestVersion, versions: Object.fromEntries(entries) });
   }
 
-  async function projectRoutes(req, user, parts) {
+  async function projectRoutes(req: Request, user: AdminUser, parts: string[]) {
     const [id, section, subId, subAction] = parts;
     if (!id) {
       if (req.method !== 'POST') return fail('Not found', 404);
       if (!(await canCreate(user))) return fail('shipcue Cloud is invite-only for now. Ask to join the beta.', 403);
+      const over = (await limited('project', user.id)) ?? (await planCheck(user.id, 'projects'));
+      if (over) return over;
       const b = await body(req);
       const name = String(b.name ?? '').trim().slice(0, 80);
       if (!name) return fail('Name the project.');
-      const over = await billing.check(user.id, 'projects');
-      if (over) return over;
       const key = `pk_${randomBytes(12).toString('hex')}`;
-      const [p] = await q(`INSERT INTO cloud_projects (name, public_key, created_by) VALUES ($1, $2, $3) RETURNING *`, [name, key, user.id]);
-      await q(`INSERT INTO cloud_members (project_id, user_id, email, name, role) VALUES ($1, $2, $3, $4, 'owner')`, [p.id, user.id, user.email, nameFromEmail(user.email)]);
-      return json({ project: publicProject(p) }, 201);
+      const [p] = await q<ProjectRow>(`INSERT INTO cloud_projects (name, public_key, created_by) VALUES ($1, $2, $3) RETURNING *`, [name, key, user.id]);
+      await q(`INSERT INTO cloud_members (project_id, user_id, email, name, role) VALUES ($1, $2, $3, $4, 'owner')`, [p!.id, user.id, user.email, nameOf(user)]);
+      return json({ project: publicProject(p!) }, 201);
     }
     if (!UUID.test(id)) return fail('Not found', 404);
     const p = await projectRow(id);
@@ -531,9 +729,20 @@ export function createCloudHandler(opts) {
 
     if (req.method === 'GET' && !section) {
       const [members, invites, agents] = await Promise.all([
-        q(`SELECT id, user_id, email, name, role FROM cloud_members WHERE project_id = $1 AND NOT is_deleted ORDER BY created_at`, [id]),
-        owner ? q(`SELECT id, email, role, created_at FROM cloud_invites WHERE project_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL ORDER BY created_at`, [id]) : [],
-        q(`SELECT id, name, owner_user_id, owner_name, pull, types, last_seen_at, created_at FROM cloud_agents WHERE project_id = $1 AND revoked_at IS NULL AND NOT hosted ORDER BY created_at`, [id]),
+        q<{ id: string; user_id: string; email: string; name: string; role: Role }>(
+          `SELECT id, user_id, email, name, role FROM cloud_members WHERE project_id = $1 AND NOT is_deleted ORDER BY created_at`,
+          [id],
+        ),
+        owner
+          ? q<{ id: string; email: string; role: Role; created_at: string | Date }>(
+              `SELECT id, email, role, created_at FROM cloud_invites WHERE project_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL ORDER BY created_at`,
+              [id],
+            )
+          : [],
+        q<{ id: string; name: string; owner_user_id: string; owner_name: string; pull: boolean | null; types: ReportType[] | null; last_seen_at: string | Date | null }>(
+          `SELECT id, name, owner_user_id, owner_name, pull, types, last_seen_at, created_at FROM cloud_agents WHERE project_id = $1 AND revoked_at IS NULL AND NOT hosted ORDER BY created_at`,
+          [id],
+        ),
       ]);
       return json({
         project: publicProject(p),
@@ -560,8 +769,8 @@ export function createCloudHandler(opts) {
 
     if (section === 'rotate-key') {
       if (!owner) return fail('Only owners can change the key.', 403);
-      const [row] = await q(`UPDATE cloud_projects SET public_key = $2, updated_at = now() WHERE id = $1 RETURNING *`, [id, `pk_${randomBytes(12).toString('hex')}`]);
-      return json({ project: publicProject(row) });
+      const [row] = await q<ProjectRow>(`UPDATE cloud_projects SET public_key = $2, updated_at = now() WHERE id = $1 RETURNING *`, [id, `pk_${randomBytes(12).toString('hex')}`]);
+      return json({ project: publicProject(row!) });
     }
     if (section === 'delete') {
       if (!owner) return fail('Only owners can delete the project.', 403);
@@ -571,9 +780,9 @@ export function createCloudHandler(opts) {
 
     if (section === 'settings') {
       if (!owner) return fail('Only owners can change settings.', 403);
-      const sets = [];
-      const params = [id];
-      const set = (col, v) => {
+      const sets: string[] = [];
+      const params: unknown[] = [id];
+      const set = (col: string, v: unknown) => {
         params.push(v);
         sets.push(`${col} = $${params.length}`);
       };
@@ -600,7 +809,7 @@ export function createCloudHandler(opts) {
       if (b.agentPull !== undefined) set('agent_pull', b.agentPull === true);
       if (b.publicBoard !== undefined) set('public_board', b.publicBoard === true);
       if (b.areas !== undefined) {
-        const areas = Array.isArray(b.areas) ? b.areas : null;
+        const areas = Array.isArray(b.areas) ? (b.areas as { value?: unknown; label?: unknown }[]) : null;
         const ok =
           areas &&
           areas.length <= 50 &&
@@ -609,7 +818,7 @@ export function createCloudHandler(opts) {
         set('areas', JSON.stringify(areas.map((a) => ({ value: String(a.value), label: String(a.label).trim() }))));
       }
       // Forwarding (Slack, a signed webhook). A new webhook URL gets a new secret, shown once.
-      let webhookSecret = null;
+      let webhookSecret: string | null = null;
       if (b.slackWebhookUrl !== undefined) {
         const v = b.slackWebhookUrl === null || b.slackWebhookUrl === '' ? null : String(b.slackWebhookUrl).trim();
         if (v !== null && !/^https:\/\/hooks\.slack\.com\/[\w/-]+$/.test(v)) return fail('Use a Slack incoming webhook URL (https://hooks.slack.com/...).');
@@ -623,18 +832,18 @@ export function createCloudHandler(opts) {
         set('webhook_secret', webhookSecret);
       }
       // The GitHub webhook's secret (shipcue report 919f5ca2): turning it on (again) makes a new one, shown once.
-      let githubSecret = null;
+      let githubSecret: string | null = null;
       if (b.githubWebhook !== undefined) {
         githubSecret = b.githubWebhook === true ? `ghsec_${randomBytes(24).toString('hex')}` : null;
         set('github_secret', githubSecret);
       }
       if (b.notifyEvents !== undefined) {
-        const events = Array.isArray(b.notifyEvents) ? b.notifyEvents : null;
+        const events = Array.isArray(b.notifyEvents) ? (b.notifyEvents as ShipcueEventType[]) : null;
         if (!events || !events.every((e) => EVENT_TYPES.includes(e))) return fail(`Events are ${EVENT_TYPES.join(', ')}.`);
         set('notify_events', [...new Set(events)]);
       }
       // The hosted agent (shipcue report 3d2dded6): turning it on makes its agent row, off retires it.
-      let hostedOn;
+      let hostedOn: boolean | undefined;
       if (b.hostedAgent !== undefined) {
         hostedOn = b.hostedAgent === true;
         if (hostedOn && !hosted) return fail('The hosted agent is not available on this server.', 409);
@@ -646,11 +855,11 @@ export function createCloudHandler(opts) {
       if (b.hostedAutoTriage !== undefined) set('hosted_auto_triage', b.hostedAutoTriage === true);
       // The activity digest (shipcue report 5f4d339b): how often, and to Slack or the owner's email.
       if (b.digestEvery !== undefined) {
-        if (!DIGEST_EVERY.includes(b.digestEvery)) return fail('A digest goes out off, hourly or daily.');
+        if (!DIGEST_EVERY.includes(b.digestEvery as string)) return fail('A digest goes out off, hourly or daily.');
         set('digest_every', b.digestEvery);
       }
       if (b.digestTo !== undefined) {
-        if (!DIGEST_TO.includes(b.digestTo)) return fail('A digest goes to Slack or email.');
+        if (!DIGEST_TO.includes(b.digestTo as string)) return fail('A digest goes to Slack or email.');
         if (b.digestTo === 'email' && !sendEmail) return fail('Email digests are not available on this server.', 409);
         set('digest_to', b.digestTo);
       }
@@ -660,7 +869,7 @@ export function createCloudHandler(opts) {
         set('app_url', v);
       }
       if (!sets.length) return fail('Nothing to change.');
-      const [row] = await q(`UPDATE cloud_projects SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, params);
+      const [row] = await q<ProjectRow>(`UPDATE cloud_projects SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, params);
       if (hostedOn === true && !(await q(`SELECT 1 FROM cloud_agents WHERE project_id = $1 AND hosted AND revoked_at IS NULL`, [id])).length) {
         await q(
           `INSERT INTO cloud_agents (project_id, name, token_hash, owner_user_id, owner_name, pull, hosted) VALUES ($1, $2, NULL, $3, $4, false, true)`,
@@ -668,13 +877,13 @@ export function createCloudHandler(opts) {
         );
       }
       if (hostedOn === false) {
-        const gone = await q(`UPDATE cloud_agents SET revoked_at = now() WHERE project_id = $1 AND hosted AND revoked_at IS NULL RETURNING id`, [id]);
+        const gone = await q<{ id: string }>(`UPDATE cloud_agents SET revoked_at = now() WHERE project_id = $1 AND hosted AND revoked_at IS NULL RETURNING id`, [id]);
         // Reports still queued for it go back to the queue.
         const store = postgresStore(db, 'shipcue_reports', { project: id });
-        const by = { kind: 'person', id: user.id, name: m.name };
+        const by: Claimant = { kind: 'person', id: user.id, name: m.name };
         for (const a of gone) for (const r of await store.list({ claimant: a.id })) await store.release(r.id, { by });
       }
-      return json({ project: publicProject(row), ...(webhookSecret ? { webhookSecret } : {}), ...(githubSecret ? { githubSecret } : {}) });
+      return json({ project: publicProject(row!), ...(webhookSecret ? { webhookSecret } : {}), ...(githubSecret ? { githubSecret } : {}) });
     }
 
     if (section === 'invites') {
@@ -685,7 +894,7 @@ export function createCloudHandler(opts) {
         return json({ ok: true });
       }
       const email = String(b.email ?? '').trim().toLowerCase();
-      const role = ROLES.includes(b.role) ? b.role : 'member';
+      const role = ROLES.includes(b.role as Role) ? (b.role as Role) : 'member';
       if (!EMAIL.test(email)) return fail('Enter their email.');
       const existing = await q(
         `SELECT 1 FROM cloud_members WHERE project_id = $1 AND lower(email) = $2 AND NOT is_deleted UNION ALL
@@ -694,20 +903,30 @@ export function createCloudHandler(opts) {
       );
       if (existing.length) return fail('They are already on the team or invited.', 409);
       // People count against the plan of the account that created the project.
-      const over = await billing.check(p.created_by, 'people', email);
+      const over = (await limited('invite', user.id)) ?? (await planCheck(p.created_by, 'people', email));
       if (over) return over;
       const [inv] = await q(`INSERT INTO cloud_invites (project_id, email, role, invited_by) VALUES ($1, $2, $3, $4) RETURNING id, email, role`, [id, email, role, user.id]);
-      return json({ invite: inv }, 201);
+      // Tell them, when this server sends email; the invite stands either way (it is joined on sign-in).
+      let emailed = false;
+      if (sendEmail) {
+        try {
+          await sendEmail(inviteEmail({ to: email, from: m.name, project: p.name, role, link: new URL(appPath, req.url).toString() }));
+          emailed = true;
+        } catch (err) {
+          console.error('shipcue admin: invite email failed', errorOf(err).message);
+        }
+      }
+      return json({ invite: inv, emailed }, 201);
     }
 
     if (section === 'members' && subId && UUID.test(subId)) {
       if (!owner) return fail('Only owners can change the team.', 403);
-      const target = (await q(`SELECT id, role FROM cloud_members WHERE id = $1 AND project_id = $2 AND NOT is_deleted`, [subId, id]))[0];
+      const target = (await q<{ id: string; role: Role }>(`SELECT id, role FROM cloud_members WHERE id = $1 AND project_id = $2 AND NOT is_deleted`, [subId, id]))[0];
       if (!target) return fail('Not found', 404);
-      const owners = Number((await q(`SELECT count(*)::int AS n FROM cloud_members WHERE project_id = $1 AND role = 'owner' AND NOT is_deleted`, [id]))[0].n);
+      const owners = Number((await q<{ n: number }>(`SELECT count(*)::int AS n FROM cloud_members WHERE project_id = $1 AND role = 'owner' AND NOT is_deleted`, [id]))[0]!.n);
       const lastOwner = target.role === 'owner' && owners <= 1;
       if (subAction === 'role') {
-        if (!ROLES.includes(b.role)) return fail('Pick a role.');
+        if (!ROLES.includes(b.role as Role)) return fail('Pick a role.');
         if (lastOwner && b.role !== 'owner') return fail('A project needs at least one owner.', 409);
         await q(`UPDATE cloud_members SET role = $1 WHERE id = $2`, [b.role, subId]);
         return json({ ok: true });
@@ -723,7 +942,7 @@ export function createCloudHandler(opts) {
       if (m.role === 'viewer') return fail('Viewers cannot connect agents.', 403);
       if (subId && subAction === 'revoke') {
         if (!UUID.test(subId)) return fail('Not found', 404);
-        const a = (await q(`SELECT owner_user_id FROM cloud_agents WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL AND NOT hosted`, [subId, id]))[0];
+        const a = (await q<{ owner_user_id: string }>(`SELECT owner_user_id FROM cloud_agents WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL AND NOT hosted`, [subId, id]))[0];
         if (!a) return fail('Not found', 404);
         if (!owner && a.owner_user_id !== user.id) return fail('Only an owner or whoever connected it can disconnect it.', 403);
         await q(`UPDATE cloud_agents SET revoked_at = now() WHERE id = $1`, [subId]);
@@ -732,11 +951,16 @@ export function createCloudHandler(opts) {
       const name = String(b.name ?? '').trim().toLowerCase();
       if (!AGENT_NAME.test(name)) return fail('Agent names are lowercase letters, numbers and . _ @ - (up to 60).');
       if (name === HOSTED_NAME) return fail(`${HOSTED_NAME} is the hosted agent's name. Pick another.`);
-      const types = b.types == null ? null : Array.isArray(b.types) && b.types.length && b.types.every((t) => TYPES.includes(t)) ? b.types : undefined;
+      const types =
+        b.types == null
+          ? null
+          : Array.isArray(b.types) && b.types.length && b.types.every((t) => TYPES.includes(t as ReportType))
+            ? (b.types as ReportType[])
+            : undefined;
       if (types === undefined) return fail('Types are bug, feature and task.');
       const pull = b.pull === true ? true : b.pull === false ? false : null;
       if ((await q(`SELECT 1 FROM cloud_agents WHERE project_id = $1 AND name = $2 AND revoked_at IS NULL`, [id, name])).length) return fail('An agent with that name is already connected.', 409);
-      const over = await billing.check(p.created_by, 'agentTokens');
+      const over = await planCheck(p.created_by, 'agentTokens');
       if (over) return over;
       const token = `sca_${randomBytes(24).toString('hex')}`;
       const [a] = await q(
@@ -753,13 +977,13 @@ export function createCloudHandler(opts) {
    * The hosted agent as a broadcaster (shipcue report 3d2dded6): a report assigned to it, or any new one
    * with auto-triage, is triaged after the response (background), so filing and assigning never wait on OpenAI.
    */
-  async function hostedBroadcaster(p, store, config, forwarders) {
+  async function hostedBroadcaster(p: ProjectRow, store: ReportStore, config: ShipcueConfig, forwarders: Broadcaster[]): Promise<Broadcaster[]> {
     if (!hosted || !p.hosted_agent) return [];
-    const row = (await q(`SELECT id, name FROM cloud_agents WHERE project_id = $1 AND hosted AND revoked_at IS NULL`, [p.id]))[0];
+    const row = (await q<{ id: string; name: string }>(`SELECT id, name FROM cloud_agents WHERE project_id = $1 AND hosted AND revoked_at IS NULL`, [p.id]))[0];
     if (!row) return [];
-    const agent = { kind: 'agent', id: row.id, name: row.name };
-    // Once billing is enforced, the plan's triages a day over the account's projects; until then the server's cap per project.
-    const planLimit = await billing.triageLimit(p.created_by);
+    const agent = { kind: 'agent' as const, id: row.id, name: row.name };
+    // With plans, their triages a day over the account's projects; without, the server's cap per project.
+    const planLimit = plans.triageLimit ? await plans.triageLimit(p.created_by) : null;
     return [
       {
         name: 'hosted agent',
@@ -781,14 +1005,14 @@ export function createCloudHandler(opts) {
             usedToday: planLimit ? planLimit.usedToday : async () =>
               Number(
                 (
-                  await q(
+                  await q<{ n: number }>(
                     `SELECT count(*)::int AS n FROM shipcue_report_events WHERE project_id = $1 AND action = 'note' AND actor_id = $2 AND at > now() - interval '1 day'`,
                     [p.id, agent.id],
                   )
-                )[0].n,
+                )[0]!.n,
               ),
             onReleased: (r) => broadcast(forwarders, { type: 'report.released', at: new Date().toISOString(), report: r }),
-          }).catch((err) => console.error('shipcue cloud: hosted agent failed', err));
+          }).catch((err) => console.error('shipcue admin: hosted agent failed', err));
           background(work);
         },
       },
@@ -796,9 +1020,9 @@ export function createCloudHandler(opts) {
   }
 
   /** The project's own shipcue handler: the button, the agent API and the team API. */
-  async function projectQueue(req, key) {
+  async function projectQueue(req: Request, key: string) {
     if (!/^pk_[0-9a-f]{24}$/.test(key)) return fail('Not found', 404);
-    const p = (await q(`SELECT * FROM cloud_projects WHERE public_key = $1 AND NOT is_deleted`, [key]))[0];
+    const p = (await q<ProjectRow>(`SELECT * FROM cloud_projects WHERE public_key = $1 AND NOT is_deleted`, [key]))[0];
     if (!p) return fail('Not found', 404);
     const path = new URL(req.url).pathname;
     const teamPath = path.startsWith(`${base}/p/${key}/team/`);
@@ -808,20 +1032,27 @@ export function createCloudHandler(opts) {
     const origin = req.headers.get('origin');
     const filing = req.method === 'POST' && (path === `${base}/p/${key}/reports` || /^\/reports\/[^/]+\/video$/.test(path.slice(`${base}/p/${key}`.length)));
     if (filing && origin && !p.allowed_origins.includes(origin)) return fail("This site is not on the project's list of sites.", 403);
+    if (filing) {
+      const ip = clientIp(req);
+      const over = await limited('file', ip && `${p.id}:${ip}`);
+      if (over) return over;
+    }
     const s = teamPath ? await session(req) : null;
     const store = postgresStore(db, 'shipcue_reports', { project: p.id });
-    const config = resolveConfig({ areas: Array.isArray(p.areas) ? p.areas : [] });
+    const config = resolveConfig({ areas: Array.isArray(p.areas) ? (p.areas as Area[]) : [] });
     // Each project's own forwarding: a Slack channel and/or a signed webhook.
-    const forwarders = [
-      ...(p.slack_webhook_url ? [slack({ webhookUrl: p.slack_webhook_url, events: p.notify_events })] : []),
-      ...(p.webhook_url ? [webhook({ url: p.webhook_url, secret: p.webhook_secret ?? undefined, events: p.notify_events })] : []),
+    const events = p.notify_events ?? undefined;
+    const forwarders: Broadcaster[] = [
+      ...(p.slack_webhook_url ? [slack({ webhookUrl: p.slack_webhook_url, events })] : []),
+      ...(p.webhook_url ? [webhook({ url: p.webhook_url, secret: p.webhook_secret ?? undefined, events })] : []),
     ];
     const handler = createShipcueHandler({
       store,
       config,
       basePath: `${base}/p/${key}`,
       cors: p.allowed_origins,
-      // The site vouches for who is signed in there; Cloud cannot check it.
+      ...(opts.saveScreenshot ? { saveScreenshot: (file: File, k: string) => opts.saveScreenshot!(file, `${p.id}/${k}`) } : {}),
+      // The site vouches for who is signed in there; the admin cannot check it.
       getReporter: async (r) => reporterFrom(r),
       board: p.public_board,
       // The team sees every fix link on the public board, private repositories included.
@@ -835,7 +1066,7 @@ export function createCloudHandler(opts) {
       github: p.github_secret ? { secret: p.github_secret } : undefined,
       agents: async (token) => {
         const a = (
-          await q(
+          await q<{ id: string; name: string; pull: boolean | null; types: ReportType[] | null }>(
             `UPDATE cloud_agents SET last_seen_at = now() WHERE token_hash = $1 AND project_id = $2 AND revoked_at IS NULL AND NOT hosted RETURNING id, name, pull, types`,
             [sha256(token), p.id],
           )
@@ -850,10 +1081,13 @@ export function createCloudHandler(opts) {
         },
         claimants: async () => {
           const [members, agents] = await Promise.all([
-            q(`SELECT user_id, name FROM cloud_members WHERE project_id = $1 AND NOT is_deleted AND role <> 'viewer' ORDER BY name`, [p.id]),
-            q(`SELECT id, name FROM cloud_agents WHERE project_id = $1 AND revoked_at IS NULL ORDER BY name`, [p.id]),
+            q<{ user_id: string; name: string }>(`SELECT user_id, name FROM cloud_members WHERE project_id = $1 AND NOT is_deleted AND role <> 'viewer' ORDER BY name`, [p.id]),
+            q<{ id: string; name: string }>(`SELECT id, name FROM cloud_agents WHERE project_id = $1 AND revoked_at IS NULL ORDER BY name`, [p.id]),
           ]);
-          return [...members.map((m) => ({ kind: 'person', id: m.user_id, name: m.name })), ...agents.map((a) => ({ kind: 'agent', id: a.id, name: a.name }))];
+          return [
+            ...members.map((m): Claimant => ({ kind: 'person', id: m.user_id, name: m.name })),
+            ...agents.map((a): Claimant => ({ kind: 'agent', id: a.id, name: a.name })),
+          ];
         },
       },
     });
@@ -861,10 +1095,10 @@ export function createCloudHandler(opts) {
   }
 
   /** Where a project's digest goes: its Slack channel, or its first owner's email. Null when that is not set up. */
-  async function digestSender(p) {
+  async function digestSender(p: ProjectRow): Promise<DigestSender | null> {
     if (p.digest_to === 'email') {
       if (!sendEmail) return null;
-      const owner = (await q(`SELECT email FROM cloud_members WHERE project_id = $1 AND role = 'owner' AND NOT is_deleted ORDER BY created_at LIMIT 1`, [p.id]))[0];
+      const owner = (await q<{ email: string }>(`SELECT email FROM cloud_members WHERE project_id = $1 AND role = 'owner' AND NOT is_deleted ORDER BY created_at LIMIT 1`, [p.id]))[0];
       return owner ? emailDigest({ to: owner.email, send: sendEmail }) : null;
     }
     return p.slack_webhook_url ? slackDigest({ webhookUrl: p.slack_webhook_url }) : null;
@@ -875,18 +1109,22 @@ export function createCloudHandler(opts) {
    * sent. A period is taken before it is sent, so two runs at once never send it twice; a failed send
    * gives it back for the next run.
    */
-  async function runDigests(req) {
+  async function runDigests(req: Request) {
     if (!opts.cronSecret) return fail('Not found', 404);
     const given = Buffer.from(req.headers.get('authorization') ?? '');
     const expected = Buffer.from(`Bearer ${opts.cronSecret}`);
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return fail('Unauthorized', 401);
     const now = new Date();
     const link = new URL(appPath, req.url).toString();
-    const results = [];
-    for (const p of await q(`SELECT * FROM cloud_projects WHERE digest_every <> 'off' AND NOT is_deleted ORDER BY digest_sent_at NULLS FIRST`)) {
+    const results: { project: string; sent: boolean; reason?: string }[] = [];
+    for (const p of await q<ProjectRow>(`SELECT * FROM cloud_projects WHERE digest_every <> 'off' AND NOT is_deleted ORDER BY digest_sent_at NULLS FIRST`)) {
       const due = digestDue(p, now);
       if (!due) continue;
-      const taken = await q(`UPDATE cloud_projects SET digest_sent_at = $2 WHERE id = $1 AND digest_sent_at IS NOT DISTINCT FROM $3::timestamptz RETURNING id`, [p.id, due.until, p.digest_sent_at ?? null]);
+      const taken = await q(`UPDATE cloud_projects SET digest_sent_at = $2 WHERE id = $1 AND digest_sent_at IS NOT DISTINCT FROM $3::timestamptz RETURNING id`, [
+        p.id,
+        due.until,
+        p.digest_sent_at ?? null,
+      ]);
       if (!taken.length) continue;
       try {
         const sender = await digestSender(p);
@@ -902,7 +1140,7 @@ export function createCloudHandler(opts) {
         await sender.send(message);
         results.push({ project: p.id, sent: true });
       } catch (err) {
-        console.error('shipcue cloud: digest failed', p.id, err instanceof Error ? err.message : err);
+        console.error('shipcue admin: digest failed', p.id, err instanceof Error ? err.message : err);
         await q(`UPDATE cloud_projects SET digest_sent_at = $3::timestamptz WHERE id = $1 AND digest_sent_at = $2`, [p.id, due.until, p.digest_sent_at ?? null]);
         results.push({ project: p.id, sent: false, reason: 'failed' });
       }
@@ -910,23 +1148,55 @@ export function createCloudHandler(opts) {
     return json({ sent: results.filter((r) => r.sent).length, results });
   }
 
-  async function route(req) {
+  /** The admin page: a shell that loads {base}/app.js, which talks to this handler. */
+  function page() {
+    const b = escapeHtml(base);
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(opts.pageTitle ?? 'shipcue admin')}</title>
+<style>
+:root { --paper: #F2F4F7; --ink: #16203A; --muted: #5A6478; --line: #D5DBE5; --white: #FFFFFF; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+a { color: inherit; }
+</style>
+</head>
+<body>
+<main><div id="shipcue-app" data-api="${b}"></div></main>
+<script src="${b}/app.js?v=${escapeHtml(SHIPCUE_VERSION)}" defer></script>
+</body>
+</html>`;
+    return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+  }
+  async function pageScript() {
+    // Its own chunk, loaded only when the page is asked for: the admin's API never pays for it.
+    const { default: code } = await import('virtual:shipcue-admin-ui');
+    return new Response(code, { headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=3600' } });
+  }
+
+  async function route(req: Request): Promise<Response> {
     const path = new URL(req.url).pathname;
+    if (opts.page && req.method === 'GET' && (path === base || path === `${base}/`)) return page();
+    if (opts.page && req.method === 'GET' && path === `${base}/app.js`) return pageScript();
     if (!path.startsWith(`${base}/`)) return fail('Not found', 404);
     const parts = path.slice(base.length + 1).split('/').filter(Boolean);
     const [head, ...rest] = parts;
     if (head === 'p' && rest[0]) return projectQueue(req, rest[0]);
     if (head === 'digest' && !rest.length && (req.method === 'GET' || req.method === 'POST')) return runDigests(req);
-    // Billing: Checkout, the portal and Stripe's webhook. With billing off this falls through, as before.
-    if (head === 'billing') {
-      let signedIn;
-      const res = await billing.routes(req, rest, async () => (signedIn = await session(req)));
-      if (res) return withCookies(res, signedIn?.set);
+    // Billing (a payment provider's webhook is not ours to hold to JSON-only): falls through without plans.routes.
+    if (head === 'billing' && plans.routes) {
+      let signedIn: Session = null;
+      const res = await plans.routes(req, rest, async () => (signedIn = await session(req)));
+      if (res) return withCookies(res, (signedIn as Session)?.set);
     }
     if (!jsonWrite(req)) return fail('Send JSON.', 415);
     if (head === 'auth') return authRoutes(req, rest[0], rest[1]);
     const s = await session(req);
-    if (!s) return fail('Sign in first.', 401);
+    // signIn tells the page what to show: its own form, or the app's sign-in page (null: none to link to).
+    if (!s) return json({ error: 'Sign in first.', signIn: auth ? 'form' : (opts.signInUrl ?? null) }, 401);
     if (head === 'me' && req.method === 'GET') return withCookies(await me(s.user), s.set);
     if (head === 'overview' && req.method === 'GET' && !rest.length) return withCookies(await overview(s.user), s.set);
     if (head === 'overview' && req.method === 'GET' && rest[0] === 'versions' && rest.length === 1) return withCookies(await overviewVersions(s.user), s.set);
@@ -934,11 +1204,11 @@ export function createCloudHandler(opts) {
     return fail('Not found', 404);
   }
 
-  return async function cloudHandler(req) {
+  return async function adminHandler(req: Request): Promise<Response> {
     try {
       return await route(req);
     } catch (err) {
-      console.error('shipcue cloud: failed', err);
+      console.error('shipcue admin: failed', err);
       return fail('Something went wrong. Please try again.', 500);
     }
   };

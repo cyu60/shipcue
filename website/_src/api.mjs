@@ -3,9 +3,11 @@ import pg from 'pg';
 import { createShipcueHandler, emailReporter, postgresStore } from '../../src/server';
 import { resolveConfig } from '../../src/core';
 import { AREAS } from './areas.mjs';
-import { cloudUserFrom, insforgeAuth, insforgeEmail } from './cloud.mjs';
+import { adminUserFrom, insforgeAuth, insforgeEmail } from '../../src/admin';
 
-// Who is signed in: a shipcue Cloud account, from the session cookie /app sets.
+// Who is signed in: a shipcue Cloud account, from the session cookie cloud.shipcue.ai sets for all of
+// shipcue.ai (so only on www.shipcue.ai, not the old shipcue.ibuildathing.com).
+const CLOUD = 'https://cloud.shipcue.ai';
 const auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
@@ -23,7 +25,7 @@ const handler = createShipcueHandler({
   broadcasters: sendEmail
     ? [emailReporter({ appName: 'shipcue', link: 'https://shipcue.ibuildathing.com/cuelog/', mineLink: 'https://shipcue.ibuildathing.com/app/mine/', send: sendEmail })]
     : [],
-  getReporter: async (req) => (await cloudUserFrom(req, auth))?.email ?? null,
+  getReporter: async (req) => (await adminUserFrom(req, auth))?.email ?? null,
   // My reports at /app/mine/ (report 3d0d7995): GET /api/shipcue/mine. Safe here because getReporter
   // above is the Cloud session cookie, checked with the sign-in service, never a header.
   reporterPortal: true,
@@ -32,7 +34,7 @@ const handler = createShipcueHandler({
   signInUrl: (req) => {
     const from = req.headers.get('referer');
     const path = from && new URL(from).origin === new URL(req.url).origin ? new URL(from).pathname : '/';
-    return `/app/?next=${encodeURIComponent(path)}`;
+    return `${CLOUD}/?next=${encodeURIComponent(new URL(path, req.url).toString())}`;
   },
   agentToken: process.env.SHIPCUE_TOKEN,
   // The Changelog page reads the queue and the fixes (no reporters or diagnostics).
@@ -40,7 +42,7 @@ const handler = createShipcueHandler({
   // shipcue's own board shows screenshots too (report 9fdd0b45).
   boardScreenshots: true,
   // Videos are uploaded to Vercel Blob by /api/shipcue-upload; only this store's report folders count.
-  // PRs on cyu60/shipcue that name a report move it to In review and close it on merge (report 919f5ca2).
+  // PRs on edumame/shipcue that name a report move it to In review and close it on merge (report 919f5ca2).
   github: process.env.SHIPCUE_GITHUB_SECRET ? { secret: process.env.SHIPCUE_GITHUB_SECRET } : undefined,
   acceptVideoUrl: (url, id) => {
     const u = new URL(url);

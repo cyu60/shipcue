@@ -43,7 +43,7 @@ export function MyReports({ endpoint = '/api/shipcue' }) {
   if (state.phase === 'signedOut')
     return (
       <p style={s.muted}>
-        <a href="/app/?next=%2Fapp%2Fmine%2F">Sign in</a> to see the reports you sent to shipcue, on any device.
+        <a href={`https://cloud.shipcue.ai/?next=${encodeURIComponent(`${window.location.origin}/app/mine/`)}`}>Sign in</a> to see the reports you sent to shipcue, on any device.
       </p>
     );
   if (!state.reports.length)

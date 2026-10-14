@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error -- plain JS module for the site
-import * as L from '../website/_src/listener.mjs';
+import * as L from '../src/admin/ui/listener.mjs';
 
 const opts = {
   url: 'https://shipcue.example.com/api/cloud/p/pk_0123456789abcdef01234567',
@@ -17,7 +17,7 @@ const opts = {
   project: 'Habitect (web)',
   version: '0.19.0',
 };
-const TGZ = 'https://github.com/cyu60/shipcue/releases/download/v0.19.0/shipcue-0.19.0.tgz';
+const TGZ = 'https://github.com/edumame/shipcue/releases/download/v0.19.0/shipcue-0.19.0.tgz';
 /** How bash splits a line into words, without running it. */
 const words = (line: string) => execFileSync('bash', ['-c', `set -- ${line}; printf '%s\\0' "$@"`], { encoding: 'utf8', env: { HOME: '/home/t', PATH: process.env.PATH } }).split('\0').slice(0, -1);
 
@@ -98,5 +98,56 @@ describe('listener: Linux systemd --user', () => {
     expect(script).toContain('systemctl --user enable --now shipcue-listen-habitect-web');
     expect(script).toContain('loginctl enable-linger');
     expect(script).toContain(L.systemdUnit(opts));
+  });
+});
+
+describe('dispatch: the Setup text', () => {
+  const o = { url: 'https://shipcue.example.com/api/cloud/p/pk_1', token: 'sca_t', agent: 'mac-mini', folder: '~/code/my app', project: 'My app', version: '1.2.3' };
+
+  it('installs the release globally, dry-runs, then installs the launchd agent with the same flags', () => {
+    const lines = L.dispatchInstall({ ...o, max: '3', instructions: "Run pnpm test; don't skip it." }).split('\n');
+    expect(lines[0]).toBe('npm install -g https://github.com/edumame/shipcue/releases/download/v1.2.3/shipcue-1.2.3.tgz');
+    const dry = words(lines[1]!);
+    const install = words(lines[2]!);
+    expect(dry.slice(0, 3)).toEqual(['shipcue', 'dispatch', '--dry-run']);
+    expect(install.slice(0, 3)).toEqual(['shipcue', 'dispatch', '--install']);
+    expect(install.slice(3)).toEqual(dry.slice(3));
+    // ~ stays for dispatch to expand, spaces and quotes survive the shell.
+    expect(install.slice(3)).toEqual(['--url', o.url, '--token', 'sca_t', '--agent', 'mac-mini', '--repo', '~/code/my app', '--max', '3', '--instructions', "Run pnpm test; don't skip it."]);
+  });
+
+  it('leaves out what is not set, and names the log after the repo folder', () => {
+    const text = L.dispatchInstall(o);
+    expect(text).not.toContain('--max');
+    expect(text).not.toContain('--instructions');
+    expect(text).toContain('~/.local/state/shipcue-dispatch/my-app/dispatch.log');
+    expect(L.dispatchName('~/code/Block Outliner/')).toBe('block-outliner');
+  });
+});
+
+describe('listener: one setup prompt', () => {
+  const prompt = L.setupPrompt(opts);
+  const blocks = [...prompt.matchAll(/```sh\n([\s\S]*?)\n```/g)].map((m) => m[1]);
+
+  it('carries the endpoint, token, agent and folder, and the same install scripts as the tabs', () => {
+    expect(prompt).toContain(`Project endpoint: ${opts.url}`);
+    expect(prompt).toContain('Agent token: sca_abc123');
+    expect(prompt).toContain('as the agent "mac-mini"');
+    expect(blocks).toContain(L.launchdInstall(opts).trimEnd());
+    expect(blocks).toContain(L.systemdInstall(opts).trimEnd());
+  });
+
+  it('adds the MCP server in the folder and checks the token, as runnable shell', () => {
+    const [mcp, check] = blocks;
+    const [cd, add] = mcp.split('\n');
+    expect(cd).toBe("cd ~/'code/my app'\\''s'");
+    expect(words(add)).toEqual(['claude', 'mcp', 'add', 'shipcue', '-e', `SHIPCUE_URL=${opts.url}`, '-e', 'SHIPCUE_TOKEN=sca_abc123', '--', 'npx', '-y', '-p', TGZ, 'shipcue-mcp']);
+    expect(words(check.replace(/ >\/dev\/null.*$/, ''))).toEqual(['curl', '-fsS', '-H', 'Authorization: Bearer sca_abc123', `${opts.url}/reports?status=open`]);
+  });
+
+  it('works from the home folder and names how to check and stop the service', () => {
+    expect(L.setupPrompt({ ...opts, folder: '' })).toContain('```sh\ncd ~\nclaude mcp add');
+    expect(prompt).toContain('launchctl print gui/$(id -u)/com.shipcue.listen.habitect-web');
+    expect(prompt).toContain('systemctl --user disable --now shipcue-listen-habitect-web');
   });
 });
