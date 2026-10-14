@@ -7,7 +7,7 @@ import { CueLogTable } from '../../react';
 import { ago } from '../../react/CueLog';
 import { SHIPCUE_VERSION } from '../../core';
 import { LISTEN_EVENTS } from '../../mcp/events';
-import { DEFAULT_LISTEN_COMMAND, dispatchInstall, dispatchName, launchdInstall, listenCommand, releaseTarball, setupPrompt, slug, systemdInstall } from './listener.mjs';
+import { DEFAULT_LISTEN_COMMAND, dispatchInstall, dispatchName, launchdInstall, listenCommand, projectPrompt, releaseTarball, setupPrompt, slug, systemdInstall } from './listener.mjs';
 
 const root = document.getElementById('shipcue-app');
 // Served by the handler (page: true): its base, and the app's own sign-in instead of Cloud's pages.
@@ -438,6 +438,78 @@ function Digest({ detail, save }) {
   );
 }
 
+/**
+ * The whole Setup as one prompt for Claude Code (or Codex) in the app's repo: the button, the shipcue
+ * tools as an agent, and a workflow that keeps working the queue on that machine (projectPrompt).
+ */
+function OnePrompt({ detail, endpoint, run }) {
+  const p = detail.project;
+  const [pick, setPick] = useState(detail.agents[0]?.id ?? 'new');
+  const [newName, setNewName] = useState('');
+  const [made, setMade] = useState(null);
+  const [folder, setFolder] = useState(`~/code/${slug(p.name)}`);
+  const agent = made && made.id === pick ? made : detail.agents.find((a) => a.id === pick);
+  const opts = {
+    url: endpoint,
+    token: made && made.id === pick ? made.token : `<${agent?.name ?? 'agent'}'s token>`,
+    agent: agent?.name ?? 'agent',
+    events: ['filed', 'assigned'],
+    folder,
+    project: p.name,
+    version: VERSION,
+    max: '4',
+    origins: p.allowedOrigins,
+  };
+  const create = () =>
+    run(async () => {
+      const r = await api(`/projects/${p.id}/agents`, { name: newName });
+      setMade({ id: r.agent.id, name: r.agent.name, token: r.token });
+      setPick(r.agent.id);
+      setNewName('');
+    });
+  return (
+    <section style={s.card}>
+      <h3 style={{ margin: 0 }}>Set it all up with one prompt</h3>
+      <p style={s.small}>
+        Paste this into Claude Code (or Codex) on the machine that should work the queue. It adds the button to your app in a PR, connects Claude to this project as the agent, and
+        keeps a workflow running there: shipcue dispatch on a Mac, a listener on Linux. It asks you only for logins and the settings below. Or do each step by hand underneath.
+      </p>
+      <div style={s.row}>
+        <select style={s.input} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Agent">
+          {detail.agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              🤖 {a.name}
+            </option>
+          ))}
+          <option value="new">New agent…</option>
+        </select>
+        {pick === 'new' && (
+          <>
+            <input style={s.input} placeholder="mac-mini" value={newName} onChange={(e) => setNewName(e.target.value.toLowerCase())} aria-label="New agent name" />
+            <Button ink onClick={create} disabled={!newName.trim()}>
+              Create agent
+            </Button>
+          </>
+        )}
+        <label style={s.small}>
+          App's repo on that machine <input style={{ ...s.input, width: 220 }} value={folder} onChange={(e) => setFolder(e.target.value)} aria-label="App's repo" />
+        </label>
+      </div>
+      {pick !== 'new' && (
+        <>
+          <p style={s.small}>
+            {made && made.id === pick
+              ? `${made.name}'s token is in this, shown this once.`
+              : `It asks for ${agent?.name}'s token (shown once when it was connected), or create a new agent here to fill it in.`}
+            {p.allowedOrigins.length ? '' : ' List your sites under step 1 first, or it will ask you to.'}
+          </p>
+          <Copy text={projectPrompt(opts)} />
+        </>
+      )}
+    </section>
+  );
+}
+
 function Setup({ detail, reload, onProjects }) {
   const p = detail.project;
   const owner = detail.role === 'owner';
@@ -477,6 +549,7 @@ function Setup({ detail, reload, onProjects }) {
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       {error && <p style={s.error}>{error}</p>}
+      {detail.role !== 'viewer' && <OnePrompt detail={detail} endpoint={endpoint} run={run} />}
       <section style={s.card}>
         <h3 style={{ margin: 0 }}>1. Add the button to your app</h3>
         <Copy text={`pnpm add https://github.com/edumame/shipcue/releases/download/v${VERSION}/shipcue-${VERSION}.tgz`} />

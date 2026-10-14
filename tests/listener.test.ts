@@ -151,3 +151,59 @@ describe('listener: one setup prompt', () => {
     expect(prompt).toContain('systemctl --user disable --now shipcue-listen-habitect-web');
   });
 });
+
+describe('the project prompt: button, agent and workflow in one', () => {
+  const prompt = L.projectPrompt({ ...opts, max: '4', origins: ['https://app.example.com'] });
+  const blocks = [...prompt.matchAll(/```sh\n([\s\S]*?)\n```/g)].map((m) => m[1]);
+
+  it('carries the endpoint, token, agent, folder and sites', () => {
+    expect(prompt).toContain(`Project endpoint: ${opts.url}`);
+    expect(prompt).toContain('Agent token: sca_abc123');
+    expect(prompt).toContain('as the agent "mac-mini"');
+    expect(prompt).toContain('Sites the button may file from: https://app.example.com');
+    expect(L.projectPrompt({ ...opts })).toContain('Sites the button may file from: none yet');
+  });
+
+  it('installs the button from the release and renders it with the endpoint', () => {
+    expect(words(blocks[0]!)).toEqual(['curl', '-fsS', `${opts.url}/capabilities`]);
+    expect(words(blocks[1]!)).toEqual(['pnpm', 'add', TGZ]);
+    expect(prompt).toContain("```tsx\nimport { ReportButton } from 'shipcue/react';");
+  });
+
+  it('adds the MCP server, checks the token, and runs the same dispatch and systemd text as the cards', () => {
+    expect(blocks[2]!.split('\n')[0]).toBe("cd ~/'code/my app'\\''s'");
+    expect(words(blocks[2]!.split('\n')[1]!).slice(0, 4)).toEqual(['claude', 'mcp', 'add', 'shipcue']);
+    expect(blocks[3]).toContain('&& echo token ok');
+    expect(blocks).toContain(L.dispatchInstall({ ...opts, max: '4' }).trimEnd());
+    expect(blocks).toContain(L.systemdInstall(opts).trimEnd());
+    expect(prompt).toContain("shipcue dispatch --uninstall --repo '~/code/my app'\\''s'"); // dispatch expands ~/ itself
+  });
+});
+
+describe('uninstall: the reverse of each install', () => {
+  it('removes the launchd agent, the systemd unit and dispatch from the paths the installs use', () => {
+    expect(L.launchdUninstall(opts.project)).toContain('launchctl bootout gui/$(id -u)/com.shipcue.listen.habitect-web');
+    expect(L.launchdUninstall(opts.project)).toContain('rm -f ~/Library/LaunchAgents/com.shipcue.listen.habitect-web.plist');
+    expect(L.launchdInstall(opts)).toContain('~/Library/LaunchAgents/com.shipcue.listen.habitect-web.plist');
+    expect(L.systemdUninstall(opts.project)).toContain('rm -f ~/.config/systemd/user/shipcue-listen-habitect-web.service');
+    expect(L.systemdInstall(opts)).toContain('~/.config/systemd/user/shipcue-listen-habitect-web.service');
+    const d = L.dispatchUninstall(opts).split('\n');
+    expect(words(d[0]!)).toEqual(['shipcue', 'dispatch', '--uninstall', '--repo', "~/code/my app's"]);
+    expect(d[1]).toBe(`rm -rf ~/.local/state/shipcue-dispatch/${L.dispatchName(opts.folder)}`);
+    expect(L.dispatchInstall(opts)).toContain(`~/.local/state/shipcue-dispatch/${L.dispatchName(opts.folder)}/dispatch.log`);
+  });
+
+  it('is in both prompts, with the MCP server removed from the same folder it was added in', () => {
+    const mcpOff = "```sh\ncd ~/'code/my app'\\''s'\nclaude mcp remove shipcue\n```";
+    const project = L.projectPrompt(opts);
+    expect(project).toContain('## 5. Removing it');
+    expect(project).toContain(L.dispatchUninstall(opts).trimEnd());
+    expect(project).toContain(L.systemdUninstall(opts.project).trimEnd());
+    expect(project).toContain(mcpOff);
+    expect(project).toContain('Disconnect mac-mini');
+    const setup = L.setupPrompt(opts);
+    expect(setup).toContain(L.launchdUninstall(opts.project).trimEnd());
+    expect(setup).toContain(L.systemdUninstall(opts.project).trimEnd());
+    expect(setup).toContain(mcpOff);
+  });
+});
