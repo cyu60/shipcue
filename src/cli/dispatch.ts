@@ -335,6 +335,9 @@ export async function runPass(s: DispatchSettings, deps: PassDeps, dryRun = fals
     }
   }
 
+  // A real pass stays quiet when idle (it runs every minute); a dry run always says something.
+  if (dryRun && !jobs.length) say(`nothing to start: ${open.length} open, none free for ${s.agent} (${live} of ${s.max} sessions live)`);
+
   let usage: Usage | null = null;
   for (const job of jobs) {
     const r = job.report;

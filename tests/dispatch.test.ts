@@ -125,6 +125,12 @@ describe('a pass', () => {
   });
 
   it('holds when a tool is missing, and a dry run claims and starts nothing', async () => {
+    // An empty queue: the dry run still prints a line, a real pass stays quiet.
+    await runPass(s, deps, true);
+    expect(logs).toEqual(['(dry run) nothing to start: 0 open, none free for mac-mini (0 of 2 sessions live)']);
+    logs.length = 0;
+    await runPass(s, deps);
+    expect(logs).toEqual([]);
     const r = await store.create(sample());
     await runPass(s, deps, true);
     expect(started).toEqual([]);
