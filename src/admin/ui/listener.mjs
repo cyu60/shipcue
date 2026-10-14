@@ -195,3 +195,40 @@ shipcue dispatch --install ${flags}
 # Log: ~/.local/state/shipcue-dispatch/${dispatchName(n.folder)}/dispatch.log
 `;
 }
+
+const fence = (body) => `\`\`\`sh\n${body.trimEnd()}\n\`\`\``;
+
+/**
+ * One prompt to paste into Claude Code (or Codex) on the machine that should work the queue: it checks
+ * the tools and the folder, gives Claude the shipcue MCP tools, checks the token, installs the listener
+ * as a service (launchd on macOS, systemd on Linux) and checks it is running. Everything it runs is
+ * the same text the Command / launchd / systemd tabs show, so the prompt never drifts from them.
+ */
+export function setupPrompt(o) {
+  const n = normalise(o);
+  const mcp = `claude mcp add shipcue -e SHIPCUE_URL=${shq(n.url)} -e SHIPCUE_TOKEN=${shq(n.token)} -- npx -y -p ${releaseTarball(n.version)} shipcue-mcp`;
+  const label = launchdLabel(o.project);
+  const unit = systemdName(o.project);
+  return `Set up this machine to work my shipcue Cloud project "${o.project ?? n.name}" as the agent "${n.agent}", and keep it running after this chat ends. Do every step yourself; stop and ask me only for what only I can do (a password, a login, which repo).
+
+- Project endpoint: ${n.url}
+- Agent token: ${n.token}
+  It is a secret: never print it back, never commit it, and only put it where the commands below put it (files kept at mode 600). If it is still a <placeholder>, ask me for the token first.
+- Folder the agent works in: ${n.folder}
+- What runs for each report: ${n.command}
+
+1. Tools. Check node 20+ (with npx), git, gh (signed in: \`gh auth status\`) and claude (Claude Code, signed in). Install what is missing (Homebrew on macOS, the package manager on Linux), or tell me exactly what to run.
+2. Folder. Make sure ${n.folder} exists and is a git checkout of the app this project's reports are about, with a remote the agent can push branches to. If it is not, ask me for the repo URL and clone it there.
+3. shipcue tools for Claude. In that folder (run \`claude mcp remove shipcue\` first if one is already there):
+${fence(`cd ${n.folder === '~' ? '~' : shDir(n.folder)}\n${mcp}`)}
+4. Token. This must print "token ok"; a 401 means the token is wrong or was revoked, so stop and tell me:
+${fence(`curl -fsS -H ${shq(`Authorization: Bearer ${n.token}`)} ${shq(`${n.url}/reports?status=open`)} >/dev/null && echo token ok`)}
+5. Listener service. On macOS run this as is:
+${fence(launchdInstall(o))}
+   Then ask me to run \`sudo pmset -a sleep 0 disablesleep 1\` so the Mac stays awake, and to turn on automatic login, so it comes back after a restart.
+   On Linux run this as is instead:
+${fence(systemdInstall(o))}
+6. Check it. macOS: \`launchctl print gui/$(id -u)/${label} | grep -m1 state\` says running, and \`tail ~/Library/Logs/shipcue-listen-${n.name}.log\` shows no errors after 30 seconds. Linux: \`systemctl --user status ${unit}\`. If the log says npx or claude is not found, the service's login shell does not see them (nvm and similar set PATH only in interactive shells): put their folder on PATH in ~/.zprofile (macOS) or ~/.profile (Linux) and restart the service.
+7. Unattended runs. The command above runs once per event with nobody watching, so it must not stop on a permission prompt: make sure Claude Code is allowed to edit files and run git, gh and the app's tests in ${n.folder} (its .claude/settings.local.json), or tell me which permission mode you suggest.
+8. Tell me in a few lines: what you installed, where the log is, how to stop it (\`launchctl bootout gui/$(id -u)/${label}\` or \`systemctl --user disable --now ${unit}\`), and anything still waiting on me.`;
+}

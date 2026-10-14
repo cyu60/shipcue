@@ -124,3 +124,30 @@ describe('dispatch: the Setup text', () => {
     expect(L.dispatchName('~/code/Block Outliner/')).toBe('block-outliner');
   });
 });
+
+describe('listener: one setup prompt', () => {
+  const prompt = L.setupPrompt(opts);
+  const blocks = [...prompt.matchAll(/```sh\n([\s\S]*?)\n```/g)].map((m) => m[1]);
+
+  it('carries the endpoint, token, agent and folder, and the same install scripts as the tabs', () => {
+    expect(prompt).toContain(`Project endpoint: ${opts.url}`);
+    expect(prompt).toContain('Agent token: sca_abc123');
+    expect(prompt).toContain('as the agent "mac-mini"');
+    expect(blocks).toContain(L.launchdInstall(opts).trimEnd());
+    expect(blocks).toContain(L.systemdInstall(opts).trimEnd());
+  });
+
+  it('adds the MCP server in the folder and checks the token, as runnable shell', () => {
+    const [mcp, check] = blocks;
+    const [cd, add] = mcp.split('\n');
+    expect(cd).toBe("cd ~/'code/my app'\\''s'");
+    expect(words(add)).toEqual(['claude', 'mcp', 'add', 'shipcue', '-e', `SHIPCUE_URL=${opts.url}`, '-e', 'SHIPCUE_TOKEN=sca_abc123', '--', 'npx', '-y', '-p', TGZ, 'shipcue-mcp']);
+    expect(words(check.replace(/ >\/dev\/null.*$/, ''))).toEqual(['curl', '-fsS', '-H', 'Authorization: Bearer sca_abc123', `${opts.url}/reports?status=open`]);
+  });
+
+  it('works from the home folder and names how to check and stop the service', () => {
+    expect(L.setupPrompt({ ...opts, folder: '' })).toContain('```sh\ncd ~\nclaude mcp add');
+    expect(prompt).toContain('launchctl print gui/$(id -u)/com.shipcue.listen.habitect-web');
+    expect(prompt).toContain('systemctl --user disable --now shipcue-listen-habitect-web');
+  });
+});
