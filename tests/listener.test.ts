@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error -- plain JS module for the site
-import * as L from '../website/_src/listener.mjs';
+import * as L from '../src/admin/ui/listener.mjs';
 
 const opts = {
   url: 'https://shipcue.example.com/api/cloud/p/pk_0123456789abcdef01234567',
@@ -98,5 +98,29 @@ describe('listener: Linux systemd --user', () => {
     expect(script).toContain('systemctl --user enable --now shipcue-listen-habitect-web');
     expect(script).toContain('loginctl enable-linger');
     expect(script).toContain(L.systemdUnit(opts));
+  });
+});
+
+describe('dispatch: the Setup text', () => {
+  const o = { url: 'https://shipcue.example.com/api/cloud/p/pk_1', token: 'sca_t', agent: 'mac-mini', folder: '~/code/my app', project: 'My app', version: '1.2.3' };
+
+  it('installs the release globally, dry-runs, then installs the launchd agent with the same flags', () => {
+    const lines = L.dispatchInstall({ ...o, max: '3', instructions: "Run pnpm test; don't skip it." }).split('\n');
+    expect(lines[0]).toBe('npm install -g https://github.com/cyu60/shipcue/releases/download/v1.2.3/shipcue-1.2.3.tgz');
+    const dry = words(lines[1]!);
+    const install = words(lines[2]!);
+    expect(dry.slice(0, 3)).toEqual(['shipcue', 'dispatch', '--dry-run']);
+    expect(install.slice(0, 3)).toEqual(['shipcue', 'dispatch', '--install']);
+    expect(install.slice(3)).toEqual(dry.slice(3));
+    // ~ stays for dispatch to expand, spaces and quotes survive the shell.
+    expect(install.slice(3)).toEqual(['--url', o.url, '--token', 'sca_t', '--agent', 'mac-mini', '--repo', '~/code/my app', '--max', '3', '--instructions', "Run pnpm test; don't skip it."]);
+  });
+
+  it('leaves out what is not set, and names the log after the repo folder', () => {
+    const text = L.dispatchInstall(o);
+    expect(text).not.toContain('--max');
+    expect(text).not.toContain('--instructions');
+    expect(text).toContain('~/.local/state/shipcue-dispatch/my-app/dispatch.log');
+    expect(L.dispatchName('~/code/Block Outliner/')).toBe('block-outliner');
   });
 });

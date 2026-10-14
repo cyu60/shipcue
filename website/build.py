@@ -380,7 +380,7 @@ def plan_cards():
         cards.append(f'  <div class="{cls}"><h3>{p["name"]}</h3><p class="price">${p["price"]}<span>/month</span></p><p>{p["blurb"]}</p><ul>{limits}</ul>{cta}</div>')
     script = """<script>
 // Plan buttons stay "Free during beta" unless the Cloud says Checkout is on (GET /api/cloud/billing/plans answers only then).
-fetch('/api/cloud/billing/plans').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+fetch('https://cloud.shipcue.ai/api/cloud/billing/plans').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
   if (!d || !d.plans) return;
   d.plans.forEach(function (p) {
     var el = document.querySelector('[data-plan="' + p.id + '"]');
@@ -402,7 +402,7 @@ CLOUD = """
 <div class="prose">
 <h1>Cloud</h1>
 <p class="lede">Two Claude Code accounts, a Codex seat, a Mac mini or two, a terminal open for each. shipcue Cloud is the one queue they all take work from, so no two fix the same thing and you can see who is on what.</p>
-<div class="note">shipcue Cloud is in an invite-only beta, free while it lasts. <a href="/app/">Sign in</a>, <a href="/contact/">ask to join</a>, or see the <a href="#pricing">plans</a>.</div>
+<div class="note">shipcue Cloud is in an invite-only beta, free while it lasts. <a href="https://cloud.shipcue.ai/">Sign in</a>, <a href="/contact/">ask to join</a>, or see the <a href="#pricing">plans</a>.</div>
 <h2>Who it is for</h2>
 <p>Founders and builders who run more coding agents than they can watch: several Claude Code or Codex subscriptions, a laptop plus a Mac mini or two, a terminal per agent. Each one is fast on its own. Together they collide: two terminals on the same bug, one agent's fix undoing another's, and you as the switchboard, copying reports into prompts and asking which window is on what.</p>
 <p>Cloud is a thin coordination layer over all of them. It does not run your agents or hold your subscriptions: they keep running on your machines with your own logins, and each one takes its next job from the same queue.</p>
@@ -419,7 +419,7 @@ CLOUD = """
 <p>The plans for when the beta ends. Every plan has the hosted queue, the CueLog, the MCP tools, listeners, work areas, the GitHub loop and the digest. They differ in how many projects, agents and people they cover. Machines and terminals are never counted: an agent token runs wherever you start it.</p>
 {PLANS}
 <p>Prices are monthly, in US dollars. Rather run it yourself? Self-hosting stays free: the button, the handler, the MCP server and the CueLog table are MIT-licensed, and the <a href="/docs/">docs</a> set them up in your own Postgres.</p>
-<div class="actions"><a class="btn btn-ink" href="/contact/">Ask to join the beta</a><a class="btn btn-plain" href="/app/">Sign in</a></div>
+<div class="actions"><a class="btn btn-ink" href="/contact/">Ask to join the beta</a><a class="btn btn-plain" href="https://cloud.shipcue.ai/">Sign in</a></div>
 <h2>Questions</h2>
 <p><strong>Does shipcue see my Claude or Codex logins?</strong> No. Your agents sign in to Claude and Codex on your machines as they do now. shipcue only gives each one an agent token for the queue.</p>
 <p><strong>Does it run my agents?</strong> Not your coding agents: the listener starts them on your machines. The one agent that runs on shipcue is the optional hosted triage agent, which reads a report and leaves a note, and never touches code.</p>
@@ -435,7 +435,7 @@ CLOUD = """
 </ul>
 <h2>Set up</h2>
 <ol>
-  <li><a href="/app/">Sign in</a> and create a project.</li>
+  <li><a href="https://cloud.shipcue.ai/">Sign in</a> and create a project.</li>
   <li>Add <code>&lt;ReportButton endpoint="…/api/cloud/p/&lt;key&gt;" reporter={user?.email} /&gt;</code> to your app (or run <code>npx shipcue init --cloud &lt;key&gt; --write</code> in a Next.js app), and list the sites it runs on. <code>reporter</code> is who is signed in on your site, so the CueLog shows who filed each report. shipcue cannot check it, so Cloud projects have no reporter portal (a "My reports" list on any device); the Yours list stays per browser.</li>
   <li>Connect an agent: Setup gives you the <code>claude mcp add shipcue …</code> line with that agent's token.</li>
   <li>Optional: under <strong>Close the loop with GitHub</strong>, turn on the project's webhook and add its URL and secret to your repository (Pull requests only), so opening a PR puts a report in review and merging it marks it Fixed.</li>
@@ -612,10 +612,7 @@ DOCS = DOCS.replace("{VERSION}", VERSION)
 page("docs/index.html", "Docs · shipcue", "Set up shipcue: the table, the handler, the button and the agent tools.", DOCS, "/docs/")
 CLOUD = CLOUD.replace("{PLANS}", plan_cards())
 page("cloud/index.html", "Cloud · shipcue", f"shipcue Cloud: one queue for every Claude Code and Codex account, terminal and Mac mini you run, {PRICE_RANGE}.", CLOUD, "/cloud/")
-APP = """<div id="shipcue-app"></div>
-<script src="/assets/shipcue-app.js" defer></script>
-"""
-page("app/index.html", "CueLog · shipcue Cloud", "Sign in to shipcue Cloud and work your CueLog.", APP, "/cloud/")
+# The Cloud dashboard is its own site now, at https://cloud.shipcue.ai (vercel.json sends /app/ there).
 MINE = """<div class="prose">
 <h1>My reports</h1>
 <p class="lede">What you sent to shipcue while signed in, where each one stands, and how it was fixed. The same on any device.</p>

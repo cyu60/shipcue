@@ -8,8 +8,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { SHIPCUE_VERSION, compareVersions, parseVersion, type Report } from '../src/core';
 import { createShipcueHandler, memoryStore } from '../src/server';
 import { filterReports, nobodyLooked } from '../src/react/CueLog';
-// @ts-expect-error -- plain JS module for the site's function
-import { createCloudHandler } from '../website/_src/cloud.mjs';
+import { createAdminHandler } from '../src/admin';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
 const schema = readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8');
@@ -69,7 +68,7 @@ describe('shipcue Cloud: All projects', () => {
   const jar = new Map<string, string>();
 
   const make = (o: Record<string, unknown> = {}) =>
-    createCloudHandler({
+    createAdminHandler({
       db: { query: (t: string, p?: unknown[]) => db.query(t, p) },
       auth,
       beta: ['ada@example.com', 'bob@example.com'],

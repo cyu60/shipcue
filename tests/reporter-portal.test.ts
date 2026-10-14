@@ -100,8 +100,7 @@ describe('shipcue Cloud projects have no reporter portal (their reporter is unve
   it('GET /p/<key>/mine is 404 even with an x-shipcue-user header, and capabilities never says mine', async () => {
     const { readFileSync } = await import('node:fs');
     const { PGlite } = await import('@electric-sql/pglite');
-    // @ts-expect-error -- plain JS module for the site's function
-    const { createCloudHandler } = await import('../website/_src/cloud.mjs');
+    const { createAdminHandler } = await import('../src/admin');
     const db = new PGlite();
     await db.exec(readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8'));
     await db.exec(readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8'));
@@ -120,7 +119,7 @@ describe('shipcue Cloud projects have no reporter portal (their reporter is unve
       },
     };
     const CLOUD = 'https://shipcue.example.com/api/cloud';
-    const handle = createCloudHandler({ db: { query: (t: string, p?: unknown[]) => db.query(t, p) }, auth, beta: ['ada@example.com'], secureCookies: false });
+    const handle = createAdminHandler({ db: { query: (t: string, p?: unknown[]) => db.query(t, p) }, auth, beta: ['ada@example.com'], secureCookies: false });
     const signUp = await handle(new Request(`${CLOUD}/auth/sign-up`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'ada@example.com', password: 'long-enough-pw' }) }));
     const cookie = signUp.headers.getSetCookie().map((c: string) => c.split(';')[0]).join('; ');
     const created = await handle(new Request(`${CLOUD}/projects`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'P' }) }));

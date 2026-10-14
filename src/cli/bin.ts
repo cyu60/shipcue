@@ -2,9 +2,11 @@
 // shipcue's setup CLI (shipcue report 5fdbd60f).
 //   npx shipcue doctor [--url https://app/api/shipcue] [--route <file>] [--env A,B] [--offline] [--db | --no-db]
 //   npx shipcue init --cloud <pk_…> [--write]
+//   npx shipcue dispatch [--dry-run | --status | --install | --uninstall]
 
 import { readFileSync } from 'node:fs';
 import { runDoctor } from './doctor';
+import { runDispatch } from './dispatch';
 import { runInit } from './init';
 
 const [command, ...args] = process.argv.slice(2);
@@ -15,6 +17,11 @@ const HELP = `shipcue doctor   check this app's shipcue setup and print the fix 
   --db / --no-db                   check the tables without --url / skip them
   --offline                        don't look up the newest release
 shipcue init --cloud <pk_…>      the button for a shipcue Cloud project (--write adds it)
+shipcue dispatch                 start a Claude Code session per unclaimed report (one pass)
+  --dry-run / --status             what it would start / what this machine started
+  --install / --uninstall          a launchd agent that runs a pass every minute (macOS)
+  --url --token --agent --repo     the queue, its agent token, the agent's name, the repo to work in
+  --max 10 --types bug,feature,task --instructions "..." --permission-mode auto
 `;
 
 async function main() {
@@ -24,6 +31,7 @@ async function main() {
     return runDoctor({ cwd: process.cwd(), args, schemaSql });
   }
   if (command === 'init') return runInit({ cwd: process.cwd(), args });
+  if (command === 'dispatch') return runDispatch({ args, cwd: process.cwd() });
   return { output: HELP, code: command === undefined || command === '--help' || command === 'help' ? 0 : 1 };
 }
 

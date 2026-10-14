@@ -168,3 +168,30 @@ loginctl enable-linger "$USER"
 # Logs: journalctl --user -u ${name} -f   Stop: systemctl --user disable --now ${name}
 `;
 }
+
+/** The name shipcue dispatch gives an install: its repo folder's name (dispatch.ts settingsFrom). */
+export const dispatchName = (folder) => slug(String(folder ?? '').replace(/\/+$/, '').split('/').pop() || 'project');
+
+/**
+ * shipcue dispatch from Setup (macOS): install shipcue for good (launchd needs a path npm will not
+ * clear, unlike npx's cache), look at what it would start, then load its launchd agent. Each pass
+ * starts a Claude Code session per unclaimed report, with the shipcue MCP tools built in.
+ */
+export function dispatchInstall(o) {
+  const n = normalise(o);
+  const flags = [
+    `--url ${shq(n.url)}`,
+    `--token ${shq(n.token)}`,
+    `--agent ${shq(n.agent)}`,
+    `--repo ${shq(n.folder)}`,
+    ...(o.max ? [`--max ${Number(o.max)}`] : []),
+    ...((o.instructions ?? '').trim() ? [`--instructions ${shq(o.instructions.trim())}`] : []),
+  ].join(' ');
+  const repo = `--repo ${shq(n.folder)}`;
+  return `npm install -g ${releaseTarball(n.version)}
+shipcue dispatch --dry-run ${flags}
+shipcue dispatch --install ${flags}
+# What it started: shipcue dispatch --status ${repo}   Stop: shipcue dispatch --uninstall ${repo}
+# Log: ~/.local/state/shipcue-dispatch/${dispatchName(n.folder)}/dispatch.log
+`;
+}

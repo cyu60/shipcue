@@ -241,7 +241,31 @@ Switch on `board` in the handler (`true`, or `(req) => boolean` to limit who see
 
 For the team: every report in full, claimed and worked by people and agents together. Give the handler a `team` option, `{ getMember: (req) => ({ id, name, role: 'owner' | 'member' | 'viewer' }) | null, claimants: (req) => [{ kind: 'person' | 'agent', id, name }] }`, and render `<CueLogTable endpoint="/api/shipcue" />` from `shipcue/react` on a signed-in page. It has Open / Mine / In review / Fixed / All pills, filters (type, priority, who has it, search), sorting (queue order, longest waiting, recently updated, claimant), a List and a Board view (drag between columns), inline priority and assignee, bulk actions, and a side panel with screenshots, the app snapshot, the agent prompt and the report's history. Unowned work says "Nobody yet" in amber, and the "Claimed by" filter's *Nobody has looked* keeps open reports nobody holds and nothing has happened to since they were filed; an agent's lease and a stale claim show as badges. Assigning to an agent queues the report for it: its `claim_next_report` returns that report first. Every change is kept in `shipcue_report_events`. Members can **Edit** a filed report from the drawer (text, type, area, and once it is closed, what changed), checked against your config and logged as `edited` (`store.edit`, `POST /team/reports/:id/edit`); Edit offers the handler's areas, so the `areas` prop is optional. Context drawn as an outline has a Preview / Raw switch, a report's PR shows on its row, and the list leaves diagnostics out (the drawer reads them with the report). **Merge** folds a duplicate into the original (`POST /team/reports/:id/merge { into }`, members only): the duplicate closes as won't fix with "Duplicate of #<id8>", both reports get a note, and the original's note counts the duplicate's reporters (never who they are); `into` must be a report the same store can see, so a Cloud project can't merge into another's. A note can carry suggestions in its detail (`store.note(id, text, by, { suggest: { priority?, area?, duplicateOf? } })`, as Cloud's hosted agent does): the drawer shows them as small **Apply priority**, **Apply area** and **Merge into #id8** chips, each a normal team API call under the member, logged in the history; nothing is applied without a click. Opt-ins: `syncUrl` keeps the tab and the open report in the URL (`?tab=fixed&report=<id>`) and adds Copy link; `hotkeys` turns on `/` search, `j`/`k` move, Enter opens, `p` pins.
 
-Or use [shipcue Cloud](https://shipcue.ibuildathing.com/cloud/): the same table, hosted, with projects, invites and agent tokens.
+Or use [shipcue Cloud](https://cloud.shipcue.ai): the same table, hosted, with projects, invites and agent tokens.
+
+## Admin page
+
+Projects, team, invites, agent tokens and the CueLog on one route, on your Postgres (`sql/schema.sql` and `sql/cloud.sql`), with no Cloud account. It reads your app's signed-in user, so it has no sign-in of its own:
+
+```ts
+// app/admin/[[...path]]/route.ts (Next.js); any server that speaks Request/Response works the same way
+import { createAdminHandler } from 'shipcue/admin';
+
+const handler = createAdminHandler({
+  db: pool,                           // node-postgres Pool, Neon, PGlite: anything with query()
+  base: '/admin',
+  page: true,                         // serves the admin page at /admin and its script at /admin/app.js
+  getUser: async (req) => {           // your session; a non-uuid id is fine
+    const u = await getSession(req);
+    return u ? { id: u.id, email: u.email, name: u.name } : null;
+  },
+  signInUrl: '/login',                // where the page sends someone signed out
+  beta: ['you@example.com'],          // who may create projects; everyone else joins by invite
+});
+export { handler as GET, handler as POST };
+```
+
+Buttons file to `/admin/p/<publicKey>` and agents use the tokens it hands out. Try it with no database or sign-in: `pnpm build && node examples/admin-demo.mjs`, then open http://localhost:4546/admin. shipcue Cloud runs the same handler with its own sign-in (`auth: insforgeAuth(...)` instead of `getUser`).
 
 ## Chrome extension
 
@@ -277,6 +301,18 @@ SHIPCUE_URL=https://app.example.com/api/shipcue SHIPCUE_TOKEN=... \
 ```
 
 `assigned` fires when someone queues a report for this agent in the CueLog. To keep a listener running as a daemon, shipcue Cloud's Setup tab writes it out for you (Run a listener): the one-line command, a macOS launchd agent (KeepAlive, logs in `~/Library/Logs`) or a Linux systemd `--user` unit, with the agent's token filled in.
+
+**A Claude Code session per report.** `shipcue dispatch` claims each unclaimed open report and starts a background Claude Code session (`claude --bg`) on it in your repo, up to `--max` (10) at once, while your Claude plan has usage left (otherwise it waits for the 5-hour or weekly window to reset). The session gets the report's task prompt and the shipcue MCP tools as the same agent, so it holds the claim: it works in its own worktree, opens a PR and submits it for review. A report it has in review whose PR has sat untouched for 15 minutes gets one takeover session (two at most). Install it once and launchd runs a pass every minute:
+
+```bash
+# with shipcue installed in the repo (see Install), so launchd has a stable path to it
+npx shipcue dispatch --dry-run --url https://app.example.com/api/shipcue --token sca_…   # what it would start
+npx shipcue dispatch --install --url https://app.example.com/api/shipcue --token sca_… --agent mac-mini \
+  --instructions "Follow the work-queues skill."   # --types bug,task  --max 4  --permission-mode auto
+npx shipcue dispatch --status      # what this machine started;  --uninstall removes the launchd agent
+```
+
+Sessions run with `--permission-mode auto` by default, since report text comes from whoever filed it; `--permission-mode bypassPermissions` skips Claude Code's checks. Log: `~/.local/state/shipcue-dispatch/<repo>/dispatch.log`.
 
 **One digest instead of a message per event.** Turn on `digest` and a cron (Vercel Cron, GitHub Actions, launchd) calls `POST {base}/digest` with the agent token every hour or day. It builds one summary of the last period from the report history: filed, fixed (with the fix line and PR), reopened, claims stuck past their lease, how many are still open and the oldest waiting, and sends it with `slackDigest({ webhookUrl })`, `emailDigest({ to, send })` (the same `send` as `emailReporter`) or your own `{ name, format, send }`. Without `send` it returns the digest as Markdown, for a daily note or an outliner log. Quiet periods send nothing unless `sendEmpty`. It never includes who filed a report, the page, diagnostics or attachments. `digest(store, { since, until, format: 'slack' | 'email' | 'markdown' })` builds one anywhere.
 
@@ -339,6 +375,7 @@ Release tarballs for GitHub: `npm run pack:release` (builds, then `npm pack`).
 
 ## Changelog
 
+- **0.36.0**: `shipcue/admin` and `shipcue dispatch`. The Cloud dashboard's server is now a package entry, `createAdminHandler` (projects, team, invites, agent tokens, settings, digests, the CueLog), so it self-hosts on your Postgres (`sql/schema.sql` + `sql/cloud.sql`): `getUser` reads your app's signed-in user instead of a sign-in of its own, `page: true` serves the admin page from the handler (its script is its own chunk), and `examples/admin-demo.mjs` runs it with PGlite. Also new on it: Forgot password by code (`AdminAuth.sendReset` / `resetPassword`; `insforgeAuth` has both), invite emails through `sendEmail`, rate limits kept in Postgres (`rateLimits`, the new `cloud_rate_limits` table), `openSignup`, `saveScreenshot`, `cookieDomain`, `pageTitle`, and a `plans` hook for limits and billing routes (shipcue Cloud's billing lives in its own repo). `shipcue dispatch` starts a background Claude Code session per unclaimed report, up to `--max` at once while the Claude plan has usage left, claims each report before its session starts, takes over this agent's PRs that stopped moving, and installs itself as a launchd agent (`--install`); Setup → Run your agents writes the command. shipcue Cloud moves to https://cloud.shipcue.ai, and the site proxies the old `/api/cloud/*` URLs there. **Upgrading (Cloud or a self-hosted admin):** run `sql/cloud.sql` again for `cloud_rate_limits`.
 - **0.35.0**: `defaultArea` on `ReportButton` (Habitect report e49ac22f): the Where select starts on the area you name, e.g. the part of your app the page belongs to, instead of Other, which stays a plain choice. It is read when the panel opens (moving on with the panel open does not change it) and again after a send; a value that is not one of `areas` starts on Other. No text or schema change.
 - **0.34.0**: no blank wait while a capture is taken (Habitect report cbb24947). From Capture until the screenshot is in the panel the page shows a tint with a spinner and "Taking the screenshot…": first around the selection, which stays clear (2 px wider than it) so none of the tint is in the picture, then over the whole page once the frame is drawn. The page takes no clicks meanwhile; the panel stays usable. New: text key `capturing`; `tabCapture().grab(sel, onTaken)` calls `onTaken` once the frame is drawn.
 - **0.33.0**: Capture is the default for a selection (Habitect report 71cc2002). In the selection's toolbar **Capture** is now the highlighted button, last in the row and marked ↵ (`aria-keyshortcuts="Enter"`), with **Capture & annotate** beside it as a plain one; Enter still captures without the annotator. The panel no longer blinks out and back while a capture is taken: it is hidden only when it lies inside the selection (or was already hidden for Select area). No API or text change.

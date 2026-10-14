@@ -58,6 +58,7 @@ describe('My reports page', () => {
     browserAs(handle, null);
     render(<MyReports />);
     const link = await screen.findByRole('link', { name: 'Sign in' });
-    expect(link.getAttribute('href')).toBe('/app/?next=%2Fapp%2Fmine%2F');
+    // Cloud signs in on its own site; it comes back to this page (www.shipcue.ai shares its cookie).
+    expect(link.getAttribute('href')).toBe(`https://cloud.shipcue.ai/?next=${encodeURIComponent(`${window.location.origin}/app/mine/`)}`);
   });
 });

@@ -1696,50 +1696,7 @@ var AREAS = [
   { value: "package", label: "The shipcue package" }
 ];
 
-// website/_src/plans.json
-var plans_default = {
-  _comment: "shipcue Cloud's plans: the one place their prices and limits live. billing.mjs enforces them, website/build.py renders them on /cloud, and the /app dashboard shows them. null means unlimited. Stripe price ids come from the env var named in priceEnv, never from here.",
-  betaPlan: "team",
-  plans: [
-    {
-      id: "solo",
-      name: "Solo",
-      price: 10,
-      priceEnv: "STRIPE_PRICE_SOLO",
-      blurb: "One builder with a couple of accounts.",
-      limits: { projects: 2, agentTokens: 5, people: 1, hostedTriagesPerDay: 10 }
-    },
-    {
-      id: "builder",
-      name: "Builder",
-      price: 25,
-      priceEnv: "STRIPE_PRICE_BUILDER",
-      blurb: "A founder running a small fleet of agents and Mac minis.",
-      pick: true,
-      limits: { projects: 10, agentTokens: 25, people: 3, hostedTriagesPerDay: 50 }
-    },
-    {
-      id: "team",
-      name: "Team",
-      price: 50,
-      priceEnv: "STRIPE_PRICE_TEAM",
-      blurb: "A team sharing agents, machines and apps.",
-      limits: { projects: null, agentTokens: null, people: 10, hostedTriagesPerDay: 200 }
-    }
-  ]
-};
-
-// website/_src/billing.mjs
-var PLANS = plans_default.plans.map((p) => Object.freeze({ ...p, limits: Object.freeze({ ...p.limits }) }));
-var BETA_PLAN = plans_default.betaPlan;
-var LIMITS = Object.freeze({
-  projects: { one: "project", many: "projects" },
-  agentTokens: { one: "agent token", many: "agent tokens" },
-  people: { one: "person", many: "people" },
-  hostedTriagesPerDay: { one: "hosted triage a day", many: "hosted triages a day" }
-});
-
-// website/_src/cloud.mjs
+// src/admin/handler.ts
 var ACCESS_COOKIE = "sc_at";
 var REFRESH_COOKIE = "sc_rt";
 function cookies(req) {
@@ -1750,6 +1707,26 @@ function cookies(req) {
   }
   return out;
 }
+async function adminUserFrom(req, auth2) {
+  const c = cookies(req);
+  if (c[ACCESS_COOKIE]) {
+    try {
+      const user = await auth2.current(c[ACCESS_COOKIE]);
+      if (user) return user;
+    } catch {
+    }
+  }
+  if (c[REFRESH_COOKIE]) {
+    try {
+      const t = await auth2.refresh(c[REFRESH_COOKIE]);
+      if (t) return t.user ? { id: t.user.id, email: t.user.email } : await auth2.current(t.accessToken);
+    } catch {
+    }
+  }
+  return null;
+}
+
+// src/admin/insforge.ts
 function insforgeAuth(baseUrl, fetchImpl = fetch) {
   const call = async (path, payload, token) => {
     const res = await fetchImpl(`${baseUrl}${path}`, {
@@ -1792,26 +1769,18 @@ function insforgeAuth(baseUrl, fetchImpl = fetch) {
     },
     async exchange(code, codeVerifier) {
       return tokens(await call("/api/auth/oauth/exchange?client_type=server", { code, code_verifier: codeVerifier }));
+    },
+    // Forgot password, by code (the project's resetPasswordMethod must be "code", like its email verification).
+    async sendReset(email) {
+      await call("/api/auth/email/send-reset-password", { email });
+    },
+    async resetPassword(email, code, password) {
+      const d = await call("/api/auth/email/exchange-reset-password-token", { email, code });
+      if (!d.token) throw new Error("That code did not work. Ask for a new one.");
+      await call("/api/auth/email/reset-password", { newPassword: password, otp: d.token });
+      return tokens(await call("/api/auth/sessions?client_type=server", { email, password }));
     }
   };
-}
-async function cloudUserFrom(req, auth2) {
-  const c = cookies(req);
-  if (c[ACCESS_COOKIE]) {
-    try {
-      const user = await auth2.current(c[ACCESS_COOKIE]);
-      if (user) return user;
-    } catch {
-    }
-  }
-  if (c[REFRESH_COOKIE]) {
-    try {
-      const t = await auth2.refresh(c[REFRESH_COOKIE]);
-      if (t) return t.user ? { id: t.user.id, email: t.user.email } : await auth2.current(t.accessToken);
-    } catch {
-    }
-  }
-  return null;
 }
 function insforgeEmail(baseUrl, apiKey, fetchImpl = fetch) {
   if (!apiKey) return null;
@@ -1826,6 +1795,7 @@ function insforgeEmail(baseUrl, apiKey, fetchImpl = fetch) {
 }
 
 // website/_src/api.mjs
+var CLOUD = "https://cloud.shipcue.ai";
 var auth = insforgeAuth(process.env.SHIPCUE_CLOUD_AUTH_URL);
 var pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
 var sendEmail = insforgeEmail(process.env.SHIPCUE_CLOUD_AUTH_URL, process.env.SHIPCUE_EMAIL_API_KEY);
@@ -1836,7 +1806,7 @@ var handler = createShipcueHandler({
   config: resolveConfig({ areas: AREAS, allowFiles: true }),
   basePath: "/api/shipcue",
   broadcasters: sendEmail ? [emailReporter({ appName: "shipcue", link: "https://shipcue.ibuildathing.com/cuelog/", mineLink: "https://shipcue.ibuildathing.com/app/mine/", send: sendEmail })] : [],
-  getReporter: async (req) => (await cloudUserFrom(req, auth))?.email ?? null,
+  getReporter: async (req) => (await adminUserFrom(req, auth))?.email ?? null,
   // My reports at /app/mine/ (report 3d0d7995): GET /api/shipcue/mine. Safe here because getReporter
   // above is the Cloud session cookie, checked with the sign-in service, never a header.
   reporterPortal: true,
@@ -1845,7 +1815,7 @@ var handler = createShipcueHandler({
   signInUrl: (req) => {
     const from = req.headers.get("referer");
     const path = from && new URL(from).origin === new URL(req.url).origin ? new URL(from).pathname : "/";
-    return `/app/?next=${encodeURIComponent(path)}`;
+    return `${CLOUD}/?next=${encodeURIComponent(new URL(path, req.url).toString())}`;
   },
   agentToken: process.env.SHIPCUE_TOKEN,
   // The Changelog page reads the queue and the fixes (no reporters or diagnostics).

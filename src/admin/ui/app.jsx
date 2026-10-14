@@ -1,16 +1,21 @@
-// shipcue Cloud's dashboard at /app/: sign in, pick a project, and work its CueLog with the team.
-// Talks to /api/cloud (cloud.mjs); the CueLog table is the package's CueLogTable on the project's team API.
+// The admin page: sign in, pick a project, and work its CueLog with the team. shipcue Cloud's /app/, and
+// what createAdminHandler serves at {base}/ with `page` (data-api names the handler's base there).
+// Talks to createAdminHandler (src/admin); the CueLog table is the package's CueLogTable on the project's team API.
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CueLogTable } from '../../src/react';
-import { ago } from '../../src/react/CueLog';
-import { SHIPCUE_VERSION } from '../../src/core';
-import { LISTEN_EVENTS } from '../../src/mcp/events';
-import { LIMITS } from './billing.mjs';
-import { DEFAULT_LISTEN_COMMAND, launchdInstall, listenCommand, releaseTarball, slug, systemdInstall } from './listener.mjs';
+import { CueLogTable } from '../../react';
+import { ago } from '../../react/CueLog';
+import { SHIPCUE_VERSION } from '../../core';
+import { LISTEN_EVENTS } from '../../mcp/events';
+import { DEFAULT_LISTEN_COMMAND, dispatchInstall, dispatchName, launchdInstall, listenCommand, releaseTarball, slug, systemdInstall } from './listener.mjs';
 
-const API = '/api/cloud';
+const root = document.getElementById('shipcue-app');
+// Served by the handler (page: true): its base, and the app's own sign-in instead of Cloud's pages.
+const EMBEDDED = !!root?.dataset.api;
+const API = root?.dataset.api || '/api/cloud';
 const ORIGIN = window.location.origin;
+// Where people sign in: this page when the handler serves it, Cloud's /app/ otherwise.
+const APP_URL = EMBEDDED ? ORIGIN + window.location.pathname : `${ORIGIN}/app/`;
 const VERSION = SHIPCUE_VERSION;
 
 async function api(path, body) {
@@ -21,7 +26,7 @@ async function api(path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error ?? 'Something went wrong.'), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error ?? 'Something went wrong.'), { status: res.status, signIn: data.signIn });
   return data;
 }
 
@@ -85,6 +90,13 @@ function Auth({ onIn }) {
         const r = await api('/auth/verify', { email, otp });
         if (r.needsSignIn) setMode('sign-in');
         else onIn();
+      } else if (mode === 'forgot') {
+        await api('/auth/forgot', { email });
+        setMode('reset');
+      } else if (mode === 'reset') {
+        const r = await api('/auth/reset', { email, code: otp, password });
+        if (r.needsSignIn) setMode('sign-in');
+        else onIn();
       } else {
         const r = await api(`/auth/${mode}`, { email, password });
         if (r.needsVerification) setMode('verify');
@@ -98,8 +110,10 @@ function Auth({ onIn }) {
   };
   return (
     <form onSubmit={submit} style={{ ...s.card, maxWidth: 420 }}>
-      <h2 style={{ margin: 0 }}>{mode === 'sign-up' ? 'Make an account' : mode === 'verify' ? 'Check your email' : 'Sign in'}</h2>
-      {mode !== 'verify' && (
+      <h2 style={{ margin: 0 }}>
+        {mode === 'sign-up' ? 'Make an account' : mode === 'verify' || mode === 'reset' ? 'Check your email' : mode === 'forgot' ? 'Forgot your password?' : 'Sign in'}
+      </h2>
+      {(mode === 'sign-in' || mode === 'sign-up') && (
         <>
           <a href={`${API}/auth/oauth/google`} style={{ ...s.btn, ...s.ink, ...s.oauth }}>
             Continue with Google
@@ -110,7 +124,28 @@ function Auth({ onIn }) {
           <p style={{ ...s.small, textAlign: 'center' }}>or with email</p>
         </>
       )}
-      {mode === 'verify' ? (
+      {mode === 'forgot' ? (
+        <>
+          <p style={s.small}>We will email you a code to set a new one.</p>
+          <input style={s.input} type="email" autoComplete="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </>
+      ) : mode === 'reset' ? (
+        <>
+          <p style={s.small}>If {email} has an account, we sent it a code. Enter it with your new password.</p>
+          <input style={s.input} inputMode="numeric" autoComplete="one-time-code" placeholder="Code" value={otp} onChange={(e) => setOtp(e.target.value)} required />
+          <input
+            style={s.input}
+            type="password"
+            autoComplete="new-password"
+            placeholder="New password"
+            minLength={8}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <Button onClick={() => api('/auth/forgot', { email }).catch(() => undefined)}>Send it again</Button>
+        </>
+      ) : mode === 'verify' ? (
         <>
           <p style={s.small}>We sent a 6-digit code to {email}.</p>
           <input style={s.input} inputMode="numeric" autoComplete="one-time-code" placeholder="Code" value={otp} onChange={(e) => setOtp(e.target.value)} required />
@@ -134,16 +169,18 @@ function Auth({ onIn }) {
       {error && <p style={s.error}>{error}</p>}
       <div style={s.row}>
         <button type="submit" disabled={busy} style={{ ...s.btn, ...s.ink }}>
-          {mode === 'sign-up' ? 'Sign up' : mode === 'verify' ? 'Verify' : 'Sign in'}
+          {mode === 'sign-up' ? 'Sign up' : mode === 'verify' ? 'Verify' : mode === 'forgot' ? 'Send a code' : mode === 'reset' ? 'Set password' : 'Sign in'}
         </button>
-        {mode !== 'verify' && (
+        {(mode === 'sign-in' || mode === 'sign-up') && (
           <Button onClick={() => setMode(mode === 'sign-up' ? 'sign-in' : 'sign-up')}>{mode === 'sign-up' ? 'I have an account' : 'Make an account'}</Button>
         )}
+        {mode === 'sign-in' && <Button onClick={() => setMode('forgot')}>Forgot password?</Button>}
+        {(mode === 'forgot' || mode === 'reset') && <Button onClick={() => setMode('sign-in')}>Back to sign in</Button>}
       </div>
       <p style={s.small}>
         {new URLSearchParams(window.location.search).get('next')
           ? 'Sign in, or make an account, to keep sending reports. You can still send them anonymously; you come straight back after.'
-          : 'shipcue Cloud is invite-only for now. If a team invited you, sign up with that email and you will land in their project.'}
+          : 'If a team invited you, sign up with that email and you will land in their project.'}
       </p>
     </form>
   );
@@ -182,8 +219,9 @@ function NewProject({ onMade }) {
 const mcpLine = (endpoint, token) => `claude mcp add shipcue -e SHIPCUE_URL=${endpoint} -e SHIPCUE_TOKEN=${token} -- npx -y -p ${releaseTarball(VERSION)} shipcue-mcp`;
 
 /**
- * Run a listener (shipcue report 3d2dded6): pick or create an agent, the events and the command, and copy
- * shipcue-listen as one command, a launchd agent (macOS) or a systemd --user unit (Linux).
+ * Run your agents: pick or create an agent, then either shipcue dispatch (a Claude Code session per
+ * report, as a launchd agent) or a listener (shipcue report 3d2dded6): the events and the command, as one
+ * command, a launchd agent (macOS) or a systemd --user unit (Linux).
  */
 function Listener({ detail, endpoint, run }) {
   const p = detail.project;
@@ -194,6 +232,9 @@ function Listener({ detail, endpoint, run }) {
   const [command, setCommand] = useState(DEFAULT_LISTEN_COMMAND);
   const [folder, setFolder] = useState(`~/code/${slug(p.name)}`);
   const [os, setOs] = useState('cmd');
+  const [how, setHow] = useState('dispatch');
+  const [max, setMax] = useState('4');
+  const [instructions, setInstructions] = useState('');
   const agent = made && made.id === pick ? made : detail.agents.find((a) => a.id === pick);
   const opts = {
     url: endpoint,
@@ -204,6 +245,8 @@ function Listener({ detail, endpoint, run }) {
     folder,
     project: p.name,
     version: VERSION,
+    max,
+    instructions,
   };
   const create = () =>
     run(async () => {
@@ -214,10 +257,21 @@ function Listener({ detail, endpoint, run }) {
     });
   return (
     <section style={s.card}>
-      <h3 style={{ margin: 0 }}>3. Run a listener</h3>
+      <h3 style={{ margin: 0 }}>3. Run your agents</h3>
+      <div style={s.pills} role="tablist" aria-label="How agents run">
+        {[
+          ['dispatch', 'Claude Code sessions (Mac)'],
+          ['listen', 'Any command (listener)'],
+        ].map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={how === k} style={{ ...s.pill, ...(how === k ? s.pillOn : {}) }} onClick={() => setHow(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
       <p style={s.small}>
-        Keep an agent on a Mac, a VPS or any machine working the queue like a daemon: shipcue-listen checks every 15 seconds (no open port) and runs your command once per
-        event, with the report's id in $SHIPCUE_REPORT_ID.
+        {how === 'dispatch'
+          ? 'shipcue dispatch checks the queue every minute and starts a background Claude Code session for each unclaimed report, a few at a time while your Claude plan has usage left. Each one claims its report, works in its own git worktree, opens a PR and submits it for review. Nothing to set up in the repo: the sessions get the shipcue tools as this agent.'
+          : "Keep an agent on a Mac, a VPS or any machine working the queue like a daemon: shipcue-listen checks every 15 seconds (no open port) and runs your command once per event, with the report's id in $SHIPCUE_REPORT_ID."}
       </p>
       <div style={s.row}>
         <select style={s.input} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Agent">
@@ -237,7 +291,37 @@ function Listener({ detail, endpoint, run }) {
           </>
         )}
       </div>
-      {pick !== 'new' && (
+      {pick !== 'new' && how === 'dispatch' && (
+        <>
+          <label style={s.small}>
+            In your repo <input style={{ ...s.input, width: 260 }} value={folder} onChange={(e) => setFolder(e.target.value)} aria-label="Repo it works in" />
+          </label>
+          <label style={s.small}>
+            Sessions at once <input style={{ ...s.input, width: 60 }} type="number" min="1" max="20" value={max} onChange={(e) => setMax(e.target.value)} aria-label="Sessions at once" />
+          </label>
+          <label style={s.small}>
+            Also tell each session (optional)
+            <input
+              style={{ ...s.input, display: 'block', width: '100%', boxSizing: 'border-box', marginTop: 4 }}
+              placeholder="Run pnpm test before opening the PR."
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              aria-label="Extra instructions"
+            />
+          </label>
+          {made && made.id === pick ? (
+            <p style={s.small}>{made.name}'s token is in this, shown this once.</p>
+          ) : (
+            <p style={s.small}>Put {agent?.name}'s token (shown once when it was connected) where it says so, or create a new agent here to fill it in.</p>
+          )}
+          <Copy text={dispatchInstall(opts)} />
+          <p style={s.small}>
+            Paste it in a terminal on the Mac that has Claude Code signed in. The dry run shows what it would start; the install keeps it running every minute (launchd). Sessions
+            keep Claude Code's permission checks (auto mode); watch one with claude agents. Log: ~/.local/state/shipcue-dispatch/{dispatchName(folder)}/dispatch.log.
+          </p>
+        </>
+      )}
+      {pick !== 'new' && how === 'listen' && (
         <>
           <div style={s.row} role="group" aria-label="Events to act on">
             {LISTEN_EVENTS.map((ev) => (
@@ -637,6 +721,7 @@ function Team({ detail, reload }) {
   const owner = detail.role === 'owner';
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('member');
+  const [sent, setSent] = useState(null);
   const [error, setError] = useState(null);
   const run = async (fn) => {
     setError(null);
@@ -690,7 +775,8 @@ function Team({ detail, reload }) {
               ink
               onClick={() =>
                 run(async () => {
-                  await api(`/projects/${p.id}/invites`, { email, role });
+                  const r = await api(`/projects/${p.id}/invites`, { email, role });
+                  setSent(r.emailed ? `Emailed ${email} an invite.` : null);
                   setEmail('');
                 })
               }
@@ -698,8 +784,11 @@ function Team({ detail, reload }) {
               Invite
             </Button>
           </div>
+          {sent && <p style={s.small}>{sent}</p>}
           <p style={s.small}>
-            Send them {ORIGIN}/app/ and ask them to sign up with that email. They land in {p.name} as soon as they sign in.
+            {detail.digest?.email
+              ? `They get an email with a link; they land in ${p.name} as soon as they sign in with that address.`
+              : `Send them ${APP_URL} and ask them to sign up with that email. They land in ${p.name} as soon as they sign in.`}
           </p>
           {detail.invites.length > 0 && (
             <table style={s.table}>
@@ -869,7 +958,36 @@ function AllProjects({ open }) {
   );
 }
 
-/** The account's plan (billing.mjs): shown only when the Cloud has Checkout on (me.billing). */
+/** An https page on this site's parent domain (cloud.shipcue.ai → *.shipcue.ai), where the session cookie reaches. */
+function sameSite(url) {
+  try {
+    const u = new URL(url);
+    const parent = window.location.hostname.split('.').slice(-2).join('.');
+    return u.protocol === 'https:' && (u.hostname === parent || u.hostname.endsWith(`.${parent}`));
+  } catch {
+    return false;
+  }
+}
+
+/** Signed out, with the app (getUser) doing sign-in: send people there. */
+function SignedOut({ url }) {
+  return (
+    <div style={{ ...s.card, maxWidth: 420 }}>
+      <h2 style={{ margin: 0 }}>Sign in first</h2>
+      <p style={s.small}>The admin uses your app's sign-in.</p>
+      {url && (
+        <a href={url} style={{ ...s.btn, ...s.ink }}>
+          Sign in
+        </a>
+      )}
+    </div>
+  );
+}
+
+/** What a plan limits, as the Plan section names them (the server's plans hook counts them). */
+const PLAN_LIMITS = { projects: 'projects', agentTokens: 'agent tokens', people: 'people', hostedTriagesPerDay: 'hosted triages a day' };
+
+/** The account's plan: shown only when the server's plans say so (me.billing). */
 function Plan() {
   const [b, setB] = useState(null);
   const [error, setError] = useState('');
@@ -927,10 +1045,10 @@ function Plan() {
       {back === 'cancel' && <p style={s.small}>Checkout was cancelled; nothing was charged.</p>}
       {b.subscription?.status === 'past_due' && <p style={s.error}>Your last payment did not go through. Update your card with Manage billing.</p>}
       <p style={s.small}>
-        {Object.keys(LIMITS)
+        {Object.keys(PLAN_LIMITS)
           .map((thing) => {
             const max = limit(thing);
-            return `${b.usage[thing]} of ${max === null ? 'unlimited' : max} ${LIMITS[thing].many}`;
+            return `${b.usage[thing]} of ${max === null ? 'unlimited' : max} ${PLAN_LIMITS[thing]}`;
           })
           .join(' · ')}
         {b.subscription?.currentPeriodEnd ? ` · renews ${new Date(b.subscription.currentPeriodEnd).toLocaleDateString()}` : ''}
@@ -942,6 +1060,8 @@ function Plan() {
 
 function App() {
   const [me, setMe] = useState(undefined);
+  // From the 401: 'form' for the built-in sign-in, else the app's sign-in page (or null).
+  const [signIn, setSignIn] = useState('form');
   const [current, setCurrent] = useState(() => new URLSearchParams(window.location.search).get('p'));
   const [creating, setCreating] = useState(false);
   const load = useCallback(async () => {
@@ -949,14 +1069,18 @@ function App() {
       const who = await api('/me');
       // Sent here to sign in from a page's report button: go back there.
       const next = new URLSearchParams(window.location.search).get('next');
-      // /app/mine/ (My reports) is the one /app page that sends people here to sign in.
-      if (next && next.startsWith('/') && !next.startsWith('//') && (!next.startsWith('/app') || next.startsWith('/app/mine/'))) {
+      // /app/mine/ (My reports) is the one /app page that sends people here to sign in; a page on a sibling
+      // site (www.shipcue.ai from cloud.shipcue.ai) shares the session cookie, so it may send them back too.
+      if (next && (next.startsWith('/') ? !next.startsWith('//') && (!next.startsWith('/app') || next.startsWith('/app/mine/')) : sameSite(next))) {
         window.location.assign(next);
         return;
       }
       setMe(who);
     } catch (err) {
-      if (err.status === 401) setMe(null);
+      if (err.status === 401) {
+        setSignIn(err.signIn === undefined ? 'form' : err.signIn);
+        setMe(null);
+      }
       else throw err;
     }
   }, []);
@@ -975,7 +1099,7 @@ function App() {
   };
 
   if (me === undefined) return <p style={s.small}>Loading…</p>;
-  if (me === null) return <Auth onIn={load} />;
+  if (me === null) return signIn === 'form' ? <Auth onIn={load} /> : <SignedOut url={signIn} />;
   // With two or more projects, the landing view is All projects; with one, its CueLog as before.
   const many = me.projects.length >= 2;
   const showAll = many && (current === 'all' || !me.projects.some((p) => p.id === current));
@@ -999,8 +1123,12 @@ function App() {
         </div>
         <div style={s.row}>
           <span style={s.small}>{me.user.email}</span>
-          <a href="/app/mine/" style={s.small}>My reports</a>
-          <Button onClick={() => api('/auth/sign-out', {}).then(() => setMe(null))}>Sign out</Button>
+          {!EMBEDDED && (
+            <a href="/app/mine/" style={s.small}>
+              My reports
+            </a>
+          )}
+          {me.session !== 'app' && <Button onClick={() => api('/auth/sign-out', {}).then(() => setMe(null))}>Sign out</Button>}
         </div>
       </div>
       {me.billing?.enabled && <Plan />}
@@ -1027,5 +1155,4 @@ function App() {
   );
 }
 
-const el = document.getElementById('shipcue-app');
-if (el) createRoot(el).render(<App />);
+if (root) createRoot(root).render(<App />);

@@ -7,8 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { createShipcueHandler, postgresStore, type ReportStore } from '../src/server';
 import type { Report, ReportEvent } from '../src/core';
-// @ts-expect-error -- plain JS module for the site's function
-import { createCloudHandler } from '../website/_src/cloud.mjs';
+import { createAdminHandler } from '../src/admin';
 
 const schema = readFileSync(new URL('../sql/schema.sql', import.meta.url), 'utf8');
 const cloudSql = readFileSync(new URL('../sql/cloud.sql', import.meta.url), 'utf8');
@@ -316,7 +315,7 @@ describe('isolation: the handler (board, screenshots, team API, agent API)', () 
   });
 });
 
-describe('isolation: shipcue Cloud (website/_src/cloud.mjs) and the site\'s own queue', () => {
+describe('isolation: shipcue Cloud (src/admin) and the site\'s own queue', () => {
   const BASE = 'https://shipcue.example.com/api/cloud';
   let db: PGlite;
   let q: { query: (t: string, p?: unknown[]) => Promise<{ rows: unknown[] }> };
@@ -351,7 +350,7 @@ describe('isolation: shipcue Cloud (website/_src/cloud.mjs) and the site\'s own 
   /** Two projects with an owner, an agent, a public board and filed reports each; plus the site's own rows. */
   async function setup() {
     ({ db, q } = await freshDb());
-    handle = createCloudHandler({ db: q, auth: fakeAuth(), beta: ['ada@example.com', 'bob@example.com'], secureCookies: false });
+    handle = createAdminHandler({ db: q, auth: fakeAuth(), beta: ['ada@example.com', 'bob@example.com'], secureCookies: false });
     const projects: Record<'A' | 'B', { id: string; key: string; token: string; agentId: string; owner: string; reports: string[] }> = {} as never;
     for (const [n, owner] of [['A', 'ada@example.com'], ['B', 'bob@example.com']] as const) {
       const { res } = await call('POST', '/auth/sign-up', { body: { email: owner, password: 'long-enough-pw' } });

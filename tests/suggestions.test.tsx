@@ -10,8 +10,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { CueLogTable, readSuggestion } from '../src/react';
 import { createShipcueHandler, memoryStore, postgresStore, type ReportStore, type TeamMember } from '../src/server';
 import { resolveConfig, type Claimant } from '../src/core';
-// @ts-expect-error -- plain JS module for the site's function
-import { triageReport, hostedFromEnv } from '../website/_src/hosted.mjs';
+import { triageReport, hostedFromEnv } from '../src/admin';
 import { sample } from './store.contract';
 
 afterEach(() => {
@@ -58,7 +57,7 @@ function triage(store: ReportStore, reportId: string, reply: Record<string, unkn
     dailyLimit: 10,
     usedToday: async () => 0,
   });
-  return run.then((note: string) => ({ note, calls }));
+  return run.then((note: string | null) => ({ note, calls }));
 }
 
 describe('hosted agent: suggestions and duplicates', () => {
@@ -97,8 +96,8 @@ describe('hosted agent: suggestions and duplicates', () => {
     const r = await store.create(sample());
     expect(JSON.parse((await triage(store, r.id, GOOD, 2)).calls[0].messages[1].content).openReports).toHaveLength(2);
     expect(JSON.parse((await triage(store, r.id, GOOD, 0)).calls[0].messages[1].content).openReports).toEqual([]);
-    expect(hostedFromEnv({ OPENAI_API_KEY: 'k' }).duplicateCandidates).toBe(50);
-    expect(hostedFromEnv({ OPENAI_API_KEY: 'k', SHIPCUE_HOSTED_DUPLICATE_CANDIDATES: '0' }).duplicateCandidates).toBe(0);
+    expect(hostedFromEnv({ OPENAI_API_KEY: 'k' })!.duplicateCandidates).toBe(50);
+    expect(hostedFromEnv({ OPENAI_API_KEY: 'k', SHIPCUE_HOSTED_DUPLICATE_CANDIDATES: '0' })!.duplicateCandidates).toBe(0);
   });
 });
 

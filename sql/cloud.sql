@@ -121,48 +121,29 @@ ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS github_secret text;
 -- The overview reads its /capabilities (server-side, short timeout) to show the version the app runs.
 ALTER TABLE cloud_projects ADD COLUMN IF NOT EXISTS app_url text CHECK (app_url IS NULL OR (app_url ~ '^https://' AND length(app_url) <= 500));
 
--- Billing (plans on /cloud): one row per Cloud account (an InsForge user), made when they first open
--- Checkout. A project counts against the account that created it (cloud_projects.created_by). Plans and
--- limits live in website/_src/plans.json; enforcement is off until CLOUD_BILLING_ENFORCED or
--- CLOUD_BETA_ENDS_AT turns it on (docs/cloud-billing.md), and until then every account counts as Team.
-CREATE TABLE IF NOT EXISTS cloud_accounts (
-  user_id                uuid PRIMARY KEY,
-  email                  text CHECK (email IS NULL OR length(email) <= 320),
-  -- The plan the subscription pays for (an id in plans.json); null when there is none.
-  plan                   text CHECK (plan IS NULL OR plan ~ '^[a-z]{1,20}$'),
-  stripe_customer_id     text UNIQUE,
-  stripe_subscription_id text,
-  -- Stripe's subscription status (active, trialing, past_due, canceled, ...).
-  status                 text,
-  current_period_end     timestamptz,
-  -- When the Stripe event behind this state was created, so an older event never undoes a newer one.
-  billing_event_at       timestamptz,
-  created_at             timestamptz NOT NULL DEFAULT now(),
-  updated_at             timestamptz NOT NULL DEFAULT now()
+-- Rate limits: one counter per key (e.g. "auth:<ip>", "invite:<user>") per fixed window, old ones swept
+-- as it goes. Without this table the admin still works, just without limits.
+CREATE TABLE IF NOT EXISTS cloud_rate_limits (
+  key          text NOT NULL CHECK (length(key) <= 400),
+  window_start timestamptz NOT NULL,
+  n            integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (key, window_start)
 );
--- Stripe webhook events already handled, so a redelivery does nothing.
-CREATE TABLE IF NOT EXISTS cloud_billing_events (
-  id          text PRIMARY KEY,
-  type        text NOT NULL,
-  received_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS cloud_projects_created_by ON cloud_projects (created_by) WHERE NOT is_deleted;
 
 -- Server only: row-level security on with no policies, and no grants to browser roles.
+ALTER TABLE cloud_rate_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_invites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shipcue_report_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cloud_accounts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cloud_billing_events ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    REVOKE ALL ON cloud_projects, cloud_members, cloud_invites, cloud_agents, shipcue_report_events, cloud_accounts, cloud_billing_events FROM anon;
+    REVOKE ALL ON cloud_projects, cloud_members, cloud_invites, cloud_agents, cloud_rate_limits, shipcue_report_events FROM anon;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-    REVOKE ALL ON cloud_projects, cloud_members, cloud_invites, cloud_agents, shipcue_report_events, cloud_accounts, cloud_billing_events FROM authenticated;
+    REVOKE ALL ON cloud_projects, cloud_members, cloud_invites, cloud_agents, cloud_rate_limits, shipcue_report_events FROM authenticated;
   END IF;
 END $$;
-REVOKE ALL ON cloud_projects, cloud_members, cloud_invites, cloud_agents, shipcue_report_events, cloud_accounts, cloud_billing_events FROM PUBLIC;
+REVOKE ALL ON cloud_projects, cloud_members, cloud_invites, cloud_agents, cloud_rate_limits, shipcue_report_events FROM PUBLIC;
