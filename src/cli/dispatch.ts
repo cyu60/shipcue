@@ -389,6 +389,8 @@ export async function runPass(s: DispatchSettings, deps: PassDeps, dryRun = fals
     } catch (err) {
       d.error = err instanceof Error ? err.message : String(err);
       await deps.client.release(r.id).catch(() => undefined);
+      // An untrusted folder fails every report the same way: hold the machine and retry this one, not give up on it.
+      if (/workspace not trusted/i.test(d.error)) return hold(now + RETRY_MIN * 60_000, `released ${id8}: ${d.error}`);
       deps.log(`could not start a session for ${id8}, released it (not retried; delete report-${r.id}.json to retry): ${d.error}`);
     }
     st.saveDispatched(d);

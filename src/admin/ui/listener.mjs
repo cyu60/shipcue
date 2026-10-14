@@ -312,7 +312,7 @@ From then on, a Claude Code session in this folder has the shipcue tools (list_r
 ## 4. A workflow that works the queue
 macOS: shipcue dispatch checks the queue every minute and starts a background Claude Code session per unclaimed report, each in its own git worktree, which claims the report, fixes it, opens a PR and submits it for review. Run this as is; show me what the dry run would start before the install line:
 ${fence(dispatchInstall(o))}
-   Then ask me to run \`sudo pmset -a sleep 0 disablesleep 1\` so the Mac stays awake, and to turn on automatic login so it comes back after a restart. Check: \`shipcue dispatch --status ${repo}\` and the log above show no errors after a minute.
+   Then ask me to run \`sudo pmset -a sleep 0 disablesleep 1\` so the Mac stays awake, and to turn on automatic login so it comes back after a restart. Background sessions only start in a folder Claude Code trusts: if I have never opened Claude Code in ${n.folder}, ask me to run \`claude\` there once and accept the trust prompt. Check: \`shipcue dispatch --status ${repo}\` and the log above show no errors after a minute.
 Linux: run the listener as a service instead (it runs claude once per new report):
 ${fence(systemdInstall(o))}
    Check: \`systemctl --user status ${unit}\`.
